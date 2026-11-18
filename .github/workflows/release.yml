@@ -31,10 +31,7 @@ jobs:
           install_args: rust
       - run: cargo build --release --locked --target ${{ matrix.target }} -p zesquad
       - name: Smoke test
-        run: |
-          out=$(target/${{ matrix.target }}/release/zesquad --version)
-          echo "$out"
-          [ "$out" = "zesquad ${VERSION#v}" ]
+        run: .github/scripts/smoke-test.sh target/${{ matrix.target }}/release/zesquad "${VERSION#v}"
       - name: Package
         run: |
           mkdir -p "dist/linux-${{ matrix.docker }}"
