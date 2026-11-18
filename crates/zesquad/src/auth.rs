@@ -1,6 +1,6 @@
 //! The optional shared password in front of the whole app.
 //!
-//! With `SQUADRON_PASSWORD` set, every page needs a session cookie, which the login page sets.
+//! With `ZESQUAD_PASSWORD` set, every page needs a session cookie, which the login page sets.
 //! The cookie holds `sha256(key, password)`, where the key is random and stored in the
 //! database: it survives restarts, isn't the password, and changing the password logs everyone
 //! out. Health check, version and static files stay open so containers and the login page work.
@@ -17,7 +17,7 @@ use sqlx::SqlitePool;
 
 use crate::web::AppState;
 
-pub const COOKIE: &str = "squadron_session";
+pub const COOKIE: &str = "zesquad_session";
 /// Slows down guessing; one wrong password costs the guesser this long.
 const WRONG_PASSWORD_DELAY: Duration = Duration::from_millis(750);
 
@@ -176,7 +176,7 @@ mod tests {
         let mut h = HeaderMap::new();
         h.append(
             header::COOKIE,
-            HeaderValue::from_static("a=1; squadron_session=xyz"),
+            HeaderValue::from_static("a=1; zesquad_session=xyz"),
         );
         assert_eq!(cookie(&h, COOKIE), Some("xyz"));
         assert_eq!(cookie(&h, "b"), None);

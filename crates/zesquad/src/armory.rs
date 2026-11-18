@@ -7,8 +7,8 @@ use anyhow::{Context as _, bail};
 use reqwest::{StatusCode, Url};
 use serde::Deserialize;
 use serde_json::Value;
-use squadron_core::armory::Endpoint;
 use tokio::sync::Mutex;
+use zesquad_core::armory::Endpoint;
 
 /// Where and as whom to call Battle.net.
 #[derive(Debug, Clone)]
@@ -91,7 +91,7 @@ impl Client {
     /// When the HTTP client can't be built (TLS setup).
     pub fn new(config: Config) -> anyhow::Result<Self> {
         let http = reqwest::Client::builder()
-            .user_agent(concat!("squadron/", env!("CARGO_PKG_VERSION")))
+            .user_agent(concat!("zesquad/", env!("CARGO_PKG_VERSION")))
             .timeout(Duration::from_secs(20))
             .build()?;
         Ok(Self {
@@ -181,7 +181,7 @@ impl Client {
             .context("asking Battle.net for a token")?;
         if !response.status().is_success() {
             bail!(
-                "Battle.net refused the client credentials ({}); check SQUADRON_BNET_CLIENT_ID and _SECRET",
+                "Battle.net refused the client credentials ({}); check ZESQUAD_BNET_CLIENT_ID and _SECRET",
                 response.status()
             );
         }

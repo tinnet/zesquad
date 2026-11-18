@@ -2,11 +2,11 @@
 
 ## Crates
 
-- `squadron-core`: no I/O. Character names (`Name-Surname`, normalised; the lower-case key is
+- `zesquad-core`: no I/O. Character names (`Name-Surname`, normalised; the lower-case key is
   what the database and the API use), tags (case-insensitive, first spelling kept), squad
   names, when a character is due for a refresh, and reading Battle.net JSON into a `Profile`.
   Parsing is lenient because Forever's responses are undocumented.
-- `squadron`: the binary. `cli` (clap, every option also an env var), `db` (sqlx + SQLite, all
+- `zesquad`: the binary. `cli` (clap, every option also an env var), `db` (sqlx + SQLite, all
   queries), `armory` (Battle.net client), `sync` (background refresh), `web` (axum handlers,
   askama templates), `assets` (CSS and htmx embedded with rust-embed).
 
@@ -49,7 +49,7 @@ Static files are served under `/static/<version>/` with a one-year cache in rele
 new version is never stuck behind old CSS.
 
 A squad's UUID v4 is its secret; anything that changes a squad checks the character belongs to
-that squad. Optionally, `SQUADRON_PASSWORD` puts one shared password in front of everything
+that squad. Optionally, `ZESQUAD_PASSWORD` puts one shared password in front of everything
 (`auth.rs`, an axum middleware). Logging in sets an HttpOnly, `SameSite=Lax` cookie holding
 `sha256(key, 0, password)`, where the key is random and kept in the `settings` table: sessions
 survive restarts, the cookie isn't the password, and changing the password logs everyone out.

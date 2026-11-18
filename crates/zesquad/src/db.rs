@@ -1,4 +1,4 @@
-//! SQLite: opening the database and every query squadron runs.
+//! SQLite: opening the database and every query zesquad runs.
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -8,9 +8,9 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use anyhow::Context as _;
 use serde_json::Value;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqlitePoolOptions};
-use squadron_core::armory::{Documents, Endpoint};
-use squadron_core::refresh::{Status, is_due};
-use squadron_core::{CharacterName, SquadName, Tag};
+use zesquad_core::armory::{Documents, Endpoint};
+use zesquad_core::refresh::{Status, is_due};
+use zesquad_core::{CharacterName, SquadName, Tag};
 
 /// Opens (creating if needed) the database and applies the migrations.
 ///

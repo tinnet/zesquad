@@ -24,14 +24,14 @@ Run `just ci` before declaring work done. Battle.net credentials go in `.env` (c
 
 ## Code
 
-- `crates/squadron-core`: pure logic (names, tags, refresh timing, parsing Battle.net JSON). No
-  I/O. `crates/squadron`: the server, database, Battle.net client and templates.
+- `crates/zesquad-core`: pure logic (names, tags, refresh timing, parsing Battle.net JSON). No
+  I/O. `crates/zesquad`: the server, database, Battle.net client and templates.
 - Clippy pedantic, warnings fail the build. Fix the cause; don't `#[allow]` without a comment
   saying why. `unsafe` is forbidden.
-- New behaviour gets a test that drives it over real HTTP (`crates/squadron/tests/`), against
+- New behaviour gets a test that drives it over real HTTP (`crates/zesquad/tests/`), against
   the fake Battle.net server there. Parsing and validation get unit and property tests in core.
 - Battle.net facts go in `docs/battlenet-api.md` with their source.
-- Schema changes are new files in `crates/squadron/migrations/`; never edit an applied one.
+- Schema changes are new files in `crates/zesquad/migrations/`; never edit an applied one.
 
 ## Privacy
 

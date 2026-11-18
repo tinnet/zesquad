@@ -6,7 +6,7 @@
 
 use serde_json::Value;
 
-/// The character endpoints squadron fetches, in the order it fetches them.
+/// The character endpoints zesquad fetches, in the order it fetches them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Endpoint {
     Summary,

@@ -12,13 +12,13 @@ use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use reqwest::redirect::Policy;
-use squadron::Settings;
 use tempfile::TempDir;
+use zesquad::Settings;
 
 const CLIENT_ID: &str = "test-id";
 const CLIENT_SECRET: &str = "test-secret";
 const TOKEN: &str = "test-token";
-/// The made-up character the fake Armory knows (see squadron-core/fixtures).
+/// The made-up character the fake Armory knows (see zesquad-core/fixtures).
 const KNOWN: &str = "aldric-thornwood";
 
 // ---- fake Battle.net ----
@@ -83,7 +83,7 @@ fn fake_character(
         return not_found;
     }
     let path = format!(
-        "{}/../squadron-core/fixtures/{fixture}.json",
+        "{}/../zesquad-core/fixtures/{fixture}.json",
         env!("CARGO_MANIFEST_DIR")
     );
     (
@@ -133,7 +133,7 @@ async fn app_with(with_armory: bool, password: Option<&str>) -> App {
     let dir = tempfile::tempdir().unwrap();
     let (fake_url, fake) = start_fake().await;
     let armory = with_armory.then(|| {
-        squadron::armory::Config::new(
+        zesquad::armory::Config::new(
             CLIENT_ID.into(),
             CLIENT_SECRET.into(),
             "eu".into(),
@@ -144,13 +144,13 @@ async fn app_with(with_armory: bool, password: Option<&str>) -> App {
     });
     let settings = Settings {
         listen: SocketAddr::from(([127, 0, 0, 1], 0)),
-        database: dir.path().join("squadron.db"),
+        database: dir.path().join("zesquad.db"),
         refresh: Duration::from_secs(3600),
         region: "eu".into(),
         armory,
         password: password.map(str::to_owned),
     };
-    let running = squadron::start(settings, std::future::pending())
+    let running = zesquad::start(settings, std::future::pending())
         .await
         .unwrap();
     App {
@@ -586,7 +586,7 @@ async fn a_wrong_password_or_cookie_gets_nowhere() {
     let forged = app
         .http
         .get(format!("{}/", app.base))
-        .header(header::COOKIE, "squadron_session=00ff")
+        .header(header::COOKIE, "zesquad_session=00ff")
         .send()
         .await
         .unwrap();

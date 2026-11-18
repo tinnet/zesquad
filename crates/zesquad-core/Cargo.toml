@@ -1,6 +1,6 @@
 [package]
-name = "squadron-core"
-description = "Squadron's pure logic: names, tags and Battle.net response parsing"
+name = "zesquad-core"
+description = "Zesquad's pure logic: names, tags and Battle.net response parsing"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

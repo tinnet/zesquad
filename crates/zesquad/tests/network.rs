@@ -1,10 +1,10 @@
 //! Calls the real Battle.net API. Ignored by `just test`; `just network-test` runs it with the
-//! credentials from .env and a real character in `SQUADRON_TEST_CHARACTER` (`Name-Surname`, EU).
+//! credentials from .env and a real character in `ZESQUAD_TEST_CHARACTER` (`Name-Surname`, EU).
 //! Real character names stay out of the repo, so the character comes from the environment.
 
-use squadron::armory::{Client, Config, Lookup};
-use squadron_core::CharacterName;
-use squadron_core::armory::{Documents, Endpoint, Profile};
+use zesquad::armory::{Client, Config, Lookup};
+use zesquad_core::CharacterName;
+use zesquad_core::armory::{Documents, Endpoint, Profile};
 
 fn client() -> Client {
     let _ = dotenvy::dotenv();
@@ -12,8 +12,8 @@ fn client() -> Client {
         std::env::var(name).unwrap_or_else(|_| panic!("set {name} (or put it in .env)"))
     };
     let config = Config::new(
-        var("SQUADRON_BNET_CLIENT_ID"),
-        var("SQUADRON_BNET_CLIENT_SECRET"),
+        var("ZESQUAD_BNET_CLIENT_ID"),
+        var("ZESQUAD_BNET_CLIENT_SECRET"),
         "eu".into(),
         None,
         "https://oauth.battle.net/token",
@@ -26,8 +26,8 @@ fn client() -> Client {
 #[ignore = "calls the real Battle.net API"]
 async fn looks_up_a_real_forever_character() {
     let _ = dotenvy::dotenv();
-    let name: CharacterName = std::env::var("SQUADRON_TEST_CHARACTER")
-        .expect("set SQUADRON_TEST_CHARACTER=Name-Surname to a Forever character in EU")
+    let name: CharacterName = std::env::var("ZESQUAD_TEST_CHARACTER")
+        .expect("set ZESQUAD_TEST_CHARACTER=Name-Surname to a Forever character in EU")
         .parse()
         .unwrap();
     let client = client();

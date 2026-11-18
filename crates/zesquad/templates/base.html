@@ -3,13 +3,13 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{% block title %}squadron{% endblock %}</title>
+  <title>{% block title %}zesquad{% endblock %}</title>
   <link rel="stylesheet" href="{{ static_base }}/style.css">
   <script src="{{ static_base }}/htmx-2.0.11.min.js" defer></script>
 </head>
 <body>
   <header class="site">
-    <a href="/" class="brand">squadron</a>
+    <a href="/" class="brand">zesquad</a>
     <span class="tagline">friend squads for WoW: Forever</span>
     {%- if logout %}
     <form method="post" action="/logout" class="logout"><button type="submit" class="quiet">Log out</button></form>

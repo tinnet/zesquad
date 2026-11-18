@@ -5,7 +5,7 @@
 header = """
 # Changelog
 
-What changed in each squadron release. Versions are dates (CalVer).
+What changed in each zesquad release. Versions are dates (CalVer).
 
 """
 body = """
@@ -20,7 +20,7 @@ body = """
 - {% if commit.scope %}**{{ commit.scope }}**: {% endif %}\
 {% if commit.breaking %}**breaking:** {% endif %}\
 {{ commit.message | split(pat="\n") | first | upper_first | trim }} \
-([{{ commit.id | truncate(length=7, end="") }}](https://github.com/tinnet/squadron/commit/{{ commit.id }}))\
+([{{ commit.id | truncate(length=7, end="") }}](https://github.com/tinnet/zesquad/commit/{{ commit.id }}))\
 {% endfor %}
 {% endfor %}\n
 """

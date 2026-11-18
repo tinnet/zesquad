@@ -1,6 +1,6 @@
 # Battle.net API for WoW: Forever
 
-What squadron can learn about a character from Blizzard's API, where each fact comes from, and
+What zesquad can learn about a character from Blizzard's API, where each fact comes from, and
 how sure we are. Forever launched on 2026-11-04 and Blizzard hasn't documented its API: what's
 here is the documented Classic API, community probing, and our own requests (see "Verified").
 Update this file when something changes.
@@ -149,7 +149,7 @@ with made-up values and the `_links` / `href` fields left out:
   `collections`, `reputations`, `quests`, `achievements_statistics`, `professions`.
 - `ruleset` (dynamic namespace) is new with Forever; "Normal" is the only value seen so far.
 
-### Other responses squadron reads
+### Other responses zesquad reads
 
 - **character-media**: `assets: [{key, value}]` with keys `avatar`, `avatar-sd`, `main-raw`,
   `main-sd-raw`; URLs like `https://render.worldofwarcraft.com/forever-eu/character/31/<id>-avatar.jpg`.
@@ -175,7 +175,7 @@ logout. A missing avatar can fall back to a generic one with
 
 ## Verified with our client
 
-Requests made with squadron's own client credentials (app token, EU host) on 2026-11-17, two
+Requests made with zesquad's own client credentials (app token, EU host) on 2026-11-17, two
 weeks after launch. `just api <path>` repeats any of them.
 
 | Request | Result |
@@ -201,7 +201,7 @@ An unrouted path gives an empty 404, which is what the forum saw for `/{name}-{s
 launch. Now the path is routed: real characters return data, and unknown ones get the JSON
 "not found" 404 that Classic Era gives too.
 
-## What squadron does with this
+## What zesquad does with this
 
 - Squad members are entered as `Name-Surname`, region EU.
 - A background job fetches the summary, character-media, equipment, specializations,

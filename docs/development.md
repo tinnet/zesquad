@@ -12,12 +12,12 @@ just run                   # http://127.0.0.1:8080, database in data/
 
 ## Tests
 
-- `just test`: unit and property tests in `squadron-core`, and black-box HTTP tests in
-  `crates/squadron/tests/http.rs`. Those start the real app on a random port with a temporary
+- `just test`: unit and property tests in `zesquad-core`, and black-box HTTP tests in
+  `crates/zesquad/tests/http.rs`. Those start the real app on a random port with a temporary
   database and a fake Battle.net in the same process, serving the made-up character in
-  `crates/squadron-core/fixtures/`. No network needed.
+  `crates/zesquad-core/fixtures/`. No network needed.
 - `just network-test`: calls the real API with `.env`'s credentials. Set
-  `SQUADRON_TEST_CHARACTER=Name-Surname` (in `.env` is fine) to a Forever character in EU.
+  `ZESQUAD_TEST_CHARACTER=Name-Surname` (in `.env` is fine) to a Forever character in EU.
 - `just ci`: format check, clippy (pedantic, warnings are errors), tests. CI runs exactly this.
 
 Fixtures and tests use made-up characters only; real names never go in the repo.
@@ -55,10 +55,10 @@ CalVer tags, `vYYYY.MM.DD` (`.N` for a second release that day). `just release` 
 signed tag. `.github/workflows/release.yml` then:
 
 1. builds `x86_64-unknown-linux-musl` and `aarch64-unknown-linux-musl` on native runners and
-   checks `squadron --version` prints the tag's version (shadow-rs reads it from git);
-2. publishes `squadron-linux-<arch>.tar.gz`, `SHA256SUMS` and build provenance as a GitHub
+   checks `zesquad --version` prints the tag's version (shadow-rs reads it from git);
+2. publishes `zesquad-linux-<arch>.tar.gz`, `SHA256SUMS` and build provenance as a GitHub
    release with the git-cliff notes;
-3. pushes `ghcr.io/tinnet/squadron:<version>` and `:latest` for amd64 and arm64. The
+3. pushes `ghcr.io/tinnet/zesquad:<version>` and `:latest` for amd64 and arm64. The
    `Dockerfile` only copies the prebuilt binaries onto distroless.
 
 `Cargo.toml`'s `version` stays `0.1.0`; untagged builds report `dev`.

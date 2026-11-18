@@ -2393,43 +2393,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "squadron"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "askama",
- "askama_web",
- "axum",
- "clap",
- "dotenvy",
- "mimalloc",
- "mime_guess",
- "reqwest",
- "rust-embed",
- "serde",
- "serde_json",
- "sha2 0.11.1",
- "shadow-rs",
- "sqlx",
- "squadron-core",
- "tempfile",
- "tokio",
- "tower-http 0.7.1",
- "tracing",
- "tracing-subscriber",
- "uuid",
-]
-
-[[package]]
-name = "squadron-core"
-version = "0.1.0"
-dependencies = [
- "proptest",
- "serde_json",
- "thiserror",
-]
-
-[[package]]
 name = "stable_deref_trait"
 version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3233,6 +3196,43 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 3.0.10",
+]
+
+[[package]]
+name = "zesquad"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "askama",
+ "askama_web",
+ "axum",
+ "clap",
+ "dotenvy",
+ "mimalloc",
+ "mime_guess",
+ "reqwest",
+ "rust-embed",
+ "serde",
+ "serde_json",
+ "sha2 0.11.1",
+ "shadow-rs",
+ "sqlx",
+ "tempfile",
+ "tokio",
+ "tower-http 0.7.1",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+ "zesquad-core",
+]
+
+[[package]]
+name = "zesquad-core"
+version = "0.1.0"
+dependencies = [
+ "proptest",
+ "serde_json",
+ "thiserror",
 ]
 
 [[package]]

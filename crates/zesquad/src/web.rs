@@ -12,10 +12,10 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde::Deserialize;
 use sqlx::SqlitePool;
-use squadron_core::armory::{Item, Pet, Profession, Profile};
-use squadron_core::refresh::Status;
-use squadron_core::{CharacterName, SquadName, parse_tags};
 use tokio::sync::Notify;
+use zesquad_core::armory::{Item, Pet, Profession, Profile};
+use zesquad_core::refresh::Status;
+use zesquad_core::{CharacterName, SquadName, parse_tags};
 
 use crate::db;
 use crate::version;

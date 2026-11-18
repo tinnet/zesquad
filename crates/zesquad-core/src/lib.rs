@@ -1,4 +1,4 @@
-//! Squadron's pure logic: validating what people type (character names, tags, squad names) and
+//! Zesquad's pure logic: validating what people type (character names, tags, squad names) and
 //! turning Battle.net responses into what the pages show. Nothing here does I/O.
 
 pub mod armory;

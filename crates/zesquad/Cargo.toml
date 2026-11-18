@@ -1,5 +1,5 @@
 [package]
-name = "squadron"
+name = "zesquad"
 description = "Friend squads for WoW: Forever, with characters looked up on the Battle.net Armory"
 version.workspace = true
 edition.workspace = true
@@ -8,7 +8,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-squadron-core = { path = "../squadron-core" }
+zesquad-core = { path = "../zesquad-core" }
 anyhow = "1.0.104"
 askama = "0.16.1"
 askama_web = { version = "0.16.0", features = ["axum-0.8"] }

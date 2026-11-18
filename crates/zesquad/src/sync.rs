@@ -4,8 +4,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use sqlx::SqlitePool;
-use squadron_core::armory::{Endpoint, Profile};
 use tokio::sync::Notify;
+use zesquad_core::armory::{Endpoint, Profile};
 
 use crate::armory::{Client, Lookup};
 use crate::db::{self, Fetched};

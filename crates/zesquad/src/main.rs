@@ -3,9 +3,9 @@ use std::process::ExitCode;
 use std::time::Duration;
 
 use clap::Parser as _;
-use squadron::cli::{BnetArgs, Cli, Command, ServeArgs};
-use squadron::{Settings, armory};
 use tracing_subscriber::EnvFilter;
+use zesquad::cli::{BnetArgs, Cli, Command, ServeArgs};
+use zesquad::{Settings, armory};
 
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
@@ -27,7 +27,7 @@ async fn main() -> ExitCode {
     match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
-            eprintln!("squadron: {e:#}");
+            eprintln!("zesquad: {e:#}");
             ExitCode::FAILURE
         }
     }
@@ -49,9 +49,9 @@ async fn serve(args: ServeArgs) -> anyhow::Result<()> {
         armory: args.bnet.config()?,
         password: args.password.clone(),
     };
-    let running = squadron::start(settings, squadron::shutdown_signal()).await?;
+    let running = zesquad::start(settings, zesquad::shutdown_signal()).await?;
     tracing::info!(
-        version = squadron::version::short(),
+        version = zesquad::version::short(),
         "listening on http://{}",
         running.addr
     );
@@ -82,7 +82,7 @@ async fn healthcheck(listen: SocketAddr) -> ExitCode {
 async fn api(path: &str, namespace: &str, bnet: &BnetArgs) -> anyhow::Result<()> {
     let Some(config) = bnet.config()? else {
         anyhow::bail!(
-            "set SQUADRON_BNET_CLIENT_ID and SQUADRON_BNET_CLIENT_SECRET (or put them in .env)"
+            "set ZESQUAD_BNET_CLIENT_ID and ZESQUAD_BNET_CLIENT_SECRET (or put them in .env)"
         );
     };
     let (status, body) = armory::Client::new(config)?.raw(path, namespace).await?;

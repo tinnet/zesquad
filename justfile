@@ -1,4 +1,4 @@
-# squadron dev tasks. `just` lists them.
+# zesquad dev tasks. `just` lists them.
 
 # Battle.net credentials for `run`, `api` and `network-test` come from .env (see .env.example).
 set dotenv-load
@@ -16,7 +16,7 @@ setup:
 test *args:
     cargo test --workspace {{ args }}
 
-# Run the tests that call the real Battle.net API; needs .env and SQUADRON_TEST_CHARACTER=Name-Surname
+# Run the tests that call the real Battle.net API; needs .env and ZESQUAD_TEST_CHARACTER=Name-Surname
 network-test:
     cargo test --workspace -- --ignored
 
@@ -57,10 +57,10 @@ docker:
     set -eu
     case "$(uname -m)" in arm64|aarch64) arch=arm64 target=aarch64-unknown-linux-musl ;; *) arch=amd64 target=x86_64-unknown-linux-musl ;; esac
     rustup target add "$target"
-    cargo zigbuild --release --target "$target" -p squadron
+    cargo zigbuild --release --target "$target" -p zesquad
     mkdir -p "dist/linux-$arch"
-    cp "target/$target/release/squadron" "dist/linux-$arch/squadron"
-    docker build --platform "linux/$arch" -t squadron:dev .
+    cp "target/$target/release/zesquad" "dist/linux-$arch/zesquad"
+    docker build --platform "linux/$arch" -t zesquad:dev .
 
 # Show what the next release's notes would say
 changelog:
@@ -74,5 +74,5 @@ release version=`date +%Y.%m.%d`:
     git add CHANGELOG.md
     git diff --cached --quiet || git commit -q -m "chore(release): {{ version }}"
     git push origin HEAD:main
-    git tag -s "v{{ version }}" -m "squadron {{ version }}"
+    git tag -s "v{{ version }}" -m "zesquad {{ version }}"
     git push origin "v{{ version }}"
