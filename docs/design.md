@@ -25,7 +25,8 @@ erDiagram
   each character is fetched once. Rows for characters no squad has any more are kept but not
   refreshed.
 - `armory_documents` keeps each endpoint's raw JSON from the last good fetch; the pages parse it
-  on render. Showing a new field needs no refetch, and a failed fetch keeps the old data.
+  the first time a character is shown after a fetch and keep the result in memory. Showing a new
+  field needs no refetch, and a failed fetch keeps the old data.
 
 ## Armory sync
 
@@ -36,7 +37,8 @@ or older than the interval (found / not found), or a tenth of it after a failure
 Per character it fetches the summary first; a 404 there marks the character not found. Then
 media, equipment, specializations, professions and, for hunters, hunter pets. A 404 on one of
 those is skipped; any other error marks the whole fetch failed. The app token is cached until
-five minutes before it expires, and a 401 gets one retry with a new token.
+five minutes before it expires (halfway, for one that lives shorter), and a 401 gets one retry
+with a new token; a second 401 fails the fetch.
 
 ## Web
 
