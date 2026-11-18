@@ -9,7 +9,8 @@ use std::fmt::Write as _;
 use std::time::Duration;
 
 use axum::extract::{Request, State};
-use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
+use axum::http::uri::PathAndQuery;
+use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, Uri, header};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Redirect, Response};
 use sha2::{Digest as _, Sha256};
@@ -108,11 +109,10 @@ pub async fn require(State(state): State<AppState>, request: Request, next: Next
     if is_open(request.uri().path()) || auth.has_session(request.headers()) {
         return next.run(request).await;
     }
-    let target = request
-        .uri()
-        .path_and_query()
-        .map_or("/", axum::http::uri::PathAndQuery::as_str);
-    let login = format!("/login?next={}", crate::web::urlencode(target));
+    let login = format!(
+        "/login?next={}",
+        crate::web::urlencode(&return_to(&request))
+    );
     if request.headers().contains_key("hx-request") {
         // htmx would swap a redirect's target into the page; this makes it navigate instead.
         let mut response = StatusCode::UNAUTHORIZED.into_response();
@@ -124,6 +124,25 @@ pub async fn require(State(state): State<AppState>, request: Request, next: Next
         return response;
     }
     Redirect::to(&login).into_response()
+}
+
+/// The page to come back to after logging in. A GET is the page itself. An htmx request is a
+/// fragment or a form post, so it's the page htmx was on (`HX-Current-URL`); any other form
+/// post can't be repeated by a GET, so it's the page it came from (`Referer`), or `/`.
+fn return_to(request: &Request) -> String {
+    let uri = request.uri();
+    if request.method() == Method::GET && !request.headers().contains_key("hx-request") {
+        return uri
+            .path_and_query()
+            .map_or("/", PathAndQuery::as_str)
+            .to_owned();
+    }
+    let page = ["hx-current-url", header::REFERER.as_str()]
+        .iter()
+        .find_map(|name| request.headers().get(*name)?.to_str().ok())
+        .and_then(|url| url.parse::<Uri>().ok())
+        .and_then(|url| url.path_and_query().map(|p| p.as_str().to_owned()));
+    zesquad_core::redirect::safe_next(page.as_deref()).to_owned()
 }
 
 fn cookie<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {

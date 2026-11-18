@@ -626,6 +626,32 @@ async fn without_a_password_login_still_only_redirects_within_the_site() {
 #[tokio::test]
 async fn htmx_requests_without_a_session_are_sent_to_the_login_page() {
     let app = app_with(false, Some(PASSWORD)).await;
+    // Back to the page htmx was on, not the form's endpoint or the polled fragment.
+    let r = app
+        .http
+        .post(format!("{}/s/abc/characters", app.base))
+        .header("HX-Request", "true")
+        .header("HX-Current-URL", format!("{}/s/abc?tag=raid", app.base))
+        .form(&[("character", "Aldric-Thornwood")])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::OK);
+    assert_eq!(
+        r.headers()["hx-redirect"],
+        "/login?next=%2Fs%2Fabc%3Ftag%3Draid"
+    );
+    let r = app
+        .http
+        .get(format!("{}/s/abc/roster", app.base))
+        .header("HX-Request", "true")
+        .header("HX-Current-URL", format!("{}/s/abc", app.base))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.headers()["hx-redirect"], "/login?next=%2Fs%2Fabc");
+
+    // Without the header, the front page: the endpoint itself isn't a page.
     let r = app
         .http
         .post(format!("{}/s/abc/characters", app.base))
@@ -634,11 +660,32 @@ async fn htmx_requests_without_a_session_are_sent_to_the_login_page() {
         .send()
         .await
         .unwrap();
-    assert_eq!(r.status(), StatusCode::OK);
-    assert_eq!(
-        r.headers()["hx-redirect"],
-        "/login?next=%2Fs%2Fabc%2Fcharacters"
-    );
+    assert_eq!(r.headers()["hx-redirect"], "/login?next=%2F");
+}
+
+#[tokio::test]
+async fn a_form_post_without_a_session_returns_to_the_page_it_came_from() {
+    let app = app_with(false, Some(PASSWORD)).await;
+    let post = |referer: Option<String>| {
+        let mut r = app
+            .http
+            .post(format!("{}/s/abc/characters", app.base))
+            .form(&[("character", "Aldric-Thornwood")]);
+        if let Some(referer) = referer {
+            r = r.header(header::REFERER, referer);
+        }
+        r.send()
+    };
+    let r = post(Some(format!("{}/s/abc", app.base))).await.unwrap();
+    assert_eq!(r.status(), StatusCode::SEE_OTHER);
+    assert_eq!(r.headers()[header::LOCATION], "/login?next=%2Fs%2Fabc");
+    let r = post(None).await.unwrap();
+    assert_eq!(r.headers()[header::LOCATION], "/login?next=%2F");
+    // Only the path of a Referer counts, and it must pass the same-site check.
+    let r = post(Some("https://evil.example/%09/x".into()))
+        .await
+        .unwrap();
+    assert_eq!(r.headers()[header::LOCATION], "/login?next=%2F%2509%2Fx");
 }
 
 #[tokio::test]
