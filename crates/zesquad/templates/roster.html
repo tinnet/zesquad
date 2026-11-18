@@ -1,6 +1,8 @@
 {%- let base = roster.base() -%}
 <section id="roster"
-  {%- if roster.polling() %} hx-get="{{ base }}/roster{{ roster.filter_query() }}" hx-trigger="every 3s" hx-swap="outerHTML"{% endif %}>
+  {#- The poll swaps the whole section, so it waits while someone is typing into it. #}
+  {%- if roster.polling() %} hx-get="{{ base }}/roster{{ roster.filter_query() }}" hx-swap="outerHTML"
+    hx-trigger="every 3s [!this.querySelector('input:not([type=hidden]):focus, input:not([type=hidden]):not(:placeholder-shown)')]"{% endif %}>
   <form method="post" action="{{ base }}/characters" class="add row"
     hx-post="{{ base }}/characters" hx-target="#roster" hx-swap="outerHTML">
     <input type="hidden" name="filter" value="{{ roster.filter_value() }}">

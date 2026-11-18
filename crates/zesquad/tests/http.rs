@@ -375,6 +375,36 @@ async fn refresh_fetches_again() {
 }
 
 #[tokio::test]
+async fn polling_waits_while_someone_is_typing() {
+    let app = app(true).await;
+    let squad = app.squad("Raiders").await;
+    let _held = app.fake.gate.write().await;
+    let (_, roster) = app
+        .htmx(
+            &format!("{squad}/characters"),
+            &[("character", "Aldric-Thornwood"), ("tags", "")],
+        )
+        .await;
+    assert!(roster.contains("Looking up on the Armory"), "{roster}");
+    // The poll's filter skips a tick while a text input is focused or not empty. Every text
+    // input needs a placeholder for `:placeholder-shown` to tell.
+    assert!(
+        roster.contains(
+            "hx-trigger=\"every 3s [!this.querySelector('input:not([type=hidden]):focus, \
+             input:not([type=hidden]):not(:placeholder-shown)')]\""
+        ),
+        "{roster}"
+    );
+    for input in roster.split("<input").skip(1) {
+        let input = input.split('>').next().unwrap();
+        assert!(
+            input.contains("type=\"hidden\"") || input.contains("placeholder=\""),
+            "text input without a placeholder: <input{input}>"
+        );
+    }
+}
+
+#[tokio::test]
 async fn armory_details_stay_while_refreshing_and_after_a_failure() {
     let app = app(true).await;
     let squad = app.squad("Raiders").await;
