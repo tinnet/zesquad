@@ -1,0 +1,118 @@
+{%- let base = roster.base() -%}
+<section id="roster"
+  {%- if roster.polling() %} hx-get="{{ base }}/roster{{ roster.filter_query() }}" hx-trigger="every 3s" hx-swap="outerHTML"{% endif %}>
+  <form method="post" action="{{ base }}/characters" class="add row"
+    hx-post="{{ base }}/characters" hx-target="#roster" hx-swap="outerHTML">
+    <input type="hidden" name="filter" value="{{ roster.filter_value() }}">
+    <label class="grow">
+      <span class="visually-hidden">Character</span>
+      <input name="character" value="{{ roster.character_input }}" placeholder="Name-Surname" required autocomplete="off">
+    </label>
+    <label class="grow">
+      <span class="visually-hidden">Tags</span>
+      <input name="tags" value="{{ roster.tags_input }}" placeholder="tags, comma separated (optional)" autocomplete="off">
+    </label>
+    <button type="submit">Add</button>
+  </form>
+  {% if let Some(error) = roster.error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
+  {% if !roster.armory_enabled %}<p class="hint">Armory lookups are off on this server, so only names and tags are shown.</p>{% endif %}
+
+  {% if !roster.tags.is_empty() %}
+  <nav class="filters" aria-label="Filter by tag">
+    <a href="{{ base }}" class="chip{% if roster.filter.is_none() %} on{% endif %}">all</a>
+    {% for (label, key) in roster.tags %}
+    <a href="{{ base }}?tag={{ crate::web::urlencode(key) }}" class="chip{% if roster.is_filter(key) %} on{% endif %}">{{ label }}</a>
+    {% endfor %}
+  </nav>
+  {% endif %}
+
+  {% if roster.members.is_empty() %}
+  <p class="empty">{% if roster.filter.is_some() %}No one has that tag.{% else %}No characters yet. Add the first one above.{% endif %}</p>
+  {% else %}
+  <ul class="members">
+    {% for m in roster.members %}
+    <li class="member class-{{ m.class_key }}" id="member-{{ m.id }}">
+      <div class="who">
+        {% if let Some(url) = m.profile.avatar_url %}<img class="avatar" src="{{ url }}" alt="" width="56" height="56" loading="lazy">{% else %}<span class="avatar none" aria-hidden="true"></span>{% endif %}
+        <div>
+          <h2 class="name">{{ m.name }} <span class="surname">{{ m.surname }}</span></h2>
+          {% if m.status == "found" %}
+          <p class="line">
+            {% if let Some(level) = m.profile.level %}Level {{ level }}{% endif %}
+            {% if let Some(race) = m.profile.race %}{{ race }}{% endif %}
+            {% if let Some(class) = m.profile.class %}<span class="class">{{ class }}</span>{% endif %}
+            {% if let Some(faction) = m.profile.faction %}<span class="faction {{ faction|lower }}">{{ faction|lower }}</span>{% endif %}
+          </p>
+          {%- let details = m.details_line() %}
+          {% if !details.is_empty() %}<p class="line sub">{{ details }}</p>{% endif %}
+          {% if let Some(seen) = m.last_login %}<p class="line sub">last played {{ seen }}</p>{% endif %}
+          {% else if m.status == "not_found" %}
+          <p class="line sub">Not on the Armory: check the spelling, or log the character out once so Battle.net publishes it.</p>
+          {% else if m.status == "failed" %}
+          <p class="line sub">Couldn't reach the Armory{% if let Some(checked) = m.checked %} ({{ checked }}){% endif %}; trying again soon.</p>
+          {% else if roster.armory_enabled %}
+          <p class="line sub">Looking up on the Armory…</p>
+          {% endif %}
+        </div>
+      </div>
+
+      <div class="tags">
+        {% for (label, key) in m.tags %}
+        <form method="post" action="{{ base }}/characters/{{ m.id }}/tags/{{ crate::web::urlencode(key) }}/delete" class="chip tag"
+          hx-post="{{ base }}/characters/{{ m.id }}/tags/{{ crate::web::urlencode(key) }}/delete" hx-target="#roster" hx-swap="outerHTML">
+          <input type="hidden" name="filter" value="{{ roster.filter_value() }}">
+          <a href="{{ base }}?tag={{ crate::web::urlencode(key) }}">{{ label }}</a>
+          <button type="submit" class="x" aria-label="Remove tag {{ label }}">×</button>
+        </form>
+        {% endfor %}
+        <form method="post" action="{{ base }}/characters/{{ m.id }}/tags" class="add-tag"
+          hx-post="{{ base }}/characters/{{ m.id }}/tags" hx-target="#roster" hx-swap="outerHTML">
+          <input type="hidden" name="filter" value="{{ roster.filter_value() }}">
+          <input name="tags" placeholder="+ tag" aria-label="Add tags to {{ m.name }}" autocomplete="off" required>
+        </form>
+      </div>
+
+      {% if m.has_details() %}
+      <details>
+        <summary>Gear, professions{% if !m.pets().is_empty() %}, pets{% endif %}</summary>
+        {% if !m.pets().is_empty() %}
+        <h3>Pets</h3>
+        <ul class="plain">
+          {% for p in m.pets() %}<li>{{ p.name }}{% if let Some(c) = p.creature %} ({{ c }}){% endif %}{% if let Some(l) = p.level %}, level {{ l }}{% endif %}{% if p.active %} · active{% endif %}</li>{% endfor %}
+        </ul>
+        {% endif %}
+        {% if !m.professions().is_empty() %}
+        <h3>Professions</h3>
+        <ul class="plain">
+          {% for p in m.professions() %}<li>{{ p.name }} {{ p.skill }}/{{ p.max }}</li>{% endfor %}
+        </ul>
+        {% endif %}
+        {% if !m.gear().is_empty() %}
+        <h3>Gear</h3>
+        <table class="gear">
+          {% for i in m.gear() %}<tr><th scope="row">{{ i.slot }}</th><td class="q-{{ i.quality }}">{{ i.name }}</td><td class="num">{% if let Some(l) = i.level %}{{ l }}{% endif %}</td></tr>{% endfor %}
+        </table>
+        {% endif %}
+      </details>
+      {% endif %}
+
+      <div class="actions">
+        {% if roster.armory_enabled %}
+        <form method="post" action="{{ base }}/characters/{{ m.id }}/refresh"
+          hx-post="{{ base }}/characters/{{ m.id }}/refresh" hx-target="#roster" hx-swap="outerHTML">
+          <input type="hidden" name="filter" value="{{ roster.filter_value() }}">
+          <button type="submit" class="quiet" title="{% if let Some(c) = m.checked %}checked {{ c }}{% endif %}">Refresh</button>
+        </form>
+        {% endif %}
+        <form method="post" action="{{ base }}/characters/{{ m.id }}/delete"
+          hx-post="{{ base }}/characters/{{ m.id }}/delete" hx-target="#roster" hx-swap="outerHTML"
+          hx-confirm="Remove {{ m.name }} {{ m.surname }} from the squad?">
+          <input type="hidden" name="filter" value="{{ roster.filter_value() }}">
+          <button type="submit" class="quiet danger">Remove</button>
+        </form>
+      </div>
+    </li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+</section>

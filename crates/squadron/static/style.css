@@ -1,0 +1,154 @@
+/* squadron: one small stylesheet, light and dark. */
+
+:root {
+  --bg: #f6f4ef;
+  --card: #ffffff;
+  --text: #1d1b16;
+  --muted: #6b665a;
+  --line: #e2ddd2;
+  --accent: #8a5a00;
+  --accent-text: #ffffff;
+  --danger: #a3262a;
+  --alliance: #1f4f9a;
+  --horde: #9a1f1f;
+  /* Class colours, darkened where the game's own would vanish on a light background. */
+  --warrior: #a6794a; --paladin: #d0679a; --hunter: #5f8f2e; --rogue: #b39b00; --priest: #8a8a8a;
+  --shaman: #0070dd; --mage: #1a9cc2; --warlock: #6566c9; --druid: #d96500;
+  /* Item quality */
+  --q-poor: #8a8a8a; --q-common: var(--text); --q-uncommon: #1a8c00; --q-rare: #0062c4;
+  --q-epic: #8a2fd0; --q-legendary: #c96500;
+  color-scheme: light dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #15140f;
+    --card: #1f1d17;
+    --text: #ece8dc;
+    --muted: #a39d8d;
+    --line: #34312a;
+    --accent: #e0a63a;
+    --accent-text: #1d1b16;
+    --danger: #ff6b6b;
+    --alliance: #6c9cf0;
+    --horde: #f07a6c;
+    --warrior: #c69b6d; --paladin: #f48cba; --hunter: #aad372; --rogue: #fff468; --priest: #ffffff;
+    --shaman: #3a9bff; --mage: #3fc7eb; --warlock: #8788ee; --druid: #ff7c0a;
+    --q-poor: #9d9d9d; --q-uncommon: #1eff00; --q-rare: #3a9bff; --q-epic: #b65cff; --q-legendary: #ff8000;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+main { max-width: 56rem; margin: 0 auto; padding: 0 1rem 4rem; }
+
+header.site {
+  max-width: 56rem; margin: 0 auto; padding: 1rem;
+  display: flex; gap: .75rem; align-items: baseline; flex-wrap: wrap;
+}
+.brand { font-weight: 700; font-size: 1.25rem; color: var(--accent); text-decoration: none; }
+.tagline { color: var(--muted); font-size: .9rem; }
+
+h1 { font-size: 1.6rem; margin: 1rem 0 .5rem; }
+a { color: var(--accent); }
+
+input, button { font: inherit; }
+input {
+  width: 100%; padding: .55rem .7rem;
+  border: 1px solid var(--line); border-radius: .5rem;
+  background: var(--card); color: var(--text);
+}
+input:focus-visible, button:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+button {
+  padding: .55rem 1rem; border: 0; border-radius: .5rem; cursor: pointer;
+  background: var(--accent); color: var(--accent-text); font-weight: 600; white-space: nowrap;
+}
+button.quiet { background: transparent; color: var(--muted); border: 1px solid var(--line); padding: .3rem .7rem; font-weight: 500; }
+button.quiet:hover { color: var(--text); }
+button.danger:hover { color: var(--danger); border-color: var(--danger); }
+
+.row { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; }
+.grow { flex: 1 1 12rem; }
+
+.error { color: var(--danger); font-weight: 600; }
+.hint, .empty { color: var(--muted); font-size: .9rem; }
+
+.visually-hidden {
+  position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap;
+}
+
+.squad-head .rename { display: flex; gap: .5rem; align-items: center; margin-top: 1rem; }
+.squad-head label { flex: 1; }
+.squad-name { font-size: 1.5rem; font-weight: 700; border-color: transparent; background: transparent; padding-left: 0; }
+.squad-name:hover, .squad-name:focus { border-color: var(--line); background: var(--card); padding-left: .7rem; }
+
+.add { margin: 1rem 0 .5rem; }
+
+.filters { display: flex; flex-wrap: wrap; gap: .4rem; margin: 1rem 0; }
+.chip {
+  display: inline-flex; align-items: center; gap: .25rem;
+  padding: .15rem .6rem; border-radius: 999px; border: 1px solid var(--line);
+  background: var(--card); color: var(--text); text-decoration: none; font-size: .85rem;
+}
+.chip.on { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+.chip a { color: inherit; text-decoration: none; }
+.chip .x { background: none; color: var(--muted); padding: 0 .1rem; font-weight: 400; }
+.chip .x:hover { color: var(--danger); }
+
+.members { list-style: none; padding: 0; margin: 0; display: grid; gap: .75rem; }
+.member {
+  background: var(--card); border: 1px solid var(--line); border-left: 4px solid var(--line);
+  border-radius: .6rem; padding: .9rem 1rem;
+  display: grid; gap: .5rem;
+}
+.who { display: flex; gap: .8rem; align-items: flex-start; }
+.avatar { width: 56px; height: 56px; border-radius: .5rem; flex: none; object-fit: cover; background: var(--line); }
+.avatar.none { display: inline-block; }
+.name { margin: 0; font-size: 1.15rem; }
+.surname { font-weight: 500; }
+.line { margin: 0; }
+.line.sub { color: var(--muted); font-size: .9rem; }
+.class { font-weight: 600; }
+.faction { font-size: .75rem; text-transform: uppercase; letter-spacing: .05em; margin-left: .25rem; }
+.faction.alliance { color: var(--alliance); }
+.faction.horde { color: var(--horde); }
+
+.tags { display: flex; flex-wrap: wrap; gap: .4rem; align-items: center; }
+.add-tag input { width: 7rem; padding: .15rem .6rem; border-radius: 999px; font-size: .85rem; }
+
+.actions { display: flex; gap: .4rem; justify-content: flex-end; }
+
+details summary { cursor: pointer; color: var(--muted); font-size: .9rem; }
+details h3 { font-size: .95rem; margin: .75rem 0 .25rem; }
+.plain { margin: 0; padding-left: 1.1rem; }
+.gear { border-collapse: collapse; font-size: .9rem; }
+.gear th { text-align: left; font-weight: 500; color: var(--muted); padding-right: 1rem; }
+.gear td.num { color: var(--muted); padding-left: 1rem; text-align: right; }
+
+/* Class accents */
+.class-warrior { border-left-color: var(--warrior); } .class-warrior .class { color: var(--warrior); }
+.class-paladin { border-left-color: var(--paladin); } .class-paladin .class { color: var(--paladin); }
+.class-hunter { border-left-color: var(--hunter); } .class-hunter .class { color: var(--hunter); }
+.class-rogue { border-left-color: var(--rogue); } .class-rogue .class { color: var(--rogue); }
+.class-priest { border-left-color: var(--priest); } .class-priest .class { color: var(--priest); }
+.class-shaman { border-left-color: var(--shaman); } .class-shaman .class { color: var(--shaman); }
+.class-mage { border-left-color: var(--mage); } .class-mage .class { color: var(--mage); }
+.class-warlock { border-left-color: var(--warlock); } .class-warlock .class { color: var(--warlock); }
+.class-druid { border-left-color: var(--druid); } .class-druid .class { color: var(--druid); }
+
+/* Item quality */
+.q-poor { color: var(--q-poor); } .q-common { color: var(--q-common); } .q-uncommon { color: var(--q-uncommon); }
+.q-rare { color: var(--q-rare); } .q-epic { color: var(--q-epic); } .q-legendary { color: var(--q-legendary); }
+
+@media (max-width: 30rem) {
+  .actions { justify-content: flex-start; }
+  .squad-name { font-size: 1.25rem; }
+}

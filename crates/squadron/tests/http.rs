@@ -1,0 +1,481 @@
+//! Black-box tests: the real app on a random port with a temporary database, talking to a fake
+//! Battle.net in the same process, driven over HTTP the way a browser (or htmx) would.
+
+use std::net::SocketAddr;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::Duration;
+
+use axum::Router;
+use axum::extract::{Path, Query, State};
+use axum::http::{HeaderMap, StatusCode, header};
+use axum::response::{IntoResponse, Response};
+use axum::routing::{get, post};
+use reqwest::redirect::Policy;
+use squadron::Settings;
+use tempfile::TempDir;
+
+const CLIENT_ID: &str = "test-id";
+const CLIENT_SECRET: &str = "test-secret";
+const TOKEN: &str = "test-token";
+/// The made-up character the fake Armory knows (see squadron-core/fixtures).
+const KNOWN: &str = "aldric-thornwood";
+
+// ---- fake Battle.net ----
+
+#[derive(Clone, Default)]
+struct Fake {
+    lookups: Arc<AtomicUsize>,
+}
+
+async fn fake_token(headers: HeaderMap) -> Response {
+    // base64("test-id:test-secret")
+    let expected = "Basic dGVzdC1pZDp0ZXN0LXNlY3JldA==";
+    if headers
+        .get(header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        != Some(expected)
+    {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    axum::Json(serde_json::json!({
+        "access_token": TOKEN, "token_type": "bearer", "expires_in": 86399
+    }))
+    .into_response()
+}
+
+fn fake_character(
+    fake: &Fake,
+    headers: &HeaderMap,
+    q: &std::collections::HashMap<String, String>,
+    segments: &[&str],
+) -> Response {
+    fake.lookups.fetch_add(1, Ordering::SeqCst);
+    let authorised = headers
+        .get(header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        == Some(&format!("Bearer {TOKEN}"));
+    if !authorised {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    if q.get("namespace").map(String::as_str) != Some("profile-forever-eu") {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    let not_found = (
+        StatusCode::NOT_FOUND,
+        r#"{"code":404,"type":"BLZWEBAPI00000404","detail":"Not Found"}"#,
+    )
+        .into_response();
+    let (key, endpoint) = match segments {
+        [key] => (*key, "summary"),
+        [key, endpoint] => (*key, *endpoint),
+        _ => return not_found,
+    };
+    let fixture = match endpoint {
+        "summary" => "summary",
+        "character-media" => "media",
+        "equipment" => "equipment",
+        "specializations" => "specializations",
+        "professions" => "professions",
+        _ => return not_found, // hunter-pets: the fixture character is a rogue
+    };
+    if key != KNOWN {
+        return not_found;
+    }
+    let path = format!(
+        "{}/../squadron-core/fixtures/{fixture}.json",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    (
+        [(header::CONTENT_TYPE, "application/json")],
+        std::fs::read_to_string(path).unwrap(),
+    )
+        .into_response()
+}
+
+async fn start_fake() -> (String, Fake) {
+    let fake = Fake::default();
+    let app = Router::new()
+        .route("/token", post(fake_token))
+        .route("/profile/wow/character/{*rest}", get(fake_character_path))
+        .with_state(fake.clone());
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move { axum::serve(listener, app).await });
+    (format!("http://{addr}"), fake)
+}
+
+/// Splits the wildcard into segments for `fake_character`.
+async fn fake_character_path(
+    State(fake): State<Fake>,
+    headers: HeaderMap,
+    Query(q): Query<std::collections::HashMap<String, String>>,
+    Path(rest): Path<String>,
+) -> Response {
+    let segments: Vec<&str> = rest.split('/').collect();
+    fake_character(&fake, &headers, &q, &segments)
+}
+
+// ---- the app ----
+
+struct App {
+    base: String,
+    http: reqwest::Client,
+    fake: Fake,
+    _dir: TempDir,
+}
+
+async fn app(with_armory: bool) -> App {
+    let dir = tempfile::tempdir().unwrap();
+    let (fake_url, fake) = start_fake().await;
+    let armory = with_armory.then(|| {
+        squadron::armory::Config::new(
+            CLIENT_ID.into(),
+            CLIENT_SECRET.into(),
+            "eu".into(),
+            Some(&fake_url),
+            &format!("{fake_url}/token"),
+        )
+        .unwrap()
+    });
+    let settings = Settings {
+        listen: SocketAddr::from(([127, 0, 0, 1], 0)),
+        database: dir.path().join("squadron.db"),
+        refresh: Duration::from_secs(3600),
+        region: "eu".into(),
+        armory,
+    };
+    let running = squadron::start(settings, std::future::pending())
+        .await
+        .unwrap();
+    App {
+        base: format!("http://{}", running.addr),
+        http: reqwest::Client::builder()
+            .redirect(Policy::none())
+            .build()
+            .unwrap(),
+        fake,
+        _dir: dir,
+    }
+}
+
+impl App {
+    async fn get(&self, path: &str) -> (StatusCode, String) {
+        let r = self
+            .http
+            .get(format!("{}{path}", self.base))
+            .send()
+            .await
+            .unwrap();
+        (r.status(), r.text().await.unwrap())
+    }
+
+    async fn post(&self, path: &str, form: &[(&str, &str)]) -> reqwest::Response {
+        self.http
+            .post(format!("{}{path}", self.base))
+            .form(form)
+            .send()
+            .await
+            .unwrap()
+    }
+
+    /// Posts like htmx does and returns the swapped-in roster.
+    async fn htmx(&self, path: &str, form: &[(&str, &str)]) -> (StatusCode, String) {
+        let r = self
+            .http
+            .post(format!("{}{path}", self.base))
+            .header("HX-Request", "true")
+            .form(form)
+            .send()
+            .await
+            .unwrap();
+        (r.status(), r.text().await.unwrap())
+    }
+
+    /// Creates a squad and returns its path, `/s/<uuid>`.
+    async fn squad(&self, name: &str) -> String {
+        let r = self.post("/squads", &[("name", name)]).await;
+        assert_eq!(r.status(), StatusCode::SEE_OTHER);
+        r.headers()[header::LOCATION].to_str().unwrap().to_owned()
+    }
+
+    async fn add(&self, squad: &str, character: &str, tags: &str) -> reqwest::Response {
+        self.post(
+            &format!("{squad}/characters"),
+            &[("character", character), ("tags", tags)],
+        )
+        .await
+    }
+
+    /// Polls the squad page until it contains `text` (the Armory sync runs in the background).
+    async fn wait_for(&self, path: &str, text: &str) -> String {
+        for _ in 0..100 {
+            let (_, body) = self.get(path).await;
+            if body.contains(text) {
+                return body;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        panic!("{path} never showed {text:?}");
+    }
+}
+
+/// The id of the n-th member on a page, from its `id="member-<id>"`.
+fn member_id(page: &str, n: usize) -> String {
+    page.split("id=\"member-")
+        .nth(n + 1)
+        .and_then(|s| s.split('"').next())
+        .unwrap()
+        .to_owned()
+}
+
+// ---- tests ----
+
+#[tokio::test]
+async fn health_version_and_static_files() {
+    let app = app(false).await;
+    assert_eq!(app.get("/healthz").await, (StatusCode::OK, "ok".into()));
+    let (status, body) = app.get("/version").await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(body.contains("\"version\""), "{body}");
+
+    let (_, page) = app.get("/").await;
+    let css = page
+        .split("href=\"")
+        .find_map(|s| s.split('"').next().filter(|h| h.ends_with("style.css")))
+        .unwrap();
+    let r = app
+        .http
+        .get(format!("{}{css}", app.base))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::OK);
+    assert_eq!(r.headers()[header::CONTENT_TYPE], "text/css");
+    assert_eq!(app.get("/static/x/nope.js").await.0, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn creating_a_squad_leads_to_its_page() {
+    let app = app(false).await;
+    let squad = app.squad("  Thursday   raiders ").await;
+    let id = squad.strip_prefix("/s/").unwrap();
+    assert!(uuid_like(id), "{id}");
+    let (status, page) = app.get(&squad).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(page.contains("value=\"Thursday raiders\""), "{page}");
+    assert!(page.contains("No characters yet"));
+}
+
+fn uuid_like(s: &str) -> bool {
+    s.len() == 36 && s.chars().all(|c| c.is_ascii_hexdigit() || c == '-')
+}
+
+#[tokio::test]
+async fn a_squad_needs_a_name() {
+    let app = app(false).await;
+    let r = app.post("/squads", &[("name", "   ")]).await;
+    assert_eq!(r.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    assert!(r.text().await.unwrap().contains("give the squad a name"));
+}
+
+#[tokio::test]
+async fn unknown_squads_and_pages_are_404() {
+    let app = app(false).await;
+    let (status, body) = app.get("/s/00000000-0000-0000-0000-000000000000").await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert!(body.contains("Not found"));
+    assert_eq!(app.get("/nope").await.0, StatusCode::NOT_FOUND);
+    let r = app
+        .add(
+            "/s/00000000-0000-0000-0000-000000000000",
+            "Aldric-Thornwood",
+            "",
+        )
+        .await;
+    assert_eq!(r.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn renaming_a_squad() {
+    let app = app(false).await;
+    let squad = app.squad("Old name").await;
+    let r = app
+        .post(&format!("{squad}/name"), &[("name", "New name")])
+        .await;
+    assert_eq!(r.status(), StatusCode::SEE_OTHER);
+    assert!(app.get(&squad).await.1.contains("value=\"New name\""));
+}
+
+#[tokio::test]
+async fn added_characters_get_their_armory_details() {
+    let app = app(true).await;
+    let squad = app.squad("Raiders").await;
+    let r = app.add(&squad, " aldric-THORNWOOD ", "Raid, alts").await;
+    assert_eq!(r.status(), StatusCode::SEE_OTHER);
+
+    let page = app.wait_for(&squad, "Night Elf").await;
+    for shown in [
+        "Aldric <span class=\"surname\">Thornwood</span>",
+        "Level 26",
+        "Rogue",
+        "&#60;Order of the Lantern&#62; · item level 14 · Combat 17 / Assassination 5",
+        "Red Defias Mask",
+        "Skinning 158/225",
+        "https://render.example/forever-eu/character/1-avatar.jpg",
+        "class-rogue",
+        ">Raid<",
+        ">alts<",
+    ] {
+        assert!(page.contains(shown), "missing {shown:?} in {page}");
+    }
+    assert!(!page.contains("Pets"), "a rogue has no pets section");
+}
+
+#[tokio::test]
+async fn characters_the_armory_doesnt_know_are_marked() {
+    let app = app(true).await;
+    let squad = app.squad("Raiders").await;
+    app.add(&squad, "Nobody-Atall", "").await;
+    app.wait_for(&squad, "Not on the Armory").await;
+}
+
+#[tokio::test]
+async fn refresh_fetches_again() {
+    let app = app(true).await;
+    let squad = app.squad("Raiders").await;
+    app.add(&squad, "Aldric-Thornwood", "").await;
+    let page = app.wait_for(&squad, "Night Elf").await;
+    let before = app.fake.lookups.load(Ordering::SeqCst);
+    let id = member_id(&page, 0);
+    let r = app
+        .post(&format!("{squad}/characters/{id}/refresh"), &[])
+        .await;
+    assert_eq!(r.status(), StatusCode::SEE_OTHER);
+    for _ in 0..100 {
+        if app.fake.lookups.load(Ordering::SeqCst) >= before + 5 {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    panic!("no new lookups after refresh");
+}
+
+#[tokio::test]
+async fn bad_input_is_explained_and_kept() {
+    let app = app(false).await;
+    let squad = app.squad("Raiders").await;
+
+    let (status, roster) = app
+        .htmx(
+            &format!("{squad}/characters"),
+            &[("character", "Aldric"), ("tags", "raid")],
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "htmx only swaps 2xx responses");
+    assert!(roster.starts_with("<section id=\"roster\""), "{roster}");
+    assert!(roster.contains("enter the character as Name-Surname"));
+    assert!(roster.contains("value=\"Aldric\""), "keeps what was typed");
+
+    let r = app.add(&squad, "A-Thornwood", "").await;
+    assert_eq!(r.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    assert!(r.text().await.unwrap().contains("2 to 24 letters"));
+
+    app.add(&squad, "Aldric-Thornwood", "").await;
+    let (_, roster) = app
+        .htmx(
+            &format!("{squad}/characters"),
+            &[("character", "aldric thornwood")],
+        )
+        .await;
+    assert!(
+        roster.contains("Aldric-Thornwood is already in this squad"),
+        "{roster}"
+    );
+}
+
+#[tokio::test]
+async fn tags_filter_the_roster() {
+    let app = app(false).await;
+    let squad = app.squad("Raiders").await;
+    app.add(&squad, "Aldric-Thornwood", "Raid, Main tank").await;
+    app.add(&squad, "Bryn-Ashvale", "alts").await;
+
+    let (_, all) = app.get(&squad).await;
+    assert!(all.contains("Aldric") && all.contains("Bryn"));
+    let (_, raid) = app.get(&format!("{squad}?tag=RAID")).await;
+    assert!(raid.contains("Aldric") && !raid.contains("Bryn"), "{raid}");
+    let (_, tank) = app.get(&format!("{squad}?tag=main%20tank")).await;
+    assert!(tank.contains("Aldric") && !tank.contains("Bryn"));
+    let (_, none) = app.get(&format!("{squad}?tag=healer")).await;
+    assert!(none.contains("No one has that tag"));
+}
+
+#[tokio::test]
+async fn tagging_and_untagging() {
+    let app = app(false).await;
+    let squad = app.squad("Raiders").await;
+    app.add(&squad, "Aldric-Thornwood", "").await;
+    let id = member_id(&app.get(&squad).await.1, 0);
+
+    let (_, roster) = app
+        .htmx(
+            &format!("{squad}/characters/{id}/tags"),
+            &[("tags", "Healer, raid")],
+        )
+        .await;
+    assert!(
+        roster.contains(">Healer<") && roster.contains(">raid<"),
+        "{roster}"
+    );
+
+    let (_, roster) = app
+        .htmx(&format!("{squad}/characters/{id}/tags/healer/delete"), &[])
+        .await;
+    assert!(
+        !roster.contains(">Healer<") && roster.contains(">raid<"),
+        "{roster}"
+    );
+}
+
+#[tokio::test]
+async fn removing_a_character() {
+    let app = app(false).await;
+    let squad = app.squad("Raiders").await;
+    app.add(&squad, "Aldric-Thornwood", "").await;
+    let id = member_id(&app.get(&squad).await.1, 0);
+    let r = app
+        .post(&format!("{squad}/characters/{id}/delete"), &[])
+        .await;
+    assert_eq!(r.status(), StatusCode::SEE_OTHER);
+    assert!(app.get(&squad).await.1.contains("No characters yet"));
+}
+
+#[tokio::test]
+async fn squads_dont_touch_each_others_characters() {
+    let app = app(false).await;
+    let ours = app.squad("Ours").await;
+    let theirs = app.squad("Theirs").await;
+    app.add(&theirs, "Aldric-Thornwood", "").await;
+    let id = member_id(&app.get(&theirs).await.1, 0);
+    app.post(&format!("{ours}/characters/{id}/delete"), &[])
+        .await;
+    app.post(
+        &format!("{ours}/characters/{id}/tags"),
+        &[("tags", "hacked")],
+    )
+    .await;
+    let (_, page) = app.get(&theirs).await;
+    assert!(page.contains("Aldric") && !page.contains("hacked"));
+}
+
+#[tokio::test]
+async fn without_credentials_names_and_tags_still_work() {
+    let app = app(false).await;
+    let squad = app.squad("Raiders").await;
+    app.add(&squad, "Aldric-Thornwood", "raid").await;
+    let (_, page) = app.get(&squad).await;
+    assert!(page.contains("Armory lookups are off"));
+    assert!(page.contains("Aldric") && page.contains(">raid<"));
+    assert!(!page.contains("hx-trigger=\"every"), "nothing to poll for");
+}

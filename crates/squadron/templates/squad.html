@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}{{ squad.name }} · squadron{% endblock %}
+{% block content %}
+<section class="squad-head">
+  <form method="post" action="/s/{{ squad.id }}/name" class="rename">
+    <label>
+      <span class="visually-hidden">Squad name</span>
+      <input name="name" value="{{ squad.name }}" required maxlength="64" class="squad-name" aria-label="Squad name">
+    </label>
+    <button type="submit" class="quiet">Rename</button>
+  </form>
+  <p class="hint">Share this page's link with your squad. Anyone who has it can edit the squad.</p>
+</section>
+{% include "roster.html" %}
+{% endblock %}

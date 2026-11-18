@@ -1,0 +1,43 @@
+[package]
+name = "squadron"
+description = "Friend squads for WoW: Forever, with characters looked up on the Battle.net Armory"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+squadron-core = { path = "../squadron-core" }
+anyhow = "1.0.104"
+askama = "0.16.1"
+askama_web = { version = "0.16.0", features = ["axum-0.8"] }
+axum = "0.8.9"
+clap = { version = "4.6.8", features = ["derive", "env"] }
+dotenvy = "0.15.7"
+mime_guess = "2.0.5"
+# musl's malloc is slow under concurrent load.
+mimalloc = "0.1.52"
+# rustls, not OpenSSL, so the musl build stays static.
+reqwest = { version = "0.13.5", default-features = false, features = ["rustls", "json", "form"] }
+rust-embed = "8.14.0"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+# No git2 (libgit2): build.rs asks the git CLI, which keeps the build free of C dependencies.
+shadow-rs = { version = "2.0.0", default-features = false }
+# `sqlite` bundles libsqlite3.
+sqlx = { version = "0.9.0", default-features = false, features = ["runtime-tokio", "sqlite", "migrate", "macros"] }
+tokio = { version = "1.54.1", features = ["macros", "rt-multi-thread", "net", "signal", "sync", "time"] }
+tower-http = { version = "0.7.1", features = ["trace", "compression-gzip", "timeout"] }
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter", "json"] }
+uuid = { version = "1.29.3", features = ["v4"] }
+
+[build-dependencies]
+shadow-rs = { version = "2.0.0", default-features = false, features = ["build"] }
+
+[dev-dependencies]
+tempfile = "3.27.0"
+
+[lints]
+workspace = true
