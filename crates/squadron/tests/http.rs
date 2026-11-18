@@ -126,6 +126,10 @@ struct App {
 }
 
 async fn app(with_armory: bool) -> App {
+    app_with(with_armory, None).await
+}
+
+async fn app_with(with_armory: bool, password: Option<&str>) -> App {
     let dir = tempfile::tempdir().unwrap();
     let (fake_url, fake) = start_fake().await;
     let armory = with_armory.then(|| {
@@ -144,6 +148,7 @@ async fn app(with_armory: bool) -> App {
         refresh: Duration::from_secs(3600),
         region: "eu".into(),
         armory,
+        password: password.map(str::to_owned),
     };
     let running = squadron::start(settings, std::future::pending())
         .await
@@ -478,4 +483,164 @@ async fn without_credentials_names_and_tags_still_work() {
     assert!(page.contains("Armory lookups are off"));
     assert!(page.contains("Aldric") && page.contains(">raid<"));
     assert!(!page.contains("hx-trigger=\"every"), "nothing to poll for");
+}
+
+// ---- password ----
+
+const PASSWORD: &str = "correct horse";
+
+/// Logs in and returns the session cookie (`name=value`).
+async fn log_in(app: &App, password: &str, next: &str) -> reqwest::Response {
+    app.post("/login", &[("password", password), ("next", next)])
+        .await
+}
+
+fn session(r: &reqwest::Response) -> String {
+    r.headers()[header::SET_COOKIE]
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_owned()
+}
+
+#[tokio::test]
+async fn with_a_password_everything_but_health_and_static_needs_a_login() {
+    let app = app_with(false, Some(PASSWORD)).await;
+    let r = app
+        .http
+        .get(format!("{}/s/abc?tag=raid", app.base))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::SEE_OTHER);
+    assert_eq!(
+        r.headers()[header::LOCATION],
+        "/login?next=%2Fs%2Fabc%3Ftag%3Draid"
+    );
+    assert_eq!(
+        app.post("/squads", &[("name", "x")]).await.status(),
+        StatusCode::SEE_OTHER
+    );
+
+    assert_eq!(app.get("/healthz").await.0, StatusCode::OK);
+    assert_eq!(app.get("/version").await.0, StatusCode::OK);
+    let (status, login) = app.get("/login?next=/s/abc").await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(login.contains("type=\"password\"") && login.contains("value=\"/s/abc\""));
+    let css = login
+        .split("href=\"")
+        .find_map(|s| s.split('"').next().filter(|h| h.ends_with("style.css")))
+        .unwrap();
+    assert_eq!(app.get(css).await.0, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn the_right_password_logs_in_and_back_to_where_you_were() {
+    let app = app_with(false, Some(PASSWORD)).await;
+    let r = log_in(&app, PASSWORD, "/?from=login").await;
+    assert_eq!(r.status(), StatusCode::SEE_OTHER);
+    assert_eq!(r.headers()[header::LOCATION], "/?from=login");
+    let set_cookie = r.headers()[header::SET_COOKIE].to_str().unwrap().to_owned();
+    assert!(
+        set_cookie.contains("HttpOnly") && set_cookie.contains("SameSite=Lax"),
+        "{set_cookie}"
+    );
+    let cookie = session(&r);
+
+    let page = app
+        .http
+        .get(format!("{}/", app.base))
+        .header(header::COOKIE, &cookie)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(page.status(), StatusCode::OK);
+    assert!(page.text().await.unwrap().contains("Log out"));
+
+    let created = app
+        .http
+        .post(format!("{}/squads", app.base))
+        .header(header::COOKIE, &cookie)
+        .form(&[("name", "Raiders")])
+        .send()
+        .await
+        .unwrap();
+    assert!(
+        created.headers()[header::LOCATION]
+            .to_str()
+            .unwrap()
+            .starts_with("/s/")
+    );
+}
+
+#[tokio::test]
+async fn a_wrong_password_or_cookie_gets_nowhere() {
+    let app = app_with(false, Some(PASSWORD)).await;
+    let r = log_in(&app, "Correct horse", "/").await;
+    assert_eq!(r.status(), StatusCode::UNAUTHORIZED);
+    assert!(r.headers().get(header::SET_COOKIE).is_none());
+    assert!(r.text().await.unwrap().contains("not the password"));
+
+    let forged = app
+        .http
+        .get(format!("{}/", app.base))
+        .header(header::COOKIE, "squadron_session=00ff")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(forged.status(), StatusCode::SEE_OTHER);
+}
+
+#[tokio::test]
+async fn login_only_redirects_within_the_site() {
+    let app = app_with(false, Some(PASSWORD)).await;
+    let r = log_in(&app, PASSWORD, "https://evil.example/").await;
+    assert_eq!(r.headers()[header::LOCATION], "/");
+}
+
+#[tokio::test]
+async fn htmx_requests_without_a_session_are_sent_to_the_login_page() {
+    let app = app_with(false, Some(PASSWORD)).await;
+    let r = app
+        .http
+        .post(format!("{}/s/abc/characters", app.base))
+        .header("HX-Request", "true")
+        .form(&[("character", "Aldric-Thornwood")])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::OK);
+    assert_eq!(
+        r.headers()["hx-redirect"],
+        "/login?next=%2Fs%2Fabc%2Fcharacters"
+    );
+}
+
+#[tokio::test]
+async fn logging_out_clears_the_session() {
+    let app = app_with(false, Some(PASSWORD)).await;
+    let r = app.post("/logout", &[]).await;
+    assert_eq!(r.status(), StatusCode::SEE_OTHER);
+    assert!(
+        r.headers()[header::SET_COOKIE]
+            .to_str()
+            .unwrap()
+            .contains("Max-Age=0")
+    );
+}
+
+#[tokio::test]
+async fn without_a_password_there_is_no_login() {
+    let app = app(false).await;
+    assert_eq!(app.get("/").await.0, StatusCode::OK);
+    assert!(!app.get("/").await.1.contains("Log out"));
+    let r = app
+        .http
+        .get(format!("{}/login?next=/s/x", app.base))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.headers()[header::LOCATION], "/s/x");
 }

@@ -6,7 +6,8 @@ up on the Battle.net Armory and shows their level, race, class, guild, item leve
 professions, gear, hunter pets and when they last played.
 
 - No accounts: a squad lives at its own unguessable link (`/s/<uuid>`). Anyone with the link can
-  see and edit it, so share it with your friends only.
+  see and edit it, so share it with your friends only. Set `SQUADRON_PASSWORD` to put one shared
+  password in front of the whole site as well.
 - Characters are entered as `Name-Surname`, the way Forever names them. EU only for now.
 - Details refresh in the background every hour, or on demand with **Refresh**. Battle.net only
   updates a character when it logs out.
@@ -40,6 +41,7 @@ working directory is read too):
 | `SQUADRON_BNET_CLIENT_ID`     |                     | Battle.net API client id                        |
 | `SQUADRON_BNET_CLIENT_SECRET` |                     | Battle.net API client secret                    |
 | `SQUADRON_BNET_REGION`        | `eu`                | `eu`, `us` or `tw`                              |
+| `SQUADRON_PASSWORD`           |                     | shared password for the whole site; empty: none |
 | `SQUADRON_LISTEN`             | `127.0.0.1:8080`    | address to listen on (`0.0.0.0:8080` in Docker) |
 | `SQUADRON_DATABASE`           | `data/squadron.db`  | SQLite file, created if missing                 |
 | `SQUADRON_REFRESH_MINUTES`    | `60`                | how often a character's details are refreshed   |

@@ -26,6 +26,8 @@ pub struct AppState {
     pub wake: Arc<Notify>,
     pub region: String,
     pub armory_enabled: bool,
+    /// Set when a password protects the app.
+    pub auth: Option<Arc<crate::auth::Auth>>,
 }
 
 pub fn router(state: AppState) -> Router {
@@ -49,7 +51,13 @@ pub fn router(state: AppState) -> Router {
             get(|| async { Json(serde_json::json!({ "version": version::short() })) }),
         )
         .route("/static/{version}/{*path}", get(crate::assets::serve))
+        .route("/login", get(login_page).post(login))
+        .route("/logout", post(logout))
         .fallback(|| async { AppError::NotFound })
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            crate::auth::require,
+        ))
         .with_state(state)
 }
 
@@ -70,6 +78,8 @@ impl<E: Into<anyhow::Error>> From<E> for AppError {
 #[template(path = "error.html")]
 struct ErrorPage {
     static_base: String,
+    /// Show the log-out button (a password is set).
+    logout: bool,
     title: &'static str,
     message: &'static str,
 }
@@ -93,6 +103,7 @@ impl IntoResponse for AppError {
         };
         let page = ErrorPage {
             static_base: crate::assets::base(),
+            logout: false,
             title,
             message,
         };
@@ -254,6 +265,8 @@ pub fn urlencode(s: &str) -> String {
 #[template(path = "index.html")]
 struct IndexPage {
     static_base: String,
+    /// Show the log-out button (a password is set).
+    logout: bool,
     error: Option<String>,
     name_input: String,
 }
@@ -262,6 +275,8 @@ struct IndexPage {
 #[template(path = "squad.html")]
 struct SquadPage {
     static_base: String,
+    /// Show the log-out button (a password is set).
+    logout: bool,
     squad: db::Squad,
     roster: Roster,
 }
@@ -274,9 +289,75 @@ struct RosterPartial {
 
 // ---- handlers ----
 
-async fn index() -> IndexPage {
+#[derive(Template, WebTemplate)]
+#[template(path = "login.html")]
+struct LoginPage {
+    static_base: String,
+    logout: bool,
+    next: String,
+    wrong: bool,
+}
+
+#[derive(Deserialize)]
+struct LoginQuery {
+    next: Option<String>,
+}
+
+async fn login_page(State(state): State<AppState>, Query(q): Query<LoginQuery>) -> Response {
+    let next = crate::auth::safe_next(q.next.as_deref()).to_owned();
+    if state.auth.is_none() {
+        return Redirect::to(&next).into_response();
+    }
+    LoginPage {
+        static_base: crate::assets::base(),
+        logout: false,
+        next,
+        wrong: false,
+    }
+    .into_response()
+}
+
+#[derive(Deserialize)]
+struct LoginForm {
+    password: String,
+    next: Option<String>,
+}
+
+async fn login(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Form(form): Form<LoginForm>,
+) -> Response {
+    let next = crate::auth::safe_next(form.next.as_deref()).to_owned();
+    let Some(auth) = &state.auth else {
+        return Redirect::to(&next).into_response();
+    };
+    if auth.password_matches(&form.password) {
+        let cookie = auth.session_cookie(&headers);
+        return ([(header::SET_COOKIE, cookie)], Redirect::to(&next)).into_response();
+    }
+    crate::auth::wrong_password_delay().await;
+    let page = LoginPage {
+        static_base: crate::assets::base(),
+        logout: false,
+        next,
+        wrong: true,
+    };
+    (StatusCode::UNAUTHORIZED, page).into_response()
+}
+
+async fn logout() -> Response {
+    (
+        [(header::SET_COOKIE, crate::auth::logout_cookie())],
+        Redirect::to("/login"),
+    )
+        .into_response()
+}
+
+async fn index(State(state): State<AppState>) -> IndexPage {
     IndexPage {
         static_base: crate::assets::base(),
+        logout: state.auth.is_some(),
         error: None,
         name_input: String::new(),
     }
@@ -300,6 +381,7 @@ async fn create_squad(
             StatusCode::UNPROCESSABLE_ENTITY,
             IndexPage {
                 static_base: crate::assets::base(),
+                logout: state.auth.is_some(),
                 error: Some(e.to_string()),
                 name_input: form.name,
             },
@@ -346,6 +428,7 @@ async fn squad_page(
     let roster = build_roster(&state, &squad.id, q.tag).await?;
     Ok(SquadPage {
         static_base: crate::assets::base(),
+        logout: state.auth.is_some(),
         squad,
         roster,
     })
@@ -422,6 +505,7 @@ async fn respond(
     };
     let page = SquadPage {
         static_base: crate::assets::base(),
+        logout: state.auth.is_some(),
         squad,
         roster,
     };

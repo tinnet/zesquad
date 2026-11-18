@@ -11,6 +11,9 @@
   <header class="site">
     <a href="/" class="brand">squadron</a>
     <span class="tagline">friend squads for WoW: Forever</span>
+    {%- if logout %}
+    <form method="post" action="/logout" class="logout"><button type="submit" class="quiet">Log out</button></form>
+    {%- endif %}
   </header>
   <main>
     {% block content %}{% endblock %}

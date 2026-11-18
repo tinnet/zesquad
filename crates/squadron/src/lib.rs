@@ -4,6 +4,7 @@
 
 pub mod armory;
 mod assets;
+pub mod auth;
 pub mod cli;
 pub mod db;
 pub mod sync;
@@ -30,6 +31,8 @@ pub struct Settings {
     pub refresh: Duration,
     pub region: String,
     pub armory: Option<armory::Config>,
+    /// The shared password; `None` leaves the app open.
+    pub password: Option<String>,
 }
 
 /// A started server.
@@ -66,11 +69,16 @@ pub async fn start(
         None
     };
 
+    let auth = match settings.password.as_deref().filter(|p| !p.is_empty()) {
+        Some(password) => Some(Arc::new(auth::Auth::new(&db, password).await?)),
+        None => None,
+    };
     let state = web::AppState {
         db,
         wake,
         region: settings.region,
         armory_enabled: syncer.is_some(),
+        auth,
     };
     let app = web::router(state).layer((
         TraceLayer::new_for_http(),

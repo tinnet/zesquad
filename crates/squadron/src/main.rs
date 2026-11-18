@@ -47,6 +47,7 @@ async fn serve(args: ServeArgs) -> anyhow::Result<()> {
         refresh: args.refresh(),
         region: args.bnet.region.clone(),
         armory: args.bnet.config()?,
+        password: args.password.clone(),
     };
     let running = squadron::start(settings, squadron::shutdown_signal()).await?;
     tracing::info!(

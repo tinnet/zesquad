@@ -55,6 +55,9 @@ pub struct ServeArgs {
     /// Minutes between Armory refreshes of a character.
     #[arg(long, env = "SQUADRON_REFRESH_MINUTES", default_value_t = 60, value_parser = clap::value_parser!(u64).range(1..))]
     pub refresh_minutes: u64,
+    /// Password everyone must enter before seeing any squad. Empty or unset: no password.
+    #[arg(long, env = "SQUADRON_PASSWORD", hide_env_values = true)]
+    pub password: Option<String>,
     /// Log JSON lines instead of text.
     #[arg(long, env = "SQUADRON_LOG_JSON")]
     pub log_json: bool,

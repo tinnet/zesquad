@@ -55,6 +55,7 @@ header.site {
 }
 .brand { font-weight: 700; font-size: 1.25rem; color: var(--accent); text-decoration: none; }
 .tagline { color: var(--muted); font-size: .9rem; }
+.logout { margin-left: auto; }
 
 h1 { font-size: 1.6rem; margin: 1rem 0 .5rem; }
 a { color: var(--accent); }
