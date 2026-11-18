@@ -36,7 +36,7 @@
         {% if let Some(url) = m.profile.avatar_url %}<img class="avatar" src="{{ url }}" alt="" width="56" height="56" loading="lazy">{% else %}<span class="avatar none" aria-hidden="true"></span>{% endif %}
         <div>
           <h2 class="name">{{ m.name }} <span class="surname">{{ m.surname }}</span></h2>
-          {% if m.status == "found" %}
+          {% if m.has_profile %}
           <p class="line">
             {% if let Some(level) = m.profile.level %}Level {{ level }}{% endif %}
             {% if let Some(race) = m.profile.race %}{{ race }}{% endif %}
@@ -46,12 +46,13 @@
           {%- let details = m.details_line() %}
           {% if !details.is_empty() %}<p class="line sub">{{ details }}</p>{% endif %}
           {% if let Some(seen) = m.last_login %}<p class="line sub">last played {{ seen }}</p>{% endif %}
-          {% else if m.status == "not_found" %}
+          {% endif %}
+          {% if m.status == "not_found" %}
           <p class="line sub">Not on the Armory: check the spelling, or log the character out once so Battle.net publishes it.</p>
           {% else if m.status == "failed" %}
-          <p class="line sub">Couldn't reach the Armory{% if let Some(checked) = m.checked %} ({{ checked }}){% endif %}; trying again soon.</p>
-          {% else if roster.armory_enabled %}
-          <p class="line sub">Looking up on the Armory…</p>
+          <p class="line sub">Couldn't reach the Armory{% if let Some(checked) = m.checked %} ({{ checked }}){% endif %}{% if m.has_profile %}, so this is what it said before{% endif %}; trying again soon.</p>
+          {% else if m.status == "pending" && roster.armory_enabled %}
+          <p class="line sub">{% if m.has_profile %}Updating from{% else %}Looking up on{% endif %} the Armory…</p>
           {% endif %}
         </div>
       </div>

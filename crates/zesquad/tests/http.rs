@@ -3,7 +3,7 @@
 
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::Duration;
 
 use axum::Router;
@@ -26,6 +26,10 @@ const KNOWN: &str = "aldric-thornwood";
 #[derive(Clone, Default)]
 struct Fake {
     lookups: Arc<AtomicUsize>,
+    /// Character lookups wait while a test holds this for writing.
+    gate: Arc<tokio::sync::RwLock<()>>,
+    /// Character lookups answer 503.
+    down: Arc<AtomicBool>,
 }
 
 async fn fake_token(headers: HeaderMap) -> Response {
@@ -57,6 +61,9 @@ fn fake_character(
         == Some(&format!("Bearer {TOKEN}"));
     if !authorised {
         return StatusCode::UNAUTHORIZED.into_response();
+    }
+    if fake.down.load(Ordering::SeqCst) {
+        return StatusCode::SERVICE_UNAVAILABLE.into_response();
     }
     if q.get("namespace").map(String::as_str) != Some("profile-forever-eu") {
         return StatusCode::FORBIDDEN.into_response();
@@ -112,6 +119,7 @@ async fn fake_character_path(
     Query(q): Query<std::collections::HashMap<String, String>>,
     Path(rest): Path<String>,
 ) -> Response {
+    let _open = fake.gate.read().await;
     let segments: Vec<&str> = rest.split('/').collect();
     fake_character(&fake, &headers, &q, &segments)
 }
@@ -364,6 +372,36 @@ async fn refresh_fetches_again() {
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
     panic!("no new lookups after refresh");
+}
+
+#[tokio::test]
+async fn armory_details_stay_while_refreshing_and_after_a_failure() {
+    let app = app(true).await;
+    let squad = app.squad("Raiders").await;
+    app.add(&squad, "Aldric-Thornwood", "").await;
+    let page = app.wait_for(&squad, "Level 26").await;
+    let refresh = format!("{squad}/characters/{}/refresh", member_id(&page, 0));
+
+    let held = app.fake.gate.write().await;
+    app.post(&refresh, &[]).await;
+    let (_, page) = app.get(&squad).await;
+    assert!(
+        page.contains("Updating from the Armory") && page.contains("Level 26"),
+        "{page}"
+    );
+    app.fake.down.store(true, Ordering::SeqCst);
+    drop(held);
+
+    let page = app.wait_for(&squad, "what it said before").await;
+    assert!(page.contains("Couldn't reach the Armory"), "{page}");
+    for shown in [
+        "Level 26",
+        "Rogue",
+        "Order of the Lantern",
+        "Red Defias Mask",
+    ] {
+        assert!(page.contains(shown), "missing {shown:?} in {page}");
+    }
 }
 
 #[tokio::test]

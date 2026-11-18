@@ -122,6 +122,8 @@ pub struct MemberView {
     pub tags: Vec<(String, String)>,
     pub status: &'static str,
     pub profile: Profile,
+    /// The Armory answered at some point; still shown while a refresh is pending or failed.
+    pub has_profile: bool,
     pub class_key: String,
     pub last_login: Option<String>,
     pub checked: Option<String>,
@@ -132,6 +134,7 @@ impl MemberView {
     fn new(m: db::Member, now: i64) -> Self {
         let profile = Profile::from_documents(&m.documents);
         Self {
+            has_profile: m.documents.summary.is_some(),
             id: m.id,
             class_key: profile.class_key(),
             last_login: profile.last_login_ms.map(|ms| ago(now - ms / 1000)),
