@@ -1,0 +1,34 @@
+# Changelog
+
+What changed in each zesquad release. Versions are dates (CalVer).
+
+## 2026.11.18
+
+### Features
+
+- **core**: Parse character names, tags and Armory responses ([058e095](https://github.com/tinnet/zesquad/commit/058e095595dcd2005a26eab4ad1ffcb25611f852))
+- Friend squads with Armory details for each character ([64db3f8](https://github.com/tinnet/zesquad/commit/64db3f8233a72594adcd41235ebb6b0d55ad64a6))
+- Optional shared password in front of the whole site ([18e71e4](https://github.com/tinnet/zesquad/commit/18e71e413ce2c9752920c97b5d93d778c353acd2))
+- **web**: Tag characters by class, spec, race, faction and professions, and colour tags ([94771aa](https://github.com/tinnet/zesquad/commit/94771aac4b362eb2ba26e07439ffd8ad85dca492))
+
+### Fixes
+
+- Let the container create its database on a new volume ([65a22e5](https://github.com/tinnet/zesquad/commit/65a22e5e6db956f2436e8b69841c5f30fa1111b4))
+- **web**: Stop the login page redirecting to other sites ([efa833c](https://github.com/tinnet/zesquad/commit/efa833c44ddb51950d2b5f56a42a9cdc36ab4fc8))
+- **web**: After logging in, return to the page you were on ([9fdf62e](https://github.com/tinnet/zesquad/commit/9fdf62e2dd679fd4df24236f254911ef34351cec))
+- **web**: Keep a character's details while refreshing or on a failed lookup ([35572ba](https://github.com/tinnet/zesquad/commit/35572baa3cc8dc3af9de20bcf0c061213db3e32e))
+- **web**: Stop the roster refresh wiping what you're typing ([8af8159](https://github.com/tinnet/zesquad/commit/8af815999fd06a3ea735a9196f6540c5152a1220))
+- **armory**: Say so when Battle.net rejects a freshly fetched token ([816d050](https://github.com/tinnet/zesquad/commit/816d0507b6aa1535a3fafbb425b1645f432d9549))
+
+### Performance
+
+- **armory**: Reuse short-lived Battle.net tokens ([f9dbac6](https://github.com/tinnet/zesquad/commit/f9dbac6c61a94cd98620344189a92be2c17a6b6b))
+- **db**: Parse each character's Armory documents once, not every render ([ef22c6b](https://github.com/tinnet/zesquad/commit/ef22c6b0f0f545036b5314f7b6cd1e70c74b0098))
+
+### Documentation
+
+- Describe what the Battle.net API offers for WoW: Forever ([6a12247](https://github.com/tinnet/zesquad/commit/6a122477d98698a035f9fa0b24b3b81fbc875d71))
+- Explain running, configuring and developing squadron ([03e16cb](https://github.com/tinnet/zesquad/commit/03e16cb6eb32db8edb990b8baba7ab4b1b6635e9))
+- Describe the Armory parse cache and token renewal ([dadc68d](https://github.com/tinnet/zesquad/commit/dadc68da1420a4656e7aa07bf96f9cdaa5cf32da))
+
+
