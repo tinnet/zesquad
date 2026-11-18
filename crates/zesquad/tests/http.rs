@@ -596,8 +596,31 @@ async fn a_wrong_password_or_cookie_gets_nowhere() {
 #[tokio::test]
 async fn login_only_redirects_within_the_site() {
     let app = app_with(false, Some(PASSWORD)).await;
-    let r = log_in(&app, PASSWORD, "https://evil.example/").await;
-    assert_eq!(r.headers()[header::LOCATION], "/");
+    // Browsers drop the tab and newline, which would leave //evil.example.
+    for next in [
+        "https://evil.example/",
+        "/\t/evil.example",
+        "/\n/evil.example",
+    ] {
+        let r = log_in(&app, PASSWORD, next).await;
+        assert_eq!(r.status(), StatusCode::SEE_OTHER, "{next:?}");
+        assert_eq!(r.headers()[header::LOCATION], "/", "{next:?}");
+    }
+}
+
+#[tokio::test]
+async fn without_a_password_login_still_only_redirects_within_the_site() {
+    let app = app(false).await;
+    for next in ["/%09/evil.example", "/%0A/evil.example", "/%5Cevil.example"] {
+        let r = app
+            .http
+            .get(format!("{}/login?next={next}", app.base))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(r.status(), StatusCode::SEE_OTHER, "{next}");
+        assert_eq!(r.headers()[header::LOCATION], "/", "{next}");
+    }
 }
 
 #[tokio::test]

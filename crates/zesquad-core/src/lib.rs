@@ -3,6 +3,7 @@
 
 pub mod armory;
 pub mod name;
+pub mod redirect;
 pub mod refresh;
 pub mod text;
 

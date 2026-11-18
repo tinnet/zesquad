@@ -304,7 +304,7 @@ struct LoginQuery {
 }
 
 async fn login_page(State(state): State<AppState>, Query(q): Query<LoginQuery>) -> Response {
-    let next = crate::auth::safe_next(q.next.as_deref()).to_owned();
+    let next = zesquad_core::redirect::safe_next(q.next.as_deref()).to_owned();
     if state.auth.is_none() {
         return Redirect::to(&next).into_response();
     }
@@ -328,7 +328,7 @@ async fn login(
     headers: HeaderMap,
     Form(form): Form<LoginForm>,
 ) -> Response {
-    let next = crate::auth::safe_next(form.next.as_deref()).to_owned();
+    let next = zesquad_core::redirect::safe_next(form.next.as_deref()).to_owned();
     let Some(auth) = &state.auth else {
         return Redirect::to(&next).into_response();
     };

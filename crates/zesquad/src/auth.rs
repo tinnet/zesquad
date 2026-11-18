@@ -126,15 +126,6 @@ pub async fn require(State(state): State<AppState>, request: Request, next: Next
     Redirect::to(&login).into_response()
 }
 
-/// Only same-site paths, so the login page can't be used to send people elsewhere.
-#[must_use]
-pub fn safe_next(next: Option<&str>) -> &str {
-    match next {
-        Some(n) if n.starts_with('/') && !n.starts_with("//") && !n.contains('\\') => n,
-        _ => "/",
-    }
-}
-
 fn cookie<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
     headers
         .get_all(header::COOKIE)
@@ -161,15 +152,6 @@ fn hex(bytes: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn next_stays_on_site() {
-        assert_eq!(safe_next(Some("/s/abc?tag=raid")), "/s/abc?tag=raid");
-        assert_eq!(safe_next(Some("//evil.example")), "/");
-        assert_eq!(safe_next(Some("https://evil.example")), "/");
-        assert_eq!(safe_next(Some("/\\evil.example")), "/");
-        assert_eq!(safe_next(None), "/");
-    }
 
     #[test]
     fn reads_cookies() {
