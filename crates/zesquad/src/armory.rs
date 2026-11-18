@@ -150,17 +150,20 @@ impl Client {
         url.query_pairs_mut()
             .append_pair("namespace", namespace)
             .append_pair("locale", self.config.locale());
-        for attempt in 0..2 {
+        let mut retried = false;
+        loop {
             let token = self.token().await?;
             let response = self.http.get(url.clone()).bearer_auth(token).send().await?;
             let status = response.status();
-            if status == StatusCode::UNAUTHORIZED && attempt == 0 {
-                *self.token.lock().await = None;
-                continue;
+            if status != StatusCode::UNAUTHORIZED {
+                return Ok((status, response.text().await?));
             }
-            return Ok((status, response.text().await?));
+            if retried {
+                bail!("Battle.net rejected a fresh token (401); check the client id and secret");
+            }
+            *self.token.lock().await = None;
+            retried = true;
         }
-        bail!("Battle.net rejected a fresh token")
     }
 
     /// The cached app token, fetching a new one when it's within five minutes of expiring.
