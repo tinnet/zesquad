@@ -20,9 +20,10 @@ test *args:
 network-test:
     cargo test --workspace -- --ignored
 
-# Clippy with every pedantic warning as an error
+# Clippy with every pedantic warning as an error, and the Mermaid diagrams in docs/
 lint:
     cargo clippy --workspace --all-targets -- -D warnings
+    for f in docs/*.md; do merman-cli lint "$f" >/dev/null || exit 1; done
 
 # Serve the app on http://127.0.0.1:8080 with a database in data/
 run *args:

@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Read-only token: pull requests from forks run this too.
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - uses: jdx/mise-action@v5.2.7 # rust, just from mise.toml
+      - run: just ci
+
+  # Every action is pinned to a commit in actions.lock; fail if a workflow uses one that isn't.
+  actions-lock:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - run: gh extension install github/gh-actions-lock --pin v0.4.1
+      - run: gh actions-lock --verify
+
+  # The static Linux binary the release ships, built and started once.
+  linux:
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-24.04, target: x86_64-unknown-linux-musl }
+          - { os: ubuntu-24.04-arm, target: aarch64-unknown-linux-musl }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0 # shadow-rs reads the tags for the version
+          persist-credentials: false
+      - run: sudo apt-get install -y --no-install-recommends musl-tools
+      - uses: jdx/mise-action@v5.2.7
+        with:
+          install_args: rust
+      - run: cargo build --release --locked --target ${{ matrix.target }} -p squadron
+      - name: Smoke test
+        run: |
+          bin=target/${{ matrix.target }}/release/squadron
+          ldd "$bin" 2>&1 | grep -q "not a dynamic executable" # static
+          "$bin" serve --listen 127.0.0.1:8080 --database "$RUNNER_TEMP/smoke.db" &
+          for _ in $(seq 20); do "$bin" healthcheck && exit 0; sleep 0.5; done
+          exit 1

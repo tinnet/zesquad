@@ -1,0 +1,128 @@
+name: Release
+
+# `just release` pushes a CalVer tag; this builds the static Linux binaries, publishes them as a
+# GitHub release, and pushes a multi-arch container image to GHCR.
+on:
+  push:
+    tags: ["v20*"] # vYYYY.MM.DD, or vYYYY.MM.DD.N for another release that day
+
+permissions: {}
+
+jobs:
+  linux:
+    strategy:
+      matrix:
+        include:
+          - { os: ubuntu-24.04, target: x86_64-unknown-linux-musl, name: linux-x86_64, docker: amd64 }
+          - { os: ubuntu-24.04-arm, target: aarch64-unknown-linux-musl, name: linux-aarch64, docker: arm64 }
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    env:
+      VERSION: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0 # shadow-rs reads the tag for the version
+          persist-credentials: false
+      - run: sudo apt-get install -y --no-install-recommends musl-tools
+      - uses: jdx/mise-action@v5.2.7
+        with:
+          install_args: rust
+      - run: cargo build --release --locked --target ${{ matrix.target }} -p squadron
+      - name: Smoke test
+        run: |
+          out=$(target/${{ matrix.target }}/release/squadron --version)
+          echo "$out"
+          [ "$out" = "squadron ${VERSION#v}" ]
+      - name: Package
+        run: |
+          mkdir -p "dist/linux-${{ matrix.docker }}"
+          cp target/${{ matrix.target }}/release/squadron "dist/linux-${{ matrix.docker }}/"
+          tar -czf "squadron-${{ matrix.name }}.tar.gz" -C target/${{ matrix.target }}/release squadron
+      - uses: actions/upload-artifact@v7.0.2
+        with:
+          path: squadron-${{ matrix.name }}.tar.gz
+          archive: false # the .tar.gz as is; the artifact takes the file's name
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v7.0.2
+        with:
+          name: image-${{ matrix.docker }}
+          path: dist/
+          if-no-files-found: error
+
+  release:
+    needs: linux
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # create the release
+      id-token: write # sign the attestation
+      attestations: write
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0 # the history since the previous tag, for the notes
+          persist-credentials: false
+      - uses: jdx/mise-action@v5.2.7
+        with:
+          install_args: git-cliff
+      - name: Release notes
+        run: git cliff --current --strip all --output "$RUNNER_TEMP/notes.md"
+      - uses: actions/download-artifact@v8.0.2
+        with:
+          path: dist
+          pattern: squadron-*
+          merge-multiple: true
+          skip-decompress: true
+      - name: Checksums
+        working-directory: dist
+        run: sha256sum squadron-* | tee SHA256SUMS
+      # Signed build provenance, checked by `gh attestation verify` and by mise on install.
+      # GitHub only offers attestations for private repositories on Enterprise Cloud.
+      - if: ${{ !github.event.repository.private }}
+        uses: actions/attest@v4.2.2
+        with:
+          subject-path: dist/squadron-*
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: >
+          gh release create "$TAG" dist/*
+          --repo "$GITHUB_REPOSITORY" --verify-tag --notes-file "$RUNNER_TEMP/notes.md"
+          --title "squadron ${TAG#v}"
+
+  image:
+    needs: linux
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write # push to ghcr.io
+    env:
+      VERSION: ${{ github.ref_name }}
+      IMAGE: ghcr.io/${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v8.0.2
+        with:
+          path: dist
+          pattern: image-*
+          merge-multiple: true
+      - uses: docker/setup-buildx-action@v4.4.1 # the Dockerfile only copies, so no QEMU needed
+      - uses: docker/login-action@v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Tags
+        id: tags
+        run: echo "tags=$IMAGE:${VERSION#v},$IMAGE:latest" >> "$GITHUB_OUTPUT"
+      - uses: docker/build-push-action@v7.4.0
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.tags.outputs.tags }}
+          labels: org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}

@@ -1,0 +1,21 @@
+version: 2
+updates:
+  # Bumps the actions in the workflows and their pins in actions.lock in one pull request.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7 # let a new release settle (or get pulled) before we take it
+    groups:
+      actions:
+        patterns: ["*"]
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      cargo:
+        patterns: ["*"]

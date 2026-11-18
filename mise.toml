@@ -1,9 +1,12 @@
 # Dev tools for this repo. `mise install` (or `just setup`) gets everything.
 
 [tools]
-rust = { version = "1.100.0", profile = "default" }
+# The musl targets build the static Linux release binaries (CI and `just docker`).
+rust = { version = "1.100.0", profile = "default", targets = "x86_64-unknown-linux-musl,aarch64-unknown-linux-musl" }
 just = "1.59.0"
 lefthook = "2.2.2"
 betterleaks = "1.10.1"
 # Release notes and CHANGELOG.md from the Conventional Commits.
 git-cliff = "2.14.2"
+# Lints the Mermaid diagrams in docs/ (the binary is merman-cli).
+"github:Latias94/merman" = "0.10.0"
