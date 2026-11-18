@@ -44,7 +44,7 @@ lefthook (installed by `just setup`):
 ## CI
 
 `.github/workflows/ci.yml` on pushes to `main` and on PRs: `just ci`; the static musl binary for
-x86_64 and aarch64, checked by `.github/scripts/smoke-test.sh` (static, and serves); and `gh actions-lock --verify`. Every action is
+x86_64 and aarch64, checked by `.github/scripts/smoke-test.sh` (static, reports its version, and serves); and `gh actions-lock --verify`. Every action is
 pinned in `.github/workflows/actions.lock`: after changing a `uses:`, run `gh actions-lock` and
 commit the lockfile with it. Dependabot proposes action and crate updates weekly.
 

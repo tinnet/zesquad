@@ -3,8 +3,8 @@
 #
 #   smoke-test.sh <binary> [version]
 #
-# Fails unless the binary is static, prints `zesquad <version>` (when a version is given), and
-# serves /healthz.
+# Fails unless the binary is static, prints `zesquad <version>` as the first line of --version
+# (when a version is given), and serves /healthz.
 set -euo pipefail
 
 bin=$1
@@ -19,7 +19,7 @@ if grep -q INTERP <<<"$headers"; then
 fi
 
 if [ -n "$version" ]; then
-  out=$("$bin" --version)
+  out=$("$bin" --version | head -n1)
   echo "$out"
   [ "$out" = "zesquad $version" ]
 fi

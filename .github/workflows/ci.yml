@@ -52,4 +52,8 @@ jobs:
           install_args: rust
       - run: cargo build --release --locked --target ${{ matrix.target }} -p zesquad
       - name: Smoke test
-        run: .github/scripts/smoke-test.sh target/${{ matrix.target }}/release/zesquad
+        run: |
+          # The version shadow-rs built in: a tag on HEAD (a release commit), else dev.
+          tag=$(git tag --list --contains HEAD)
+          version=${tag#v}
+          .github/scripts/smoke-test.sh target/${{ matrix.target }}/release/zesquad "${version:-dev}"
