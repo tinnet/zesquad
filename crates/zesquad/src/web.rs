@@ -235,9 +235,7 @@ impl Roster {
 
     #[must_use]
     pub fn filter_query(&self) -> String {
-        self.filter
-            .as_ref()
-            .map_or_else(String::new, |t| format!("?tag={}", urlencode(t)))
+        filter_query(self.filter.as_deref())
     }
 
     #[must_use]
@@ -249,6 +247,16 @@ impl Roster {
     pub fn is_filter(&self, key: &str) -> bool {
         self.filter.as_deref() == Some(key)
     }
+}
+
+/// The tag filter from a query or form as a tag key: lower case, `None` when empty.
+fn tag_filter(filter: Option<String>) -> Option<String> {
+    filter.filter(|t| !t.is_empty()).map(|t| t.to_lowercase())
+}
+
+/// `?tag=<key>` for a tag filter, empty for none.
+fn filter_query(filter: Option<&str>) -> String {
+    filter.map_or_else(String::new, |t| format!("?tag={}", urlencode(t)))
 }
 
 /// Percent-encodes everything but unreserved characters, for tags in URLs.
@@ -403,7 +411,7 @@ async fn load_squad(state: &AppState, id: &str) -> Result<db::Squad> {
 }
 
 async fn build_roster(state: &AppState, squad_id: &str, filter: Option<String>) -> Result<Roster> {
-    let filter = filter.filter(|t| !t.is_empty()).map(|t| t.to_lowercase());
+    let filter = tag_filter(filter);
     let now = db::now();
     let members = db::members(&state.db, squad_id, filter.as_deref())
         .await?
@@ -487,10 +495,9 @@ async fn respond(
     outcome: Outcome,
 ) -> Result<Response> {
     let htmx = headers.contains_key("hx-request");
+    let filter = tag_filter(filter);
     if !htmx && outcome.error.is_none() {
-        let query = filter
-            .filter(|t| !t.is_empty())
-            .map_or_else(String::new, |t| format!("?tag={}", urlencode(&t)));
+        let query = filter_query(filter.as_deref());
         return Ok(Redirect::to(&format!("/s/{}{query}", squad.id)).into_response());
     }
     let mut roster = build_roster(state, &squad.id, filter).await?;

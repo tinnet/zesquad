@@ -435,6 +435,27 @@ async fn armory_details_stay_while_refreshing_and_after_a_failure() {
 }
 
 #[tokio::test]
+async fn a_form_post_returns_to_the_same_filter() {
+    let app = app(false).await;
+    let squad = app.squad("Raiders").await;
+    let r = app
+        .post(
+            &format!("{squad}/characters"),
+            &[
+                ("character", "Aldric-Thornwood"),
+                ("tags", "Main tank"),
+                ("filter", "Main TANK"),
+            ],
+        )
+        .await;
+    assert_eq!(r.status(), StatusCode::SEE_OTHER);
+    assert_eq!(
+        r.headers()[header::LOCATION],
+        format!("{squad}?tag=main%20tank")
+    );
+}
+
+#[tokio::test]
 async fn bad_input_is_explained_and_kept() {
     let app = app(false).await;
     let squad = app.squad("Raiders").await;
