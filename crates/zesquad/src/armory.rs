@@ -76,7 +76,14 @@ pub struct Client {
 
 struct Token {
     value: String,
-    expires: Instant,
+    /// When to stop using it and fetch a new one, a little before it expires.
+    renew_at: Instant,
+}
+
+/// How long a token that expires in `expires_in` is used: until five minutes before it
+/// expires, or halfway for a short-lived one, so it's always reused at least for a while.
+fn use_for(expires_in: Duration) -> Duration {
+    expires_in.saturating_sub((expires_in / 2).min(Duration::from_secs(300)))
 }
 
 #[derive(Deserialize)]
@@ -166,11 +173,11 @@ impl Client {
         }
     }
 
-    /// The cached app token, fetching a new one when it's within five minutes of expiring.
+    /// The cached app token, fetching a new one when it's close to expiring (see [`use_for`]).
     async fn token(&self) -> anyhow::Result<String> {
         let mut cached = self.token.lock().await;
         if let Some(token) = cached.as_ref()
-            && token.expires > Instant::now() + Duration::from_secs(300)
+            && token.renew_at > Instant::now()
         {
             return Ok(token.value.clone());
         }
@@ -192,8 +199,22 @@ impl Client {
         let value = token.access_token;
         *cached = Some(Token {
             value: value.clone(),
-            expires: Instant::now() + Duration::from_secs(token.expires_in),
+            renew_at: Instant::now() + use_for(Duration::from_secs(token.expires_in)),
         });
         Ok(value)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tokens_are_renewed_before_they_expire_but_always_reused() {
+        let secs = Duration::from_secs;
+        assert_eq!(use_for(secs(86_399)), secs(86_099), "five minutes early");
+        assert_eq!(use_for(secs(600)), secs(300));
+        assert_eq!(use_for(secs(300)), secs(150), "short-lived: half its life");
+        assert_eq!(use_for(secs(0)), secs(0));
     }
 }
