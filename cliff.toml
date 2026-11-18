@@ -1,0 +1,55 @@
+# git-cliff: release notes and CHANGELOG.md from the Conventional Commits.
+# `just changelog` previews; `just release` writes CHANGELOG.md; release.yml writes the notes.
+
+[changelog]
+header = """
+# Changelog
+
+What changed in each squadron release. Versions are dates (CalVer).
+
+"""
+body = """
+{% if version -%}
+## {{ version | trim_start_matches(pat="v") }}
+{% else -%}
+## Unreleased
+{% endif -%}
+{% for group, commits in commits | group_by(attribute="group") %}
+### {{ group | striptags | trim }}
+{% for commit in commits %}
+- {% if commit.scope %}**{{ commit.scope }}**: {% endif %}\
+{% if commit.breaking %}**breaking:** {% endif %}\
+{{ commit.message | split(pat="\n") | first | upper_first | trim }} \
+([{{ commit.id | truncate(length=7, end="") }}](https://github.com/tinnet/squadron/commit/{{ commit.id }}))\
+{% endfor %}
+{% endfor %}\n
+"""
+trim = true
+footer = ""
+
+[git]
+conventional_commits = true
+filter_unconventional = true
+split_commits = false
+protect_breaking_commits = true
+filter_commits = false
+tag_pattern = "v20[0-9.]*"
+sort_commits = "oldest"
+# GitHub's merge commits aren't conventional, and git-cliff warns about them before any parser
+# runs. As chore commits they are skipped below; the commits they merge are listed on their own.
+commit_preprocessors = [
+  { pattern = "^Merge (pull request|branch) .*", replace = "chore: merge" },
+  # `git revert` writes `Revert "<subject>"`, which isn't conventional and would be dropped.
+  { pattern = '^Revert "(.*)"', replace = "revert: $1" },
+]
+# The <!-- n --> prefixes order the sections; striptags drops them in the output.
+commit_parsers = [
+  { message = "^feat", group = "<!-- 0 -->Features" },
+  { message = "^fix", group = "<!-- 1 -->Fixes" },
+  { message = "^perf", group = "<!-- 2 -->Performance" },
+  { message = "^docs", group = "<!-- 3 -->Documentation" },
+  # A revert takes back something users may have seen in an earlier release.
+  { message = "^revert", group = "<!-- 4 -->Reverts" },
+  # Internal: refactoring, tests, build, CI and tooling don't change what users get.
+  { message = "^(refactor|test|build|ci|chore|style)", skip = true },
+]

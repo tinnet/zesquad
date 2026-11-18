@@ -1,0 +1,26 @@
+# Git hooks; `lefthook install` (or `just setup`) activates them.
+
+pre-commit:
+  jobs:
+    - name: secrets
+      run: betterleaks git --pre-commit --staged --no-banner --redact -v
+    - name: format
+      glob: "{*.rs,justfile}"
+      run: just fmt
+      stage_fixed: true
+
+commit-msg:
+  jobs:
+    - name: conventional
+      script: conventional.sh
+      runner: sh
+
+pre-push:
+  # A script in .lefthook/pre-push/, not `run`: lefthook skips `run` jobs in
+  # pre-push when `git diff HEAD @{push}` is empty, e.g. when pushing a branch
+  # you're not on.
+  jobs:
+    - name: signed
+      script: signed.sh
+      runner: sh
+      use_stdin: true
