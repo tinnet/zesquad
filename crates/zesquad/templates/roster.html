@@ -1,8 +1,8 @@
 {%- let base = roster.base() -%}
 <section id="roster"
-  {#- The poll swaps the whole section, so it waits while someone is typing into it. #}
+  {#- The poll swaps the whole section, so it waits while someone is typing into it or has a colour picker open. #}
   {%- if roster.polling() %} hx-get="{{ base }}/roster{{ roster.filter_query() }}" hx-swap="outerHTML"
-    hx-trigger="every 3s [!this.querySelector('input:not([type=hidden]):focus, input:not([type=hidden]):not(:placeholder-shown)')]"{% endif %}>
+    hx-trigger="every 3s [!this.querySelector('input:not([type=hidden]):focus, input:not([type=hidden]):not([type=color]):not(:placeholder-shown)')]"{% endif %}>
   <form method="post" action="{{ base }}/characters" class="add row"
     hx-post="{{ base }}/characters" hx-target="#roster" hx-swap="outerHTML">
     <input type="hidden" name="filter" value="{{ roster.filter_value() }}">
@@ -22,10 +22,27 @@
   {% if !roster.tags.is_empty() %}
   <nav class="filters" aria-label="Filter by tag">
     <a href="{{ base }}" class="chip{% if roster.filter.is_none() %} on{% endif %}">all</a>
-    {% for (label, key) in roster.tags %}
-    <a href="{{ base }}?tag={{ crate::web::urlencode(key) }}" class="chip{% if roster.is_filter(key) %} on{% endif %}">{{ label }}</a>
+    {% for t in roster.tags %}
+    <a href="{{ base }}?tag={{ crate::web::urlencode(t.key) }}" class="chip{{ t.paint.class() }}{% if roster.is_filter(t.key) %} on{% endif %}" style="{{ t.paint.style() }}">{{ t.label }}</a>
     {% endfor %}
   </nav>
+  <details class="colours"{% if roster.colours_open %} open{% endif %}>
+    <summary>Tag colours</summary>
+    <ul class="plain colour-list">
+      {% for t in roster.tags %}
+      <li>
+        <form method="post" action="{{ base }}/tags/{{ crate::web::urlencode(t.key) }}/colour" class="row"
+          hx-post="{{ base }}/tags/{{ crate::web::urlencode(t.key) }}/colour" hx-target="#roster" hx-swap="outerHTML" hx-trigger="change, submit">
+          <input type="hidden" name="filter" value="{{ roster.filter_value() }}">
+          <input type="color" name="colour" value="{{ t.paint.picker_value() }}" aria-label="Colour for {{ t.label }}">
+          <span class="chip{{ t.paint.class() }}" style="{{ t.paint.style() }}">{{ t.label }}</span>
+          <button type="submit" class="quiet">{% if t.paint.is_set() %}Set{% else %}Add colour{% endif %}</button>
+          {% if t.picked %}<button type="submit" name="reset" value="1" class="quiet">Reset</button>{% endif %}
+        </form>
+      </li>
+      {% endfor %}
+    </ul>
+  </details>
   {% endif %}
 
   {% if roster.members.is_empty() %}
@@ -60,13 +77,20 @@
       </div>
 
       <div class="tags">
-        {% for (label, key) in m.tags %}
-        <form method="post" action="{{ base }}/characters/{{ m.id }}/tags/{{ crate::web::urlencode(key) }}/delete" class="chip tag"
-          hx-post="{{ base }}/characters/{{ m.id }}/tags/{{ crate::web::urlencode(key) }}/delete" hx-target="#roster" hx-swap="outerHTML">
+        {% for c in m.tags %}
+        {%- let key = crate::web::urlencode(c.tag.key) %}
+        {% if c.tag.auto %}
+        <span class="chip tag auto{{ c.paint.class() }}" style="{{ c.paint.style() }}" title="From the Armory">
+          <a href="{{ base }}?tag={{ key }}">{{ c.tag.label }}</a>
+        </span>
+        {% else %}
+        <form method="post" action="{{ base }}/characters/{{ m.id }}/tags/{{ key }}/delete" class="chip tag{{ c.paint.class() }}" style="{{ c.paint.style() }}"
+          hx-post="{{ base }}/characters/{{ m.id }}/tags/{{ key }}/delete" hx-target="#roster" hx-swap="outerHTML">
           <input type="hidden" name="filter" value="{{ roster.filter_value() }}">
-          <a href="{{ base }}?tag={{ crate::web::urlencode(key) }}">{{ label }}</a>
-          <button type="submit" class="x" aria-label="Remove tag {{ label }}">×</button>
+          <a href="{{ base }}?tag={{ key }}">{{ c.tag.label }}</a>
+          <button type="submit" class="x" aria-label="Remove tag {{ c.tag.label }}">×</button>
         </form>
+        {% endif %}
         {% endfor %}
         <form method="post" action="{{ base }}/characters/{{ m.id }}/tags" class="add-tag"
           hx-post="{{ base }}/characters/{{ m.id }}/tags" hx-target="#roster" hx-swap="outerHTML">

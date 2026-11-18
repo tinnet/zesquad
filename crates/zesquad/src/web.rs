@@ -15,7 +15,8 @@ use sqlx::SqlitePool;
 use tokio::sync::Notify;
 use zesquad_core::armory::{Item, Pet, Profession, Profile};
 use zesquad_core::refresh::Status;
-use zesquad_core::{CharacterName, SquadName, parse_tags};
+use zesquad_core::tags::{self, CharacterTag, Colour};
+use zesquad_core::{CharacterName, SquadName, Tag, parse_tags};
 
 use crate::db;
 use crate::version;
@@ -44,6 +45,7 @@ pub fn router(state: AppState) -> Router {
             "/s/{squad}/characters/{id}/tags/{tag}/delete",
             post(remove_tag),
         )
+        .route("/s/{squad}/tags/{tag}/colour", post(set_colour))
         .route("/s/{squad}/characters/{id}/delete", post(remove_character))
         .route("/s/{squad}/characters/{id}/refresh", post(refresh))
         .route("/healthz", get(healthz))
@@ -120,7 +122,8 @@ pub struct MemberView {
     pub id: i64,
     pub name: String,
     pub surname: String,
-    pub tags: Vec<(String, String)>,
+    /// From the Armory first, then the typed ones.
+    pub tags: Vec<Chip>,
     pub status: &'static str,
     pub profile: Arc<Profile>,
     /// The Armory answered at some point; still shown while a refresh is pending or failed.
@@ -132,8 +135,15 @@ pub struct MemberView {
 }
 
 impl MemberView {
-    fn new(m: db::Member, now: i64) -> Self {
+    fn new(m: db::Member, now: i64, colours: &Colours) -> Self {
         let profile = m.armory.profile;
+        let tags = tags::merge(tags::auto_tags(&profile), m.tags)
+            .into_iter()
+            .map(|tag| Chip {
+                paint: colours.of(&tag.key),
+                tag,
+            })
+            .collect();
         Self {
             has_profile: m.armory.answered,
             id: m.id,
@@ -143,7 +153,7 @@ impl MemberView {
             name: profile.name.clone().unwrap_or(m.name),
             surname: profile.surname.clone().unwrap_or(m.surname),
             profile,
-            tags: m.tags,
+            tags,
             status: m.status.as_str(),
             error: m.error,
         }
@@ -193,6 +203,65 @@ impl MemberView {
     }
 }
 
+/// A tag's colour, if it has one, and how a chip shows it.
+pub struct Paint(Option<Colour>);
+
+impl Paint {
+    #[must_use]
+    pub fn is_set(&self) -> bool {
+        self.0.is_some()
+    }
+
+    /// Extra classes for the chip.
+    #[must_use]
+    pub fn class(&self) -> &'static str {
+        if self.is_set() { " coloured" } else { "" }
+    }
+
+    /// CSS variables for the chip; empty without a colour.
+    #[must_use]
+    pub fn style(&self) -> String {
+        self.0.as_ref().map_or_else(String::new, |c| {
+            format!("--tag: {c}; --tag-text: {}", c.text())
+        })
+    }
+
+    /// The colour input's value: grey for a tag without a colour.
+    #[must_use]
+    pub fn picker_value(&self) -> &str {
+        self.0.as_ref().map_or("#888888", Colour::as_str)
+    }
+}
+
+/// A tag as shown on a character, coloured.
+pub struct Chip {
+    pub tag: CharacterTag,
+    pub paint: Paint,
+}
+
+/// A tag used in the squad, for the filter and the colour picker.
+pub struct SquadTag {
+    pub label: String,
+    pub key: String,
+    pub paint: Paint,
+    /// Someone picked the colour (it isn't the default).
+    pub picked: bool,
+}
+
+/// The squad's picked tag colours, falling back to the defaults.
+struct Colours(std::collections::HashMap<String, Colour>);
+
+impl Colours {
+    fn of(&self, key: &str) -> Paint {
+        Paint(
+            self.0
+                .get(key)
+                .cloned()
+                .or_else(|| tags::default_colour(key)),
+        )
+    }
+}
+
 /// "3 hours ago": precise enough for "when was this character last played".
 fn ago(secs: i64) -> String {
     let (n, unit) = match secs {
@@ -208,13 +277,15 @@ fn ago(secs: i64) -> String {
 pub struct Roster {
     pub squad_id: String,
     pub members: Vec<MemberView>,
-    pub tags: Vec<(String, String)>,
+    pub tags: Vec<SquadTag>,
     /// Key of the tag being filtered on.
     pub filter: Option<String>,
     pub armory_enabled: bool,
     pub error: Option<String>,
     pub character_input: String,
     pub tags_input: String,
+    /// Keep the tag colours open after picking one.
+    pub colours_open: bool,
 }
 
 impl Roster {
@@ -414,20 +485,41 @@ async fn load_squad(state: &AppState, id: &str) -> Result<db::Squad> {
 async fn build_roster(state: &AppState, squad_id: &str, filter: Option<String>) -> Result<Roster> {
     let filter = tag_filter(filter);
     let now = db::now();
-    let members = db::members(&state.db, &state.armory_cache, squad_id, filter.as_deref())
+    let colours = Colours(db::tag_colours(&state.db, squad_id).await?);
+    let mut members: Vec<MemberView> = db::members(&state.db, &state.armory_cache, squad_id)
         .await?
         .into_iter()
-        .map(|m| MemberView::new(m, now))
+        .map(|m| MemberView::new(m, now, &colours))
         .collect();
+    // Every tag in the squad, alphabetically, spelled the way it first appears.
+    let mut labels = std::collections::BTreeMap::new();
+    for chip in members.iter().flat_map(|m| &m.tags) {
+        labels
+            .entry(chip.tag.key.clone())
+            .or_insert_with(|| chip.tag.label.clone());
+    }
+    let tags = labels
+        .into_iter()
+        .map(|(key, label)| SquadTag {
+            paint: colours.of(&key),
+            picked: colours.0.contains_key(&key),
+            label,
+            key,
+        })
+        .collect();
+    if let Some(key) = &filter {
+        members.retain(|m| m.tags.iter().any(|c| &c.tag.key == key));
+    }
     Ok(Roster {
         squad_id: squad_id.to_owned(),
         members,
-        tags: db::squad_tags(&state.db, squad_id).await?,
+        tags,
         filter,
         armory_enabled: state.armory_enabled,
         error: None,
         character_input: String::new(),
         tags_input: String::new(),
+        colours_open: false,
     })
 }
 
@@ -476,6 +568,7 @@ struct Outcome {
     error: Option<String>,
     character_input: String,
     tags_input: String,
+    colours_open: bool,
 }
 
 impl Outcome {
@@ -484,6 +577,7 @@ impl Outcome {
             error: None,
             character_input: String::new(),
             tags_input: String::new(),
+            colours_open: false,
         }
     }
 }
@@ -506,6 +600,7 @@ async fn respond(
     roster.error = outcome.error;
     roster.character_input = outcome.character_input;
     roster.tags_input = outcome.tags_input;
+    roster.colours_open = outcome.colours_open;
     if htmx {
         return Ok(RosterPartial { roster }.into_response());
     }
@@ -554,6 +649,7 @@ async fn add_character(
                     error: Some(format!("{character} is already in this squad")),
                     character_input: form.character,
                     tags_input: form.tags,
+                    colours_open: false,
                 }
             }
         }
@@ -561,6 +657,7 @@ async fn add_character(
             error: Some(error),
             character_input: form.character,
             tags_input: form.tags,
+            colours_open: false,
         },
     };
     respond(&state, &headers, squad, form.filter, outcome).await
@@ -609,6 +706,57 @@ async fn remove_tag(
     let squad = load_squad(&state, &id).await?;
     db::remove_tag(&state.db, &squad.id, character, &tag).await?;
     respond(&state, &headers, squad, form.filter, Outcome::ok()).await
+}
+
+#[derive(Deserialize)]
+struct ColourForm {
+    #[serde(default)]
+    colour: String,
+    /// Set by the reset button: back to the default colour.
+    #[serde(default)]
+    reset: Option<String>,
+    #[serde(default)]
+    filter: Option<String>,
+}
+
+async fn set_colour(
+    State(state): State<AppState>,
+    Path((id, tag)): Path<(String, String)>,
+    headers: HeaderMap,
+    Form(form): Form<ColourForm>,
+) -> Result<Response> {
+    let squad = load_squad(&state, &id).await?;
+    let colour = if form.reset.is_some() {
+        Ok(None)
+    } else {
+        Colour::parse(&form.colour).map(Some)
+    };
+    let outcome = match (Tag::new(&tag), colour) {
+        (Ok(None), _) => return Err(AppError::NotFound),
+        (Ok(Some(tag)), Ok(colour)) => {
+            db::set_tag_colour(&state.db, &squad.id, &tag, colour.as_ref()).await?;
+            Outcome::ok()
+        }
+        (Err(e), _) => Outcome {
+            error: Some(e.to_string()),
+            ..Outcome::ok()
+        },
+        (_, Err(e)) => Outcome {
+            error: Some(e.to_string()),
+            ..Outcome::ok()
+        },
+    };
+    respond(
+        &state,
+        &headers,
+        squad,
+        form.filter,
+        Outcome {
+            colours_open: true,
+            ..outcome
+        },
+    )
+    .await
 }
 
 async fn remove_character(

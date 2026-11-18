@@ -11,6 +11,7 @@ use serde_json::Value;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqlitePoolOptions};
 use zesquad_core::armory::{Documents, Endpoint, Profile};
 use zesquad_core::refresh::{Status, is_due};
+use zesquad_core::tags::Colour;
 use zesquad_core::{CharacterName, SquadName, Tag};
 
 /// Opens (creating if needed) the database and applies the migrations.
@@ -289,7 +290,8 @@ struct MemberRow {
     error: Option<String>,
 }
 
-/// The squad's members in the order they were added, optionally only those with a tag.
+/// The squad's members in the order they were added. Filtering by tag happens after, since
+/// some tags come from the Armory data.
 ///
 /// # Errors
 ///
@@ -298,17 +300,13 @@ pub async fn members(
     db: &SqlitePool,
     cache: &ArmoryCache,
     squad_id: &str,
-    tag_key: Option<&str>,
 ) -> anyhow::Result<Vec<Member>> {
     let rows: Vec<MemberRow> = sqlx::query_as(
         "SELECT c.id, c.name, c.surname, c.region, c.char_key, a.status, a.fetched_at, a.error
          FROM characters c LEFT JOIN armory a USING (region, char_key)
-         WHERE c.squad_id = ?1 AND (?2 IS NULL OR EXISTS
-           (SELECT 1 FROM character_tags t WHERE t.character_id = c.id AND t.tag_key = ?2))
-         ORDER BY c.added_at, c.id",
+         WHERE c.squad_id = ? ORDER BY c.added_at, c.id",
     )
     .bind(squad_id)
-    .bind(tag_key)
     .fetch_all(db)
     .await?;
 
@@ -378,20 +376,56 @@ async fn load_armory(db: &SqlitePool, region: &str, key: &str) -> anyhow::Result
     })
 }
 
-/// Every tag used in the squad, `(label, key)`, alphabetically.
+/// The colours picked for the squad's tags, by tag key. Rows that don't parse (there are none
+/// unless someone edited the database) are left out.
 ///
 /// # Errors
 ///
 /// On database errors.
-pub async fn squad_tags(db: &SqlitePool, squad_id: &str) -> anyhow::Result<Vec<(String, String)>> {
-    Ok(sqlx::query_as(
-        "SELECT MIN(t.label), t.tag_key FROM character_tags t
-         JOIN characters c ON c.id = t.character_id WHERE c.squad_id = ?
-         GROUP BY t.tag_key ORDER BY t.tag_key",
-    )
-    .bind(squad_id)
-    .fetch_all(db)
-    .await?)
+pub async fn tag_colours(
+    db: &SqlitePool,
+    squad_id: &str,
+) -> anyhow::Result<HashMap<String, Colour>> {
+    let rows: Vec<(String, String)> =
+        sqlx::query_as("SELECT tag_key, colour FROM tag_colours WHERE squad_id = ?")
+            .bind(squad_id)
+            .fetch_all(db)
+            .await?;
+    Ok(rows
+        .into_iter()
+        .filter_map(|(key, colour)| Some((key, Colour::parse(&colour).ok()?)))
+        .collect())
+}
+
+/// Picks a tag's colour in a squad, or with `None` goes back to its default.
+///
+/// # Errors
+///
+/// On database errors.
+pub async fn set_tag_colour(
+    db: &SqlitePool,
+    squad_id: &str,
+    tag: &Tag,
+    colour: Option<&Colour>,
+) -> anyhow::Result<()> {
+    if let Some(colour) = colour {
+        sqlx::query(
+            "INSERT INTO tag_colours (squad_id, tag_key, colour) VALUES (?, ?, ?)
+             ON CONFLICT (squad_id, tag_key) DO UPDATE SET colour = excluded.colour",
+        )
+        .bind(squad_id)
+        .bind(tag.key())
+        .bind(colour.as_str())
+        .execute(db)
+        .await?;
+    } else {
+        sqlx::query("DELETE FROM tag_colours WHERE squad_id = ? AND tag_key = ?")
+            .bind(squad_id)
+            .bind(tag.key())
+            .execute(db)
+            .await?;
+    }
+    Ok(())
 }
 
 /// Characters (`region`, `char_key`) in at least one squad whose Armory data is due.

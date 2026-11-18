@@ -386,19 +386,22 @@ async fn polling_waits_while_someone_is_typing() {
         )
         .await;
     assert!(roster.contains("Looking up on the Armory"), "{roster}");
-    // The poll's filter skips a tick while a text input is focused or not empty. Every text
-    // input needs a placeholder for `:placeholder-shown` to tell.
+    // The poll's filter skips a tick while an input is focused (a colour picker too) or a text
+    // input is not empty. Every text input needs a placeholder for `:placeholder-shown` to
+    // tell. An open colours panel doesn't stop it, or picking a colour would stop the polling.
     assert!(
         roster.contains(
             "hx-trigger=\"every 3s [!this.querySelector('input:not([type=hidden]):focus, \
-             input:not([type=hidden]):not(:placeholder-shown)')]\""
+             input:not([type=hidden]):not([type=color]):not(:placeholder-shown)')]\""
         ),
         "{roster}"
     );
     for input in roster.split("<input").skip(1) {
         let input = input.split('>').next().unwrap();
         assert!(
-            input.contains("type=\"hidden\"") || input.contains("placeholder=\""),
+            input.contains("type=\"hidden\"")
+                || input.contains("type=\"color\"")
+                || input.contains("placeholder=\""),
             "text input without a placeholder: <input{input}>"
         );
     }
@@ -530,6 +533,153 @@ async fn tagging_and_untagging() {
         !roster.contains(">Healer<") && roster.contains(">raid<"),
         "{roster}"
     );
+}
+
+/// The members part of a page, below the tag filter and colours.
+fn members(page: &str) -> &str {
+    page.split_once("<ul class=\"members\">")
+        .map_or("", |(_, m)| m)
+}
+
+/// The chip for a tag on the first character that has it, from its opening tag to the end of
+/// its link.
+fn chip<'a>(page: &'a str, label: &str) -> Option<&'a str> {
+    let page = members(page);
+    let end = page.find(&format!(">{label}</a>"))?;
+    let start = page[..end].rfind("class=\"chip tag")?;
+    Some(&page[start..end])
+}
+
+#[tokio::test]
+async fn armory_data_tags_characters_automatically() {
+    let app = app(true).await;
+    let squad = app.squad("Raiders").await;
+    app.add(&squad, "Aldric-Thornwood", "raid, rogue").await;
+    app.add(&squad, "Bryn-Ashvale", "").await;
+    let page = app.wait_for(&squad, "Night Elf").await;
+
+    for label in [
+        "Rogue",
+        "Combat",
+        "Night Elf",
+        "Alliance",
+        "Skinning",
+        "Cooking",
+    ] {
+        let chip = chip(&page, label).unwrap_or_else(|| panic!("no {label} chip in {page}"));
+        assert!(chip.starts_with("class=\"chip tag auto"), "{chip}");
+    }
+    assert_eq!(
+        members(&page).matches(">Rogue</a>").count(),
+        1,
+        "typed and automatic shown once"
+    );
+    assert!(
+        !page.contains("/tags/rogue/delete"),
+        "automatic tags can't be removed"
+    );
+    assert!(page.contains("/tags/raid/delete"), "typed ones can");
+    assert!(
+        chip(&page, "Rogue")
+            .unwrap()
+            .contains("style=\"--tag: #fff569; --tag-text: #000000\""),
+        "class tags start in the class colour: {page}"
+    );
+    assert!(
+        page.contains(&format!("href=\"{squad}?tag=night%20elf\" class=\"chip\"")),
+        "automatic tags are in the filter: {page}"
+    );
+
+    let (_, filtered) = app.get(&format!("{squad}?tag=Skinning")).await;
+    assert!(
+        filtered.contains("Aldric") && !filtered.contains("Bryn"),
+        "{filtered}"
+    );
+}
+
+#[tokio::test]
+async fn picking_and_resetting_tag_colours() {
+    let app = app(false).await;
+    let squad = app.squad("Raiders").await;
+    let other = app.squad("Others").await;
+    app.add(&squad, "Aldric-Thornwood", "Raid, Mage").await;
+    app.add(&other, "Aldric-Thornwood", "raid").await;
+
+    // Without htmx: a plain post and a redirect back.
+    let r = app
+        .post(
+            &format!("{squad}/tags/raid/colour"),
+            &[("colour", "#3FC7EB"), ("filter", "raid")],
+        )
+        .await;
+    assert_eq!(r.status(), StatusCode::SEE_OTHER);
+    assert_eq!(r.headers()[header::LOCATION], format!("{squad}?tag=raid"));
+    let (_, page) = app.get(&squad).await;
+    let raid = chip(&page, "Raid").unwrap();
+    assert!(
+        raid.contains("coloured") && raid.contains("--tag: #3fc7eb; --tag-text: #000000"),
+        "{raid}"
+    );
+    assert!(
+        page.contains("type=\"color\" name=\"colour\" value=\"#3fc7eb\""),
+        "{page}"
+    );
+    assert!(
+        !app.get(&other).await.1.contains("#3fc7eb"),
+        "colours are per squad"
+    );
+
+    // A class tag starts in its class colour, can be changed and goes back on reset.
+    let mage = "--tag: #69ccf0";
+    assert!(chip(&page, "Mage").unwrap().contains(mage), "{page}");
+    let (_, roster) = app
+        .htmx(
+            &format!("{squad}/tags/mage/colour"),
+            &[("colour", "#000000")],
+        )
+        .await;
+    assert!(
+        chip(&roster, "Mage")
+            .unwrap()
+            .contains("--tag: #000000; --tag-text: #ffffff")
+    );
+    assert!(
+        roster.contains("<details class=\"colours\" open>"),
+        "stays open: {roster}"
+    );
+    let (_, roster) = app
+        .htmx(
+            &format!("{squad}/tags/mage/colour"),
+            &[("colour", "#000000"), ("reset", "1")],
+        )
+        .await;
+    assert!(chip(&roster, "Mage").unwrap().contains(mage), "{roster}");
+
+    // Resetting a tag that isn't a class leaves it uncoloured.
+    let (_, roster) = app
+        .htmx(&format!("{squad}/tags/raid/colour"), &[("reset", "1")])
+        .await;
+    assert!(
+        !chip(&roster, "Raid").unwrap().contains("coloured"),
+        "{roster}"
+    );
+
+    assert!(
+        roster.contains(">Add colour<"),
+        "uncoloured tags offer to add one: {roster}"
+    );
+
+    let (status, roster) = app
+        .htmx(&format!("{squad}/tags/raid/colour"), &[("colour", "red")])
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(roster.contains("pick a colour like #3fc7eb"), "{roster}");
+    for colour in ["red", "#000000"] {
+        let r = app
+            .post(&format!("{squad}/tags/%20/colour"), &[("colour", colour)])
+            .await;
+        assert_eq!(r.status(), StatusCode::NOT_FOUND, "blank tag with {colour}");
+    }
 }
 
 #[tokio::test]
