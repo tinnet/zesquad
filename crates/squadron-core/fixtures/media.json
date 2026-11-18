@@ -1,0 +1,8 @@
+{
+  "character": { "name": "Aldric", "id": 1000001, "surname": "Thornwood", "slug": "aldric-thornwood" },
+  "assets": [
+    { "key": "main-raw", "value": "https://render.example/forever-eu/character/1-main-raw.png" },
+    { "key": "avatar", "value": "https://render.example/forever-eu/character/1-avatar.jpg" },
+    { "key": "avatar-sd", "value": "https://render.example/forever-eu/character/1-avatar-sd.jpg" }
+  ]
+}

@@ -1,0 +1,20 @@
+{
+  "character": { "name": "Aldric", "id": 1000001, "surname": "Thornwood", "slug": "aldric-thornwood" },
+  "specialization_groups": [
+    {
+      "is_active": false,
+      "specializations": [{ "specialization_name": "Subtlety", "spent_points": 30 }]
+    },
+    {
+      "is_active": true,
+      "specializations": [
+        { "specialization": { "name": "Assassination", "id": 37 }, "spent_points": 5 },
+        {
+          "specialization_name": "Combat",
+          "spent_points": 17,
+          "talents": [{ "talent": { "name": "Precision", "id": 1 }, "talent_rank": 5 }]
+        }
+      ]
+    }
+  ]
+}

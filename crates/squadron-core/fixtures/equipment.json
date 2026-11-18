@@ -1,0 +1,20 @@
+{
+  "character": { "name": "Aldric", "id": 1000001, "surname": "Thornwood", "slug": "aldric-thornwood" },
+  "equipped_items": [
+    {
+      "item": { "id": 7997 },
+      "slot": { "type": "HEAD", "name": "Head" },
+      "quality": { "type": "POOR", "name": "Poor" },
+      "name": "Red Defias Mask",
+      "level": { "value": 15, "display_string": "Item Level 15" }
+    },
+    {
+      "item": { "id": 2 },
+      "slot": { "type": "CHEST", "name": "Chest" },
+      "quality": { "type": "UNCOMMON", "name": "Uncommon" },
+      "name": "Tanned Leather Jerkin",
+      "level": { "value": 18, "display_string": "Item Level 18" }
+    },
+    { "slot": { "type": "SHIRT", "name": "Shirt" } }
+  ]
+}

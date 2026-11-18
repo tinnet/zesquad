@@ -1,0 +1,15 @@
+{
+  "character": { "name": "Aldric", "id": 1000001, "surname": "Thornwood", "slug": "aldric-thornwood" },
+  "primaries": [
+    {
+      "profession": { "name": "Skinning", "id": 393 },
+      "tiers": [{ "skill_points": 158, "max_skill_points": 225, "tier": { "name": "Skinning", "id": 1 } }]
+    }
+  ],
+  "secondaries": [
+    {
+      "profession": { "name": "Cooking", "id": 185 },
+      "tiers": [{ "skill_points": 40, "max_skill_points": 75 }]
+    }
+  ]
+}

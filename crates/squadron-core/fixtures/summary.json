@@ -1,0 +1,24 @@
+{
+  "id": 1000001,
+  "name": "Aldric",
+  "surname": "Thornwood",
+  "name_search": "Aldric Thornwood",
+  "gender": { "type": "MALE", "name": "Male" },
+  "faction": { "type": "ALLIANCE", "name": "Alliance" },
+  "race": { "name": "Night Elf", "id": 4 },
+  "character_class": { "name": "Rogue", "id": 4 },
+  "level": 26,
+  "experience": 4991,
+  "achievement_points": 0,
+  "last_login_timestamp": 1794955893000,
+  "average_item_level": 13,
+  "equipped_item_level": 14,
+  "guild": {
+    "name": "Order of the Lantern",
+    "id": 1000002,
+    "slug": "order-of-the-lantern",
+    "faction": { "type": "ALLIANCE", "name": "Alliance" }
+  },
+  "ruleset": { "name": "Normal", "id": 2 },
+  "is_remix": false
+}
