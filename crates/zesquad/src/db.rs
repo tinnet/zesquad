@@ -1,14 +1,15 @@
 //! SQLite: opening the database and every query zesquad runs.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
 use std::str::FromStr as _;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::Context as _;
 use serde_json::Value;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqlitePoolOptions};
-use zesquad_core::armory::{Documents, Endpoint};
+use zesquad_core::armory::{Documents, Endpoint, Profile};
 use zesquad_core::refresh::{Status, is_due};
 use zesquad_core::{CharacterName, SquadName, Tag};
 
@@ -234,7 +235,46 @@ pub struct Member {
     pub status: Status,
     pub fetched_at: Option<i64>,
     pub error: Option<String>,
-    pub documents: Documents,
+    pub armory: Armory,
+}
+
+/// What the stored Armory documents of a character add up to. Cheap to clone.
+#[derive(Debug, Default, Clone)]
+pub struct Armory {
+    pub profile: Arc<Profile>,
+    /// The Armory has answered for this character (kept through a failed refresh).
+    pub answered: bool,
+}
+
+/// Parsed Armory documents by character, with the `fetched_at` and status they were parsed
+/// for, so a roster render (every 3s while polling) only reads and parses documents stored
+/// since the last one. One entry per character ever shown; a character is a few KB parsed.
+#[derive(Default)]
+pub struct ArmoryCache(Mutex<HashMap<(String, String), (Version, Armory)>>);
+
+/// `fetched_at` is in seconds; the status tells apart two fetches in the same second that
+/// stored different results (found, then not found).
+type Version = (i64, Option<String>);
+
+impl ArmoryCache {
+    fn get(&self, key: &(String, String), version: &Version) -> Option<Armory> {
+        let cache = self
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        cache
+            .get(key)
+            .filter(|(v, _)| v == version)
+            .map(|(_, armory)| armory.clone())
+    }
+
+    fn put(&self, key: (String, String), version: Version, armory: Armory) {
+        let mut cache = self
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        cache.insert(key, (version, armory));
+    }
 }
 
 #[derive(sqlx::FromRow)]
@@ -242,6 +282,8 @@ struct MemberRow {
     id: i64,
     name: String,
     surname: String,
+    region: String,
+    char_key: String,
     status: Option<String>,
     fetched_at: Option<i64>,
     error: Option<String>,
@@ -254,11 +296,12 @@ struct MemberRow {
 /// On database errors.
 pub async fn members(
     db: &SqlitePool,
+    cache: &ArmoryCache,
     squad_id: &str,
     tag_key: Option<&str>,
 ) -> anyhow::Result<Vec<Member>> {
     let rows: Vec<MemberRow> = sqlx::query_as(
-        "SELECT c.id, c.name, c.surname, a.status, a.fetched_at, a.error
+        "SELECT c.id, c.name, c.surname, c.region, c.char_key, a.status, a.fetched_at, a.error
          FROM characters c LEFT JOIN armory a USING (region, char_key)
          WHERE c.squad_id = ?1 AND (?2 IS NULL OR EXISTS
            (SELECT 1 FROM character_tags t WHERE t.character_id = c.id AND t.tag_key = ?2))
@@ -281,35 +324,58 @@ pub async fn members(
         tags_by_member.entry(id).or_default().push((label, key));
     }
 
-    let docs: Vec<(i64, String, String)> = sqlx::query_as(
-        "SELECT c.id, d.endpoint, d.body FROM armory_documents d
-         JOIN characters c USING (region, char_key) WHERE c.squad_id = ?",
-    )
-    .bind(squad_id)
-    .fetch_all(db)
-    .await?;
-    let mut docs_by_member: BTreeMap<i64, Documents> = BTreeMap::new();
-    for (id, endpoint, body) in docs {
-        if let (Some(endpoint), Ok(body)) =
-            (Endpoint::parse(&endpoint), serde_json::from_str(&body))
-        {
-            docs_by_member.entry(id).or_default().set(endpoint, body);
-        }
-    }
-
-    Ok(rows
-        .into_iter()
-        .map(|r| Member {
+    let mut members = Vec::with_capacity(rows.len());
+    for r in rows {
+        let armory = match r.fetched_at {
+            // Never fetched, so nothing stored.
+            None => Armory::default(),
+            Some(at) => {
+                let key = (r.region, r.char_key);
+                let version = (at, r.status.clone());
+                if let Some(armory) = cache.get(&key, &version) {
+                    armory
+                } else {
+                    let armory = load_armory(db, &key.0, &key.1).await?;
+                    cache.put(key, version, armory.clone());
+                    armory
+                }
+            }
+        };
+        members.push(Member {
             tags: tags_by_member.remove(&r.id).unwrap_or_default(),
-            documents: docs_by_member.remove(&r.id).unwrap_or_default(),
+            armory,
             status: Status::parse(r.status.as_deref().unwrap_or_default()),
             id: r.id,
             name: r.name,
             surname: r.surname,
             fetched_at: r.fetched_at,
             error: r.error,
-        })
-        .collect())
+        });
+    }
+    Ok(members)
+}
+
+/// Reads and parses one character's stored Armory documents.
+async fn load_armory(db: &SqlitePool, region: &str, key: &str) -> anyhow::Result<Armory> {
+    let rows: Vec<(String, String)> = sqlx::query_as(
+        "SELECT endpoint, body FROM armory_documents WHERE region = ? AND char_key = ?",
+    )
+    .bind(region)
+    .bind(key)
+    .fetch_all(db)
+    .await?;
+    let mut docs = Documents::default();
+    for (endpoint, body) in rows {
+        if let (Some(endpoint), Ok(body)) =
+            (Endpoint::parse(&endpoint), serde_json::from_str(&body))
+        {
+            docs.set(endpoint, body);
+        }
+    }
+    Ok(Armory {
+        profile: Arc::new(Profile::from_documents(&docs)),
+        answered: docs.summary.is_some(),
+    })
 }
 
 /// Every tag used in the squad, `(label, key)`, alphabetically.

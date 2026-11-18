@@ -26,6 +26,7 @@ pub struct AppState {
     pub wake: Arc<Notify>,
     pub region: String,
     pub armory_enabled: bool,
+    pub armory_cache: Arc<db::ArmoryCache>,
     /// Set when a password protects the app.
     pub auth: Option<Arc<crate::auth::Auth>>,
 }
@@ -121,7 +122,7 @@ pub struct MemberView {
     pub surname: String,
     pub tags: Vec<(String, String)>,
     pub status: &'static str,
-    pub profile: Profile,
+    pub profile: Arc<Profile>,
     /// The Armory answered at some point; still shown while a refresh is pending or failed.
     pub has_profile: bool,
     pub class_key: String,
@@ -132,9 +133,9 @@ pub struct MemberView {
 
 impl MemberView {
     fn new(m: db::Member, now: i64) -> Self {
-        let profile = Profile::from_documents(&m.documents);
+        let profile = m.armory.profile;
         Self {
-            has_profile: m.documents.summary.is_some(),
+            has_profile: m.armory.answered,
             id: m.id,
             class_key: profile.class_key(),
             last_login: profile.last_login_ms.map(|ms| ago(now - ms / 1000)),
@@ -413,7 +414,7 @@ async fn load_squad(state: &AppState, id: &str) -> Result<db::Squad> {
 async fn build_roster(state: &AppState, squad_id: &str, filter: Option<String>) -> Result<Roster> {
     let filter = tag_filter(filter);
     let now = db::now();
-    let members = db::members(&state.db, squad_id, filter.as_deref())
+    let members = db::members(&state.db, &state.armory_cache, squad_id, filter.as_deref())
         .await?
         .into_iter()
         .map(|m| MemberView::new(m, now))

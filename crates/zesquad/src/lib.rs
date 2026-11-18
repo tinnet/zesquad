@@ -78,6 +78,7 @@ pub async fn start(
         wake,
         region: settings.region,
         armory_enabled: syncer.is_some(),
+        armory_cache: Arc::default(),
         auth,
     };
     let app = web::router(state).layer((
