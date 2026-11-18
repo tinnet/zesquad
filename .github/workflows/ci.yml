@@ -54,7 +54,8 @@ jobs:
       - name: Smoke test
         run: |
           bin=target/${{ matrix.target }}/release/zesquad
-          ldd "$bin" 2>&1 | grep -q "not a dynamic executable" # static
+          # Static: x86_64 musl builds are static-pie ("statically linked"), aarch64 ones aren't.
+          ldd "$bin" 2>&1 | grep -q -E "not a dynamic executable|statically linked"
           "$bin" serve --listen 127.0.0.1:8080 --database "$RUNNER_TEMP/smoke.db" &
           for _ in $(seq 20); do "$bin" healthcheck && exit 0; sleep 0.5; done
           exit 1
