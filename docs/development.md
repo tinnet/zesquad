@@ -44,8 +44,7 @@ lefthook (installed by `just setup`):
 ## CI
 
 `.github/workflows/ci.yml` on pushes to `main` and on PRs: `just ci`; the static musl binary for
-x86_64 and aarch64, smoke-tested by `.github/scripts/smoke-test.sh` (no ELF interpreter, then
-`serve` on a free port must answer `healthcheck`); and `gh actions-lock --verify`. Every action is
+x86_64 and aarch64, checked by `.github/scripts/smoke-test.sh` (static, and serves); and `gh actions-lock --verify`. Every action is
 pinned in `.github/workflows/actions.lock`: after changing a `uses:`, run `gh actions-lock` and
 commit the lockfile with it. Dependabot proposes action and crate updates weekly.
 
@@ -56,8 +55,8 @@ CalVer tags, `vYYYY.MM.DD` (`.N` for a second release that day). `just release` 
 signed tag. `.github/workflows/release.yml` then:
 
 1. builds `x86_64-unknown-linux-musl` and `aarch64-unknown-linux-musl` on native runners and
-   runs `.github/scripts/smoke-test.sh` on them, the same check as CI, which also requires
-   `zesquad --version` to print the tag's version (shadow-rs reads it from git);
+   runs CI's smoke test on them, plus a check that `zesquad --version` prints the tag's version
+   (shadow-rs reads it from git);
 2. publishes `zesquad-linux-<arch>.tar.gz`, `SHA256SUMS` and build provenance as a GitHub
    release with the git-cliff notes;
 3. pushes `ghcr.io/tinnet/zesquad:<version>` and `:latest` for amd64 and arm64. The

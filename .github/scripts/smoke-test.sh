@@ -10,9 +10,7 @@ set -euo pipefail
 bin=$1
 version=${2:-}
 
-# Static or static-pie: no program interpreter, so it starts on distroless/static, which has no
-# dynamic loader. Read the ELF headers rather than ldd's wording, which varies by glibc version
-# and says "not a dynamic executable" for a musl-linked binary too.
+# Static or static-pie: no PT_INTERP, so it runs on distroless/static (no dynamic loader).
 headers=$(readelf --program-headers --wide "$bin")
 if grep -q INTERP <<<"$headers"; then
   echo "$bin is dynamically linked:" >&2
@@ -26,17 +24,19 @@ if [ -n "$version" ]; then
   [ "$out" = "zesquad $version" ]
 fi
 
-# A free port, so the health check can't reach some other server on a fixed one.
-port=$(python3 -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')
-"$bin" serve --listen "127.0.0.1:$port" --database "${RUNNER_TEMP:-/tmp}/smoke-$port.db" &
+# Port 0, then the address serve logs it bound: the health check reaches this server, no other.
+dir=$(mktemp -d)
+"$bin" serve --listen 127.0.0.1:0 --database "$dir/smoke.db" --log-json >"$dir/log" 2>&1 &
 pid=$!
-trap 'kill "$pid" 2>/dev/null || true' EXIT
+trap 'kill "$pid" 2>/dev/null || true; rm -rf "$dir"' EXIT
 
-for _ in $(seq 20); do
-  # Ours must still be running, not just something answering on the port.
-  kill -0 "$pid" 2>/dev/null || { echo "zesquad serve exited" >&2; exit 1; }
-  "$bin" healthcheck --listen "127.0.0.1:$port" && exit 0
-  sleep 0.5
+tries=100
+for _ in $(seq "$tries"); do
+  kill -0 "$pid" 2>/dev/null || { echo "zesquad serve exited:" >&2; cat "$dir/log" >&2; exit 1; }
+  addr=$(grep -o 'listening on http://[^"]*' "$dir/log" | cut -d/ -f3 || true)
+  [ -n "$addr" ] && "$bin" healthcheck --listen "$addr" && exit 0
+  sleep 0.1
 done
-echo "zesquad serve not healthy after 10s" >&2
+echo "zesquad serve not healthy after $tries tries:" >&2
+cat "$dir/log" >&2
 exit 1
