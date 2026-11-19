@@ -29,7 +29,8 @@ pub struct Settings {
     pub listen: SocketAddr,
     pub database: PathBuf,
     pub refresh: Duration,
-    pub region: String,
+    /// The region new squads start in.
+    pub default_region: zesquad_core::Region,
     pub armory: Option<armory::Config>,
     /// The shared password; `None` leaves the app open.
     pub password: Option<String>,
@@ -53,7 +54,7 @@ pub async fn start(
     settings: Settings,
     shutdown: impl Future<Output = ()> + Send + 'static,
 ) -> anyhow::Result<Running> {
-    let db = db::open(&settings.database).await?;
+    let db = db::open(&settings.database, settings.default_region).await?;
     let wake = Arc::new(Notify::new());
 
     let syncer = if let Some(config) = settings.armory {
@@ -76,7 +77,7 @@ pub async fn start(
     let state = web::AppState {
         db,
         wake,
-        region: settings.region,
+        default_region: settings.default_region,
         armory_enabled: syncer.is_some(),
         armory_cache: Arc::default(),
         auth,

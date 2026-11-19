@@ -5,6 +5,7 @@ use std::time::Duration;
 
 use sqlx::SqlitePool;
 use tokio::sync::Notify;
+use zesquad_core::Region;
 use zesquad_core::armory::{Endpoint, Profile};
 
 use crate::armory::{Client, Lookup};
@@ -44,11 +45,11 @@ impl Syncer {
         let interval = i64::try_from(self.interval.as_secs()).unwrap_or(i64::MAX);
         let due = db::due(&self.db, db::now(), interval).await?;
         for (region, key) in &due {
-            let fetched = self.fetch(key).await;
+            let fetched = self.fetch(*region, key).await;
             if let Fetched::Failed(e) = &fetched {
-                tracing::warn!(character = %key, "armory fetch failed: {e}");
+                tracing::warn!(character = %key, %region, "armory fetch failed: {e}");
             }
-            db::store(&self.db, region, key, fetched).await?;
+            db::store(&self.db, region.as_str(), key, fetched).await?;
             tokio::time::sleep(PAUSE).await;
         }
         Ok(())
@@ -56,8 +57,8 @@ impl Syncer {
 
     /// The summary decides whether the character exists; the other endpoints are extras, so a
     /// 404 on one of them is skipped rather than failing the character.
-    async fn fetch(&self, key: &str) -> Fetched {
-        let summary = match self.client.character(key, Endpoint::Summary).await {
+    async fn fetch(&self, region: Region, key: &str) -> Fetched {
+        let summary = match self.client.character(region, key, Endpoint::Summary).await {
             Ok(Lookup::Found(doc)) => doc,
             Ok(Lookup::NotFound) => return Fetched::NotFound,
             Err(e) => return Fetched::Failed(format!("{e:#}")),
@@ -67,7 +68,7 @@ impl Syncer {
             if endpoint == Endpoint::Summary || !Profile::wants(&summary, endpoint) {
                 continue;
             }
-            match self.client.character(key, endpoint).await {
+            match self.client.character(region, key, endpoint).await {
                 Ok(Lookup::Found(doc)) => docs.push((endpoint, doc)),
                 Ok(Lookup::NotFound) => {}
                 Err(e) => return Fetched::Failed(format!("{e:#}")),

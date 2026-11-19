@@ -3,8 +3,8 @@
 //! Real character names stay out of the repo, so the character comes from the environment.
 
 use zesquad::armory::{Client, Config, Lookup};
-use zesquad_core::CharacterName;
 use zesquad_core::armory::{Documents, Endpoint, Profile};
+use zesquad_core::{CharacterName, Region};
 
 fn client() -> Client {
     let _ = dotenvy::dotenv();
@@ -14,7 +14,6 @@ fn client() -> Client {
     let config = Config::new(
         var("ZESQUAD_BNET_CLIENT_ID"),
         var("ZESQUAD_BNET_CLIENT_SECRET"),
-        "eu".into(),
         None,
         zesquad::armory::TOKEN_URL,
     )
@@ -33,7 +32,11 @@ async fn looks_up_a_real_forever_character() {
     let client = client();
     let mut docs = Documents::default();
     for endpoint in [Endpoint::Summary, Endpoint::Media, Endpoint::Equipment] {
-        match client.character(&name.key(), endpoint).await.unwrap() {
+        match client
+            .character(Region::Eu, &name.key(), endpoint)
+            .await
+            .unwrap()
+        {
             Lookup::Found(doc) => docs.set(endpoint, doc),
             Lookup::NotFound => panic!("{} not found on {}", endpoint.as_str(), name.key()),
         }
@@ -54,7 +57,7 @@ async fn looks_up_a_real_forever_character() {
 #[ignore = "calls the real Battle.net API"]
 async fn unknown_characters_are_not_found() {
     let lookup = client()
-        .character("nobody-xqzvjw", Endpoint::Summary)
+        .character(Region::Eu, "nobody-xqzvjw", Endpoint::Summary)
         .await
         .unwrap();
     assert!(matches!(lookup, Lookup::NotFound));

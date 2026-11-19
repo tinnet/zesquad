@@ -12,14 +12,15 @@ use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqlitePo
 use zesquad_core::armory::{Documents, Endpoint, Profile};
 use zesquad_core::refresh::{Status, is_due};
 use zesquad_core::tags::Colour;
-use zesquad_core::{CharacterName, SquadName, Tag};
+use zesquad_core::{CharacterName, Region, SquadName, Tag};
 
-/// Opens (creating if needed) the database and applies the migrations.
+/// Opens (creating if needed) the database and applies the migrations. Squads from before
+/// squads had regions, with no characters to tell, get `default_region`.
 ///
 /// # Errors
 ///
 /// When the file can't be opened or a migration fails.
-pub async fn open(path: &Path) -> anyhow::Result<SqlitePool> {
+pub async fn open(path: &Path, default_region: Region) -> anyhow::Result<SqlitePool> {
     if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
         std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
     }
@@ -37,6 +38,10 @@ pub async fn open(path: &Path) -> anyhow::Result<SqlitePool> {
         .run(&pool)
         .await
         .context("migrating the database")?;
+    sqlx::query("UPDATE squads SET region = ? WHERE region IS NULL")
+        .bind(default_region.as_str())
+        .execute(&pool)
+        .await?;
     Ok(pool)
 }
 
@@ -52,16 +57,23 @@ pub fn now() -> i64 {
 pub struct Squad {
     pub id: String,
     pub name: String,
+    #[sqlx(try_from = "String")]
+    pub region: Region,
 }
 
 /// # Errors
 ///
 /// On database errors.
-pub async fn create_squad(db: &SqlitePool, name: &SquadName) -> anyhow::Result<String> {
+pub async fn create_squad(
+    db: &SqlitePool,
+    name: &SquadName,
+    region: Region,
+) -> anyhow::Result<String> {
     let id = zesquad_core::squad_id::encode(uuid::Uuid::new_v4().as_u128());
-    sqlx::query("INSERT INTO squads (id, name, created_at) VALUES (?, ?, ?)")
+    sqlx::query("INSERT INTO squads (id, name, region, created_at) VALUES (?, ?, ?, ?)")
         .bind(&id)
         .bind(name.as_str())
+        .bind(region.as_str())
         .bind(now())
         .execute(db)
         .await?;
@@ -72,10 +84,12 @@ pub async fn create_squad(db: &SqlitePool, name: &SquadName) -> anyhow::Result<S
 ///
 /// On database errors.
 pub async fn squad(db: &SqlitePool, id: &str) -> anyhow::Result<Option<Squad>> {
-    Ok(sqlx::query_as("SELECT id, name FROM squads WHERE id = ?")
-        .bind(id)
-        .fetch_optional(db)
-        .await?)
+    Ok(
+        sqlx::query_as("SELECT id, name, region FROM squads WHERE id = ?")
+            .bind(id)
+            .fetch_optional(db)
+            .await?,
+    )
 }
 
 /// # Errors
@@ -98,7 +112,7 @@ pub async fn rename_squad(db: &SqlitePool, id: &str, name: &SquadName) -> anyhow
 pub async fn add_character(
     db: &SqlitePool,
     squad_id: &str,
-    region: &str,
+    region: Region,
     character: &CharacterName,
     tags: &[Tag],
 ) -> anyhow::Result<bool> {
@@ -108,7 +122,7 @@ pub async fn add_character(
          VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING",
     )
     .bind(squad_id)
-    .bind(region)
+    .bind(region.as_str())
     .bind(character.name())
     .bind(character.surname())
     .bind(character.key())
@@ -123,7 +137,7 @@ pub async fn add_character(
         insert_tag(&mut tx, id, tag).await?;
     }
     sqlx::query("INSERT INTO armory (region, char_key) VALUES (?, ?) ON CONFLICT DO NOTHING")
-        .bind(region)
+        .bind(region.as_str())
         .bind(character.key())
         .execute(&mut *tx)
         .await?;
@@ -425,7 +439,8 @@ pub async fn set_tag_colour(
     Ok(())
 }
 
-/// Characters (`region`, `char_key`) in at least one squad whose Armory data is due.
+/// Characters (`region`, `char_key`) in at least one squad whose Armory data is due. Rows with
+/// a region this version doesn't know are skipped.
 ///
 /// # Errors
 ///
@@ -434,7 +449,7 @@ pub async fn due(
     db: &SqlitePool,
     now: i64,
     interval_secs: i64,
-) -> anyhow::Result<Vec<(String, String)>> {
+) -> anyhow::Result<Vec<(Region, String)>> {
     let rows: Vec<(String, String, String, Option<i64>)> = sqlx::query_as(
         "SELECT a.region, a.char_key, a.status, a.fetched_at FROM armory a
          WHERE EXISTS (SELECT 1 FROM characters c WHERE (c.region, c.char_key) = (a.region, a.char_key))
@@ -447,7 +462,7 @@ pub async fn due(
         .filter(|(_, _, status, fetched_at)| {
             is_due(Status::parse(status), *fetched_at, now, interval_secs)
         })
-        .map(|(region, key, _, _)| (region, key))
+        .filter_map(|(region, key, _, _)| Some((Region::try_from(region).ok()?, key)))
         .collect())
 }
 

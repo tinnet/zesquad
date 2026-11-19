@@ -40,7 +40,7 @@ working directory is read too):
 |-------------------------------|---------------------|-------------------------------------------------|
 | `ZESQUAD_BNET_CLIENT_ID`     |                     | Battle.net API client id                        |
 | `ZESQUAD_BNET_CLIENT_SECRET` |                     | Battle.net API client secret                    |
-| `ZESQUAD_BNET_REGION`        | `eu`                | `eu`, `us` or `tw`                              |
+| `ZESQUAD_BNET_REGION`        | `eu`                | region new squads start in: `eu`, `us`, `tw`    |
 | `ZESQUAD_PASSWORD`           |                     | shared password for the whole site; empty: none |
 | `ZESQUAD_LISTEN`             | `127.0.0.1:8080`    | address to listen on (`0.0.0.0:8080` in Docker) |
 | `ZESQUAD_DATABASE`           | `data/zesquad.db`  | SQLite file, created if missing                 |

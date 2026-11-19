@@ -45,7 +45,7 @@ async fn serve(args: ServeArgs) -> anyhow::Result<()> {
         listen: args.listen,
         database: args.database.clone(),
         refresh: args.refresh(),
-        region: args.bnet.region.clone(),
+        default_region: args.bnet.region,
         armory: args.bnet.config()?,
         password: args.password.clone(),
     };
@@ -85,7 +85,9 @@ async fn api(path: &str, namespace: &str, bnet: &BnetArgs) -> anyhow::Result<()>
             "set ZESQUAD_BNET_CLIENT_ID and ZESQUAD_BNET_CLIENT_SECRET (or put them in .env)"
         );
     };
-    let (status, body) = armory::Client::new(config)?.raw(path, namespace).await?;
+    let (status, body) = armory::Client::new(config)?
+        .raw(bnet.region, path, namespace)
+        .await?;
     println!("{status}");
     match serde_json::from_str::<serde_json::Value>(&body) {
         Ok(json) => println!("{}", serde_json::to_string_pretty(&json)?),

@@ -7,6 +7,8 @@ use std::time::Duration;
 
 use clap::{Args, Parser, Subcommand};
 
+use zesquad_core::Region;
+
 use crate::armory;
 use crate::version;
 
@@ -80,9 +82,9 @@ pub struct BnetArgs {
     /// Battle.net API client secret.
     #[arg(long, env = "ZESQUAD_BNET_CLIENT_SECRET", hide_env_values = true)]
     pub client_secret: Option<String>,
-    /// Battle.net region of the characters.
-    #[arg(long, env = "ZESQUAD_BNET_REGION", default_value = "eu", value_parser = ["eu", "us", "tw"])]
-    pub region: String,
+    /// Region new squads start in (eu, us or tw); `api` calls this region's host.
+    #[arg(long, env = "ZESQUAD_BNET_REGION", default_value = "eu")]
+    pub region: Region,
     /// API base URL; only tests change it.
     #[arg(long, env = "ZESQUAD_BNET_API_URL", hide = true)]
     pub api_url: Option<String>,
@@ -112,7 +114,6 @@ impl BnetArgs {
         armory::Config::new(
             id.to_owned(),
             secret.to_owned(),
-            self.region.clone(),
             self.api_url.as_deref(),
             &self.token_url,
         )

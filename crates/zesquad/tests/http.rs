@@ -14,6 +14,7 @@ use axum::routing::{get, post};
 use reqwest::redirect::Policy;
 use tempfile::TempDir;
 use zesquad::Settings;
+use zesquad_core::Region;
 use zesquad_core::armory::Endpoint;
 
 const CLIENT_ID: &str = "test-id";
@@ -66,9 +67,13 @@ fn fake_character(
     if fake.down.load(Ordering::SeqCst) {
         return StatusCode::SERVICE_UNAVAILABLE.into_response();
     }
-    if q.get("namespace").map(String::as_str) != Some("profile-forever-eu") {
-        return StatusCode::FORBIDDEN.into_response();
-    }
+    // The fake answers for every region; the known character is in EU only.
+    let namespace = q.get("namespace").map_or("", String::as_str);
+    let in_eu = match namespace {
+        "profile-forever-eu" => true,
+        "profile-forever-us" | "profile-forever-tw" => false,
+        _ => return StatusCode::FORBIDDEN.into_response(),
+    };
     let not_found = (
         StatusCode::NOT_FOUND,
         r#"{"code":404,"type":"BLZWEBAPI00000404","detail":"Not Found"}"#,
@@ -84,7 +89,7 @@ fn fake_character(
     else {
         return not_found;
     };
-    if key != KNOWN {
+    if key != KNOWN || !in_eu {
         return not_found;
     }
     let path = format!(
@@ -143,7 +148,6 @@ async fn app_with(with_armory: bool, password: Option<&str>) -> App {
         zesquad::armory::Config::new(
             CLIENT_ID.into(),
             CLIENT_SECRET.into(),
-            "eu".into(),
             Some(&fake_url),
             &format!("{fake_url}/token"),
         )
@@ -153,7 +157,7 @@ async fn app_with(with_armory: bool, password: Option<&str>) -> App {
         listen: SocketAddr::from(([127, 0, 0, 1], 0)),
         database: dir.path().join("zesquad.db"),
         refresh: Duration::from_secs(3600),
-        region: "eu".into(),
+        default_region: Region::Eu,
         armory,
         password: password.map(str::to_owned),
     };
@@ -288,14 +292,16 @@ async fn creating_a_squad_leads_to_its_page() {
 async fn squads_with_an_old_uuid_link_still_open() {
     let app = app(false).await;
     let old = "3f2b9c1e-8a4d-4e7f-9b21-6c0d5a7e8f13";
-    let db = zesquad::db::open(&app.dir.path().join("zesquad.db"))
+    let db = zesquad::db::open(&app.dir.path().join("zesquad.db"), Region::Eu)
         .await
         .unwrap();
-    sqlx::query("INSERT INTO squads (id, name, created_at) VALUES (?, 'Old raiders', 0)")
-        .bind(old)
-        .execute(&db)
-        .await
-        .unwrap();
+    sqlx::query(
+        "INSERT INTO squads (id, name, region, created_at) VALUES (?, 'Old raiders', 'eu', 0)",
+    )
+    .bind(old)
+    .execute(&db)
+    .await
+    .unwrap();
     let (status, page) = app.get(&format!("/s/{old}")).await;
     assert_eq!(status, StatusCode::OK);
     assert!(page.contains("value=\"Old raiders\""), "{page}");
@@ -368,6 +374,87 @@ async fn characters_the_armory_doesnt_know_are_marked() {
     let squad = app.squad("Raiders").await;
     app.add(&squad, "Nobody-Atall", "").await;
     app.wait_for(&squad, "Not on the Armory").await;
+}
+
+#[tokio::test]
+async fn a_squad_looks_its_characters_up_in_its_region() {
+    let app = app(true).await;
+    let (status, index) = app.get("/").await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        index.contains(r#"<option value="eu" selected>Europe</option>"#),
+        "{index}"
+    );
+    assert!(
+        index.contains(r#"<option value="us">Americas</option>"#),
+        "{index}"
+    );
+
+    let r = app
+        .post("/squads", &[("name", "Raiders"), ("region", "us")])
+        .await;
+    assert_eq!(r.status(), StatusCode::SEE_OTHER);
+    let squad = r.headers()[header::LOCATION].to_str().unwrap().to_owned();
+    let (_, page) = app.get(&squad).await;
+    assert!(page.contains("Characters from Americas"), "{page}");
+    // The fake knows this character in EU only.
+    app.add(&squad, "Aldric-Thornwood", "").await;
+    app.wait_for(&squad, "Not on the Armory").await;
+
+    let eu = app.squad("Raiders").await;
+    app.add(&eu, "Aldric-Thornwood", "").await;
+    app.wait_for(&eu, "Level ").await;
+}
+
+#[tokio::test]
+async fn a_squad_needs_a_known_region() {
+    let app = app(false).await;
+    let r = app
+        .post("/squads", &[("name", "Raiders"), ("region", "kr")])
+        .await;
+    assert_eq!(r.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    let page = r.text().await.unwrap();
+    assert!(page.contains("unknown region"), "{page}");
+    assert!(page.contains(r#"value="Raiders""#), "{page}");
+}
+
+#[tokio::test]
+async fn squads_from_before_regions_get_their_characters_region_or_the_default() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("zesquad.db");
+    // A database as it was before migration 0004 gave squads a region.
+    let old = sqlx::sqlite::SqlitePoolOptions::new()
+        .connect_with(
+            sqlx::sqlite::SqliteConnectOptions::new()
+                .filename(&path)
+                .create_if_missing(true),
+        )
+        .await
+        .unwrap();
+    let mut before = sqlx::migrate!("./migrations");
+    before.migrations = before
+        .migrations
+        .iter()
+        .filter(|m| m.version < 4)
+        .cloned()
+        .collect::<Vec<_>>()
+        .into();
+    before.run(&old).await.unwrap();
+    sqlx::query(
+        "INSERT INTO squads (id, name, created_at) VALUES ('empty', 'Empty', 0), ('full', 'Full', 0);
+         INSERT INTO characters (squad_id, region, name, surname, char_key, added_at)
+         VALUES ('full', 'us', 'Bryn', 'Ashvale', 'bryn-ashvale', 0);",
+    )
+    .execute(&old)
+    .await
+    .unwrap();
+    old.close().await;
+
+    let db = zesquad::db::open(&path, Region::Tw).await.unwrap();
+    for (id, region) in [("empty", Region::Tw), ("full", Region::Us)] {
+        let squad = zesquad::db::squad(&db, id).await.unwrap().unwrap();
+        assert_eq!(squad.region, region, "{id}");
+    }
 }
 
 #[tokio::test]

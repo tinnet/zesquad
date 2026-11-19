@@ -203,9 +203,9 @@ launch. Now the path is routed: real characters return data, and unknown ones ge
 
 ## What zesquad does with this
 
-- Squad members are entered as `Name-Surname`, region EU.
+- Squad members are entered as `Name-Surname`, in their squad's region (EU, US or TW).
 - A background job fetches the summary, character-media, equipment, specializations,
-  professions and, for hunters, hunter-pets in `profile-forever-eu` with the app token (5-6
+  professions and, for hunters, hunter-pets in `profile-forever-{region}` with the app token (5-6
   requests per character, well within the limits), keeps each raw response, and shows level,
   race, class, faction, guild, item level, last login, avatar, talents, professions, gear and
   pets. A 404 on the summary shows "not on

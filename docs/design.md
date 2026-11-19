@@ -4,7 +4,7 @@
 
 - `zesquad-core`: no I/O. Character names (`Name-Surname`, normalised; the lower-case key is
   what the database and the API use), tags (case-insensitive, first spelling kept), squad
-  names, when a character is due for a refresh, reading Battle.net JSON into a `Profile`, and
+  names, regions, when a character is due for a refresh, reading Battle.net JSON into a `Profile`, and
   the tags and tag colours that come from it.
   Parsing is lenient because Forever's responses are undocumented.
 - `zesquad`: the binary. `cli` (clap, every option also an env var), `db` (sqlx + SQLite, all
@@ -22,6 +22,9 @@ erDiagram
     armory ||--o{ armory_documents : stores
 ```
 
+- A squad has a region (`eu`, `us`, `tw`), picked when it's made and fixed after; its characters
+  are looked up there, with that region's host, namespace and locale. Squads from before
+  regions took their characters' region, or `ZESQUAD_BNET_REGION` when empty.
 - A character belongs to one squad; the same character in two squads is two rows.
 - `armory` holds one row per `(region, char_key)`, shared by every squad with that character, so
   each character is fetched once. Rows for characters no squad has any more are kept but not

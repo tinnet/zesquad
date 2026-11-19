@@ -17,7 +17,7 @@ use tokio::sync::Notify;
 use zesquad_core::armory::Profile;
 use zesquad_core::refresh::Status;
 use zesquad_core::tags::{self, CharacterTag, Colour};
-use zesquad_core::{CharacterName, SquadName, Tag, parse_tags};
+use zesquad_core::{CharacterName, Region, SquadName, Tag, parse_tags};
 
 use crate::db;
 use crate::version;
@@ -26,7 +26,8 @@ use crate::version;
 pub struct AppState {
     pub db: SqlitePool,
     pub wake: Arc<Notify>,
-    pub region: String,
+    /// The region the new-squad form starts on.
+    pub default_region: Region,
     pub armory_enabled: bool,
     pub armory_cache: Arc<db::ArmoryCache>,
     /// Set when a password protects the app.
@@ -367,6 +368,8 @@ struct IndexPage {
     logout: bool,
     error: Option<String>,
     name_input: String,
+    /// The region picked in the form.
+    region: Region,
 }
 
 #[derive(Template, WebTemplate)]
@@ -453,6 +456,7 @@ async fn index(State(state): State<AppState>) -> IndexPage {
         logout: state.auth.is_some(),
         error: None,
         name_input: String::new(),
+        region: state.default_region,
     }
 }
 
@@ -461,24 +465,38 @@ struct NameForm {
     name: String,
 }
 
+#[derive(Deserialize)]
+struct NewSquadForm {
+    name: String,
+    /// Missing means the default region.
+    region: Option<String>,
+}
+
 async fn create_squad(
     State(state): State<AppState>,
-    Form(form): Form<NameForm>,
+    Form(form): Form<NewSquadForm>,
 ) -> Result<Response> {
-    match SquadName::new(&form.name) {
-        Ok(name) => {
-            let id = db::create_squad(&state.db, &name).await?;
+    let region = form
+        .region
+        .as_deref()
+        .map_or(Ok(state.default_region), str::parse);
+    let parsed = SquadName::new(&form.name)
+        .map_err(|e| e.to_string())
+        .and_then(|name| Ok((name, region.clone().map_err(|e| e.to_string())?)));
+    match parsed {
+        Ok((name, region)) => {
+            let id = db::create_squad(&state.db, &name, region).await?;
             Ok(Redirect::to(&squad_path(&id)).into_response())
         }
-        Err(e) => Ok((
-            StatusCode::UNPROCESSABLE_ENTITY,
-            IndexPage {
+        Err(error) => {
+            let page = IndexPage {
                 logout: state.auth.is_some(),
-                error: Some(e.to_string()),
+                error: Some(error),
                 name_input: form.name,
-            },
-        )
-            .into_response()),
+                region: region.unwrap_or(state.default_region),
+            };
+            Ok((StatusCode::UNPROCESSABLE_ENTITY, page).into_response())
+        }
     }
 }
 
@@ -638,7 +656,7 @@ async fn add_character(
         .and_then(|c| Ok((c, parse_tags(&form.tags).map_err(|e| e.to_string())?)));
     let error = match parsed {
         Ok((character, tags)) => {
-            if db::add_character(&state.db, &squad.id, &state.region, &character, &tags).await? {
+            if db::add_character(&state.db, &squad.id, squad.region, &character, &tags).await? {
                 state.wake.notify_one();
                 None
             } else {
