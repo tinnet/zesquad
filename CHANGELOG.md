@@ -2,6 +2,12 @@
 
 What changed in each zesquad release. Versions are dates (CalVer).
 
+## 2026.11.18.2
+
+### Features
+
+- **web**: Shorter squad links without dashes ([7802995](https://github.com/tinnet/zesquad/commit/780299595fc14efeff7a101a44787de9c5705cd3))
+
 ## 2026.11.18.1
 
 ### Fixes
