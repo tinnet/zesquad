@@ -69,9 +69,10 @@ While any character is still pending, the roster polls itself every 3 seconds.
 Static files are served under `/static/<version>/` with a one-year cache in release builds, so a
 new version is never stuck behind old CSS.
 
-A squad's UUID v4 is its secret; anything that changes a squad checks the character belongs to
-that squad. Optionally, `ZESQUAD_PASSWORD` puts one shared password in front of everything
-(`auth.rs`, an axum middleware). Logging in sets an HttpOnly, `SameSite=Lax` cookie holding
+A squad's id, a random UUID v4 written in Crockford base32 (`squad_id.rs` in core), is its
+secret; squads made before that have the dashed UUID form, which still works. Anything that
+changes a squad checks the character belongs to that squad. Optionally, `ZESQUAD_PASSWORD`
+puts one shared password in front of everything (`auth.rs`, an axum middleware). Logging in sets an HttpOnly, `SameSite=Lax` cookie holding
 `sha256(key, 0, password)`, where the key is random and kept in the `settings` table: sessions
 survive restarts, the cookie isn't the password, and changing the password logs everyone out.
 `/login`, `/logout`, `/healthz`, `/version` and static files stay open. htmx requests without a

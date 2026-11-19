@@ -1,4 +1,4 @@
-//! zesquad: friend squads for WoW: Forever. A squad is a link (a random UUID) with a name and
+//! zesquad: friend squads for WoW: Forever. A squad is a link (a random id) with a name and
 //! a list of characters, each with free-form tags; character details come from the Battle.net
 //! Armory in the background.
 

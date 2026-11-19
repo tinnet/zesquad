@@ -58,7 +58,7 @@ pub struct Squad {
 ///
 /// On database errors.
 pub async fn create_squad(db: &SqlitePool, name: &SquadName) -> anyhow::Result<String> {
-    let id = uuid::Uuid::new_v4().to_string();
+    let id = zesquad_core::squad_id::encode(uuid::Uuid::new_v4().as_u128());
     sqlx::query("INSERT INTO squads (id, name, created_at) VALUES (?, ?, ?)")
         .bind(&id)
         .bind(name.as_str())

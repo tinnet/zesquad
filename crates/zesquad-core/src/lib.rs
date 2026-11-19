@@ -5,6 +5,7 @@ pub mod armory;
 pub mod name;
 pub mod redirect;
 pub mod refresh;
+pub mod squad_id;
 pub mod tags;
 pub mod text;
 

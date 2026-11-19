@@ -130,7 +130,7 @@ struct App {
     base: String,
     http: reqwest::Client,
     fake: Fake,
-    _dir: TempDir,
+    dir: TempDir,
 }
 
 async fn app(with_armory: bool) -> App {
@@ -168,7 +168,7 @@ async fn app_with(with_armory: bool, password: Option<&str>) -> App {
             .build()
             .unwrap(),
         fake,
-        _dir: dir,
+        dir,
     }
 }
 
@@ -205,7 +205,7 @@ impl App {
         (r.status(), r.text().await.unwrap())
     }
 
-    /// Creates a squad and returns its path, `/s/<uuid>`.
+    /// Creates a squad and returns its path, `/s/<id>`.
     async fn squad(&self, name: &str) -> String {
         let r = self.post("/squads", &[("name", name)]).await;
         assert_eq!(r.status(), StatusCode::SEE_OTHER);
@@ -273,15 +273,33 @@ async fn creating_a_squad_leads_to_its_page() {
     let app = app(false).await;
     let squad = app.squad("  Thursday   raiders ").await;
     let id = squad.strip_prefix("/s/").unwrap();
-    assert!(uuid_like(id), "{id}");
+    assert_eq!(id.len(), 26, "{id}");
+    assert!(
+        id.bytes()
+            .all(|c| c.is_ascii_digit() || c.is_ascii_lowercase() && !b"ilou".contains(&c)),
+        "{id}"
+    );
     let (status, page) = app.get(&squad).await;
     assert_eq!(status, StatusCode::OK);
     assert!(page.contains("value=\"Thursday raiders\""), "{page}");
     assert!(page.contains("No characters yet"));
 }
 
-fn uuid_like(s: &str) -> bool {
-    s.len() == 36 && s.chars().all(|c| c.is_ascii_hexdigit() || c == '-')
+#[tokio::test]
+async fn squads_with_an_old_uuid_link_still_open() {
+    let app = app(false).await;
+    let old = "3f2b9c1e-8a4d-4e7f-9b21-6c0d5a7e8f13";
+    let db = zesquad::db::open(&app.dir.path().join("zesquad.db"))
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO squads (id, name, created_at) VALUES (?, 'Old raiders', 0)")
+        .bind(old)
+        .execute(&db)
+        .await
+        .unwrap();
+    let (status, page) = app.get(&format!("/s/{old}")).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(page.contains("value=\"Old raiders\""), "{page}");
 }
 
 #[tokio::test]
