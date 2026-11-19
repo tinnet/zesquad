@@ -46,7 +46,7 @@ pub fn auto_tags(profile: &Profile) -> Vec<Tag> {
 /// The talent tree with the most points, if there's a clear one: `None` with no points spent
 /// or when two trees tie for the most.
 #[must_use]
-pub fn main_spec(talents: &[(String, u64)]) -> Option<&str> {
+fn main_spec(talents: &[(String, u64)]) -> Option<&str> {
     let most = talents.iter().map(|(_, points)| *points).max()?;
     let mut top = talents.iter().filter(|(_, points)| *points == most);
     let (tree, _) = top.next()?;

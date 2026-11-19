@@ -235,7 +235,6 @@ pub struct Member {
     pub tags: Vec<(String, String)>,
     pub status: Status,
     pub fetched_at: Option<i64>,
-    pub error: Option<String>,
     pub armory: Armory,
 }
 
@@ -287,7 +286,6 @@ struct MemberRow {
     char_key: String,
     status: Option<String>,
     fetched_at: Option<i64>,
-    error: Option<String>,
 }
 
 /// The squad's members in the order they were added. Filtering by tag happens after, since
@@ -302,7 +300,7 @@ pub async fn members(
     squad_id: &str,
 ) -> anyhow::Result<Vec<Member>> {
     let rows: Vec<MemberRow> = sqlx::query_as(
-        "SELECT c.id, c.name, c.surname, c.region, c.char_key, a.status, a.fetched_at, a.error
+        "SELECT c.id, c.name, c.surname, c.region, c.char_key, a.status, a.fetched_at
          FROM characters c LEFT JOIN armory a USING (region, char_key)
          WHERE c.squad_id = ? ORDER BY c.added_at, c.id",
     )
@@ -347,7 +345,6 @@ pub async fn members(
             name: r.name,
             surname: r.surname,
             fetched_at: r.fetched_at,
-            error: r.error,
         });
     }
     Ok(members)

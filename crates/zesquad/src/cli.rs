@@ -91,7 +91,7 @@ pub struct BnetArgs {
         long,
         env = "ZESQUAD_BNET_TOKEN_URL",
         hide = true,
-        default_value = "https://oauth.battle.net/token"
+        default_value = crate::armory::TOKEN_URL
     )]
     pub token_url: String,
 }

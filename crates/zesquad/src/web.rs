@@ -5,15 +5,16 @@ use std::sync::Arc;
 
 use askama::Template;
 use askama_web::WebTemplate;
-use axum::extract::{Form, Path, Query, State};
-use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
+use axum::extract::{Form, FromRequestParts, Path, Query, RawPathParams, State};
+use axum::http::request::Parts;
+use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde::Deserialize;
 use sqlx::SqlitePool;
 use tokio::sync::Notify;
-use zesquad_core::armory::{Item, Pet, Profession, Profile};
+use zesquad_core::armory::Profile;
 use zesquad_core::refresh::Status;
 use zesquad_core::tags::{self, CharacterTag, Colour};
 use zesquad_core::{CharacterName, SquadName, Tag, parse_tags};
@@ -32,8 +33,20 @@ pub struct AppState {
     pub auth: Option<Arc<crate::auth::Auth>>,
 }
 
+/// The open routes (health check, version, static files, logging in and out) and, behind the
+/// password when one is set, everything else, including unknown paths.
 pub fn router(state: AppState) -> Router {
-    Router::new()
+    let open = Router::new()
+        .route("/healthz", get(healthz))
+        .route(
+            "/version",
+            get(|| async { Json(serde_json::json!({ "version": version::short() })) }),
+        )
+        .route("/static/{version}/{*path}", get(crate::assets::serve))
+        .route("/login", get(login_page).post(login))
+        // Logging out needs no session: it only clears the cookie.
+        .route("/logout", post(logout));
+    let protected = Router::new()
         .route("/", get(index))
         .route("/squads", post(create_squad))
         .route("/s/{squad}", get(squad_page))
@@ -48,20 +61,55 @@ pub fn router(state: AppState) -> Router {
         .route("/s/{squad}/tags/{tag}/colour", post(set_colour))
         .route("/s/{squad}/characters/{id}/delete", post(remove_character))
         .route("/s/{squad}/characters/{id}/refresh", post(refresh))
-        .route("/healthz", get(healthz))
-        .route(
-            "/version",
-            get(|| async { Json(serde_json::json!({ "version": version::short() })) }),
-        )
-        .route("/static/{version}/{*path}", get(crate::assets::serve))
-        .route("/login", get(login_page).post(login))
-        .route("/logout", post(logout))
         .fallback(|| async { AppError::NotFound })
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             crate::auth::require,
-        ))
-        .with_state(state)
+        ));
+    open.merge(protected).with_state(state)
+}
+
+/// A squad from the `{squad}` part of the path; unknown ids are a 404.
+impl FromRequestParts<AppState> for db::Squad {
+    type Rejection = AppError;
+
+    async fn from_request_parts(parts: &mut Parts, state: &AppState) -> Result<Self> {
+        let params = RawPathParams::from_request_parts(parts, state)
+            .await
+            .map_err(|_| AppError::NotFound)?;
+        let id = params
+            .iter()
+            .find_map(|(name, value)| (name == "squad").then_some(value))
+            .ok_or(AppError::NotFound)?;
+        db::squad(&state.db, id).await?.ok_or(AppError::NotFound)
+    }
+}
+
+/// Whether htmx sent the request (it swaps part of the page rather than loading a new one).
+pub struct Htmx(pub bool);
+
+impl Htmx {
+    #[must_use]
+    pub fn of(headers: &HeaderMap) -> bool {
+        headers.contains_key("hx-request")
+    }
+}
+
+impl<S: Send + Sync> FromRequestParts<S> for Htmx {
+    type Rejection = std::convert::Infallible;
+
+    fn from_request_parts(
+        parts: &mut Parts,
+        _: &S,
+    ) -> impl Future<Output = std::result::Result<Self, Self::Rejection>> + Send {
+        std::future::ready(Ok(Self(Self::of(&parts.headers))))
+    }
+}
+
+/// A squad's page; every form on it posts below this.
+#[must_use]
+pub fn squad_path(id: &str) -> String {
+    format!("/s/{id}")
 }
 
 // ---- errors ----
@@ -80,7 +128,6 @@ impl<E: Into<anyhow::Error>> From<E> for AppError {
 #[derive(Template, WebTemplate)]
 #[template(path = "error.html")]
 struct ErrorPage {
-    static_base: String,
     /// Show the log-out button (a password is set).
     logout: bool,
     title: &'static str,
@@ -105,7 +152,6 @@ impl IntoResponse for AppError {
             }
         };
         let page = ErrorPage {
-            static_base: crate::assets::base(),
             logout: false,
             title,
             message,
@@ -124,14 +170,13 @@ pub struct MemberView {
     pub surname: String,
     /// From the Armory first, then the typed ones.
     pub tags: Vec<Chip>,
-    pub status: &'static str,
+    pub status: Status,
     pub profile: Arc<Profile>,
     /// The Armory answered at some point; still shown while a refresh is pending or failed.
     pub has_profile: bool,
     pub class_key: String,
     pub last_login: Option<String>,
     pub checked: Option<String>,
-    pub error: Option<String>,
 }
 
 impl MemberView {
@@ -154,8 +199,7 @@ impl MemberView {
             surname: profile.surname.clone().unwrap_or(m.surname),
             profile,
             tags,
-            status: m.status.as_str(),
-            error: m.error,
+            status: m.status,
         }
     }
 
@@ -185,21 +229,6 @@ impl MemberView {
         !(self.profile.gear.is_empty()
             && self.profile.professions.is_empty()
             && self.profile.pets.is_empty())
-    }
-
-    #[must_use]
-    pub fn gear(&self) -> &[Item] {
-        &self.profile.gear
-    }
-
-    #[must_use]
-    pub fn professions(&self) -> &[Profession] {
-        &self.profile.professions
-    }
-
-    #[must_use]
-    pub fn pets(&self) -> &[Pet] {
-        &self.profile.pets
     }
 }
 
@@ -281,28 +310,20 @@ pub struct Roster {
     /// Key of the tag being filtered on.
     pub filter: Option<String>,
     pub armory_enabled: bool,
-    pub error: Option<String>,
-    pub character_input: String,
-    pub tags_input: String,
-    /// Keep the tag colours open after picking one.
-    pub colours_open: bool,
+    pub form: Outcome,
 }
 
 impl Roster {
     /// The squad's URL, which every form posts below.
     #[must_use]
     pub fn base(&self) -> String {
-        format!("/s/{}", self.squad_id)
+        squad_path(&self.squad_id)
     }
 
     /// While anything is waiting for its first fetch, the page polls for the result.
     #[must_use]
     pub fn polling(&self) -> bool {
-        self.armory_enabled
-            && self
-                .members
-                .iter()
-                .any(|m| m.status == Status::Pending.as_str())
+        self.armory_enabled && self.members.iter().any(|m| m.status == Status::Pending)
     }
 
     #[must_use]
@@ -331,23 +352,17 @@ fn filter_query(filter: Option<&str>) -> String {
     filter.map_or_else(String::new, |t| format!("?tag={}", urlencode(t)))
 }
 
-/// Percent-encodes everything but unreserved characters, for tags in URLs.
+/// Percent-encodes everything but unreserved characters, for tags in URLs: askama's
+/// `urlencode_strict`, which the templates use as a filter.
 #[must_use]
 pub fn urlencode(s: &str) -> String {
-    s.bytes()
-        .map(|b| match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                (b as char).to_string()
-            }
-            _ => format!("%{b:02X}"),
-        })
-        .collect()
+    let Ok(encoded) = askama::filters::urlencode_strict(s);
+    encoded.to_string()
 }
 
 #[derive(Template, WebTemplate)]
 #[template(path = "index.html")]
 struct IndexPage {
-    static_base: String,
     /// Show the log-out button (a password is set).
     logout: bool,
     error: Option<String>,
@@ -357,7 +372,6 @@ struct IndexPage {
 #[derive(Template, WebTemplate)]
 #[template(path = "squad.html")]
 struct SquadPage {
-    static_base: String,
     /// Show the log-out button (a password is set).
     logout: bool,
     squad: db::Squad,
@@ -375,7 +389,6 @@ struct RosterPartial {
 #[derive(Template, WebTemplate)]
 #[template(path = "login.html")]
 struct LoginPage {
-    static_base: String,
     logout: bool,
     next: String,
     wrong: bool,
@@ -392,7 +405,6 @@ async fn login_page(State(state): State<AppState>, Query(q): Query<LoginQuery>) 
         return Redirect::to(&next).into_response();
     }
     LoginPage {
-        static_base: crate::assets::base(),
         logout: false,
         next,
         wrong: false,
@@ -421,7 +433,6 @@ async fn login(
     }
     crate::auth::wrong_password_delay().await;
     let page = LoginPage {
-        static_base: crate::assets::base(),
         logout: false,
         next,
         wrong: true,
@@ -439,7 +450,6 @@ async fn logout() -> Response {
 
 async fn index(State(state): State<AppState>) -> IndexPage {
     IndexPage {
-        static_base: crate::assets::base(),
         logout: state.auth.is_some(),
         error: None,
         name_input: String::new(),
@@ -458,12 +468,11 @@ async fn create_squad(
     match SquadName::new(&form.name) {
         Ok(name) => {
             let id = db::create_squad(&state.db, &name).await?;
-            Ok(Redirect::to(&format!("/s/{id}")).into_response())
+            Ok(Redirect::to(&squad_path(&id)).into_response())
         }
         Err(e) => Ok((
             StatusCode::UNPROCESSABLE_ENTITY,
             IndexPage {
-                static_base: crate::assets::base(),
                 logout: state.auth.is_some(),
                 error: Some(e.to_string()),
                 name_input: form.name,
@@ -478,12 +487,13 @@ struct FilterQuery {
     tag: Option<String>,
 }
 
-async fn load_squad(state: &AppState, id: &str) -> Result<db::Squad> {
-    db::squad(&state.db, id).await?.ok_or(AppError::NotFound)
-}
-
-async fn build_roster(state: &AppState, squad_id: &str, filter: Option<String>) -> Result<Roster> {
-    let filter = tag_filter(filter);
+/// The roster with `filter`, a tag key from `tag_filter`, applied.
+async fn build_roster(
+    state: &AppState,
+    squad_id: &str,
+    filter: Option<String>,
+    form: Outcome,
+) -> Result<Roster> {
     let now = db::now();
     let colours = Colours(db::tag_colours(&state.db, squad_id).await?);
     let mut members: Vec<MemberView> = db::members(&state.db, &state.armory_cache, squad_id)
@@ -516,22 +526,17 @@ async fn build_roster(state: &AppState, squad_id: &str, filter: Option<String>) 
         tags,
         filter,
         armory_enabled: state.armory_enabled,
-        error: None,
-        character_input: String::new(),
-        tags_input: String::new(),
-        colours_open: false,
+        form,
     })
 }
 
 async fn squad_page(
     State(state): State<AppState>,
-    Path(id): Path<String>,
+    squad: db::Squad,
     Query(q): Query<FilterQuery>,
 ) -> Result<SquadPage> {
-    let squad = load_squad(&state, &id).await?;
-    let roster = build_roster(&state, &squad.id, q.tag).await?;
+    let roster = build_roster(&state, &squad.id, tag_filter(q.tag), Outcome::default()).await?;
     Ok(SquadPage {
-        static_base: crate::assets::base(),
         logout: state.auth.is_some(),
         squad,
         roster,
@@ -540,67 +545,61 @@ async fn squad_page(
 
 async fn roster_partial(
     State(state): State<AppState>,
-    Path(id): Path<String>,
+    squad: db::Squad,
     Query(q): Query<FilterQuery>,
 ) -> Result<RosterPartial> {
-    let squad = load_squad(&state, &id).await?;
     Ok(RosterPartial {
-        roster: build_roster(&state, &squad.id, q.tag).await?,
+        roster: build_roster(&state, &squad.id, tag_filter(q.tag), Outcome::default()).await?,
     })
 }
 
 async fn rename(
     State(state): State<AppState>,
-    Path(id): Path<String>,
+    squad: db::Squad,
     Form(form): Form<NameForm>,
 ) -> Result<Redirect> {
-    let squad = load_squad(&state, &id).await?;
     // An invalid name just keeps the old one; the field is required in the form anyway.
     if let Ok(name) = SquadName::new(&form.name) {
         db::rename_squad(&state.db, &squad.id, &name).await?;
     }
-    Ok(Redirect::to(&format!("/s/{}", squad.id)))
+    Ok(Redirect::to(&squad_path(&squad.id)))
 }
 
-/// After a change: htmx gets the new roster, a plain form post a redirect back to the page.
-/// An error (bad input) is shown in the roster, keeping what was typed.
-struct Outcome {
-    error: Option<String>,
-    character_input: String,
-    tags_input: String,
-    colours_open: bool,
+/// The state of the roster's forms after a change. An error (bad input) is shown in the
+/// roster, keeping what was typed.
+#[derive(Default)]
+pub struct Outcome {
+    pub error: Option<String>,
+    pub character_input: String,
+    pub tags_input: String,
+    /// Keep the tag colours open after picking one.
+    pub colours_open: bool,
 }
 
 impl Outcome {
-    fn ok() -> Self {
+    fn error(message: String) -> Self {
         Self {
-            error: None,
-            character_input: String::new(),
-            tags_input: String::new(),
-            colours_open: false,
+            error: Some(message),
+            ..Self::default()
         }
     }
 }
 
+/// After a change: htmx gets the new roster, a plain form post a redirect back to the page.
 async fn respond(
     state: &AppState,
-    headers: &HeaderMap,
+    Htmx(htmx): Htmx,
     squad: db::Squad,
     filter: Option<String>,
     outcome: Outcome,
 ) -> Result<Response> {
-    let htmx = headers.contains_key("hx-request");
     let filter = tag_filter(filter);
-    if !htmx && outcome.error.is_none() {
-        let query = filter_query(filter.as_deref());
-        return Ok(Redirect::to(&format!("/s/{}{query}", squad.id)).into_response());
-    }
-    let mut roster = build_roster(state, &squad.id, filter).await?;
     let failed = outcome.error.is_some();
-    roster.error = outcome.error;
-    roster.character_input = outcome.character_input;
-    roster.tags_input = outcome.tags_input;
-    roster.colours_open = outcome.colours_open;
+    if !htmx && !failed {
+        let query = filter_query(filter.as_deref());
+        return Ok(Redirect::to(&format!("{}{query}", squad_path(&squad.id))).into_response());
+    }
+    let roster = build_roster(state, &squad.id, filter, outcome).await?;
     if htmx {
         return Ok(RosterPartial { roster }.into_response());
     }
@@ -610,7 +609,6 @@ async fn respond(
         StatusCode::OK
     };
     let page = SquadPage {
-        static_base: crate::assets::base(),
         logout: state.auth.is_some(),
         squad,
         roster,
@@ -629,38 +627,36 @@ struct AddForm {
 
 async fn add_character(
     State(state): State<AppState>,
-    Path(id): Path<String>,
-    headers: HeaderMap,
+    squad: db::Squad,
+    htmx: Htmx,
     Form(form): Form<AddForm>,
 ) -> Result<Response> {
-    let squad = load_squad(&state, &id).await?;
     let parsed = form
         .character
         .parse::<CharacterName>()
         .map_err(|e| e.to_string())
         .and_then(|c| Ok((c, parse_tags(&form.tags).map_err(|e| e.to_string())?)));
-    let outcome = match parsed {
+    let error = match parsed {
         Ok((character, tags)) => {
             if db::add_character(&state.db, &squad.id, &state.region, &character, &tags).await? {
                 state.wake.notify_one();
-                Outcome::ok()
+                None
             } else {
-                Outcome {
-                    error: Some(format!("{character} is already in this squad")),
-                    character_input: form.character,
-                    tags_input: form.tags,
-                    colours_open: false,
-                }
+                Some(format!("{character} is already in this squad"))
             }
         }
-        Err(error) => Outcome {
+        Err(error) => Some(error),
+    };
+    let outcome = match error {
+        None => Outcome::default(),
+        Some(error) => Outcome {
             error: Some(error),
             character_input: form.character,
             tags_input: form.tags,
-            colours_open: false,
+            ..Outcome::default()
         },
     };
-    respond(&state, &headers, squad, form.filter, outcome).await
+    respond(&state, htmx, squad, form.filter, outcome).await
 }
 
 #[derive(Deserialize)]
@@ -671,24 +667,38 @@ struct TagsForm {
     filter: Option<String>,
 }
 
+/// The rest of a path below `/s/{squad}`; the squad itself is the `db::Squad` extractor's.
+#[derive(Deserialize)]
+struct CharacterPath {
+    id: i64,
+}
+
+#[derive(Deserialize)]
+struct TagPath {
+    tag: String,
+}
+
+#[derive(Deserialize)]
+struct CharacterTagPath {
+    id: i64,
+    tag: String,
+}
+
 async fn add_tags(
     State(state): State<AppState>,
-    Path((id, character)): Path<(String, i64)>,
-    headers: HeaderMap,
+    squad: db::Squad,
+    Path(path): Path<CharacterPath>,
+    htmx: Htmx,
     Form(form): Form<TagsForm>,
 ) -> Result<Response> {
-    let squad = load_squad(&state, &id).await?;
     let outcome = match parse_tags(&form.tags) {
         Ok(tags) => {
-            db::add_tags(&state.db, &squad.id, character, &tags).await?;
-            Outcome::ok()
+            db::add_tags(&state.db, &squad.id, path.id, &tags).await?;
+            Outcome::default()
         }
-        Err(e) => Outcome {
-            error: Some(e.to_string()),
-            ..Outcome::ok()
-        },
+        Err(e) => Outcome::error(e.to_string()),
     };
-    respond(&state, &headers, squad, form.filter, outcome).await
+    respond(&state, htmx, squad, form.filter, outcome).await
 }
 
 #[derive(Deserialize)]
@@ -699,13 +709,13 @@ struct FilterForm {
 
 async fn remove_tag(
     State(state): State<AppState>,
-    Path((id, character, tag)): Path<(String, i64, String)>,
-    headers: HeaderMap,
+    squad: db::Squad,
+    Path(path): Path<CharacterTagPath>,
+    htmx: Htmx,
     Form(form): Form<FilterForm>,
 ) -> Result<Response> {
-    let squad = load_squad(&state, &id).await?;
-    db::remove_tag(&state.db, &squad.id, character, &tag).await?;
-    respond(&state, &headers, squad, form.filter, Outcome::ok()).await
+    db::remove_tag(&state.db, &squad.id, path.id, &path.tag).await?;
+    respond(&state, htmx, squad, form.filter, Outcome::default()).await
 }
 
 #[derive(Deserialize)]
@@ -721,34 +731,29 @@ struct ColourForm {
 
 async fn set_colour(
     State(state): State<AppState>,
-    Path((id, tag)): Path<(String, String)>,
-    headers: HeaderMap,
+    squad: db::Squad,
+    Path(path): Path<TagPath>,
+    htmx: Htmx,
     Form(form): Form<ColourForm>,
 ) -> Result<Response> {
-    let squad = load_squad(&state, &id).await?;
     let colour = if form.reset.is_some() {
         Ok(None)
     } else {
-        Colour::parse(&form.colour).map(Some)
+        Colour::parse(&form.colour)
+            .map(Some)
+            .map_err(|e| e.to_string())
     };
-    let outcome = match (Tag::new(&tag), colour) {
+    let outcome = match (Tag::new(&path.tag).map_err(|e| e.to_string()), colour) {
         (Ok(None), _) => return Err(AppError::NotFound),
         (Ok(Some(tag)), Ok(colour)) => {
             db::set_tag_colour(&state.db, &squad.id, &tag, colour.as_ref()).await?;
-            Outcome::ok()
+            Outcome::default()
         }
-        (Err(e), _) => Outcome {
-            error: Some(e.to_string()),
-            ..Outcome::ok()
-        },
-        (_, Err(e)) => Outcome {
-            error: Some(e.to_string()),
-            ..Outcome::ok()
-        },
+        (Err(e), _) | (_, Err(e)) => Outcome::error(e),
     };
     respond(
         &state,
-        &headers,
+        htmx,
         squad,
         form.filter,
         Outcome {
@@ -761,25 +766,25 @@ async fn set_colour(
 
 async fn remove_character(
     State(state): State<AppState>,
-    Path((id, character)): Path<(String, i64)>,
-    headers: HeaderMap,
+    squad: db::Squad,
+    Path(path): Path<CharacterPath>,
+    htmx: Htmx,
     Form(form): Form<FilterForm>,
 ) -> Result<Response> {
-    let squad = load_squad(&state, &id).await?;
-    db::remove_character(&state.db, &squad.id, character).await?;
-    respond(&state, &headers, squad, form.filter, Outcome::ok()).await
+    db::remove_character(&state.db, &squad.id, path.id).await?;
+    respond(&state, htmx, squad, form.filter, Outcome::default()).await
 }
 
 async fn refresh(
     State(state): State<AppState>,
-    Path((id, character)): Path<(String, i64)>,
-    headers: HeaderMap,
+    squad: db::Squad,
+    Path(path): Path<CharacterPath>,
+    htmx: Htmx,
     Form(form): Form<FilterForm>,
 ) -> Result<Response> {
-    let squad = load_squad(&state, &id).await?;
-    db::request_refresh(&state.db, &squad.id, character).await?;
+    db::request_refresh(&state.db, &squad.id, path.id).await?;
     state.wake.notify_one();
-    respond(&state, &headers, squad, form.filter, Outcome::ok()).await
+    respond(&state, htmx, squad, form.filter, Outcome::default()).await
 }
 
 async fn healthz(State(state): State<AppState>) -> Response {
@@ -790,15 +795,6 @@ async fn healthz(State(state): State<AppState>) -> Response {
             (StatusCode::SERVICE_UNAVAILABLE, "database unavailable").into_response()
         }
     }
-}
-
-/// Static files under a versioned path never change, so browsers may keep them for a year.
-#[must_use]
-pub fn cache_forever() -> (header::HeaderName, HeaderValue) {
-    (
-        header::CACHE_CONTROL,
-        HeaderValue::from_static("public, max-age=31536000, immutable"),
-    )
 }
 
 #[cfg(test)]

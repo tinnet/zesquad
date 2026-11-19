@@ -93,7 +93,6 @@ pub struct Profile {
     pub level: Option<u64>,
     pub race: Option<String>,
     pub class: Option<String>,
-    pub gender: Option<String>,
     /// `ALLIANCE` or `HORDE`.
     pub faction: Option<String>,
     pub guild: Option<String>,
@@ -144,7 +143,6 @@ impl Profile {
             p.level = s["level"].as_u64();
             p.race = str_at(s, &["race", "name"]);
             p.class = str_at(s, &["character_class", "name"]);
-            p.gender = str_at(s, &["gender", "name"]);
             p.faction = str_at(s, &["faction", "type"]);
             p.guild = str_at(s, &["guild", "name"]);
             p.item_level = s["equipped_item_level"]

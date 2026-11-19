@@ -8,31 +8,31 @@
     <input type="hidden" name="filter" value="{{ roster.filter_value() }}">
     <label class="grow">
       <span class="visually-hidden">Character</span>
-      <input name="character" value="{{ roster.character_input }}" placeholder="Name-Surname" required autocomplete="off">
+      <input name="character" value="{{ roster.form.character_input }}" placeholder="Name-Surname" required autocomplete="off">
     </label>
     <label class="grow">
       <span class="visually-hidden">Tags</span>
-      <input name="tags" value="{{ roster.tags_input }}" placeholder="tags, comma separated (optional)" autocomplete="off">
+      <input name="tags" value="{{ roster.form.tags_input }}" placeholder="tags, comma separated (optional)" autocomplete="off">
     </label>
     <button type="submit">Add</button>
   </form>
-  {% if let Some(error) = roster.error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
+  {% if let Some(error) = roster.form.error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
   {% if !roster.armory_enabled %}<p class="hint">Armory lookups are off on this server, so only names and tags are shown.</p>{% endif %}
 
   {% if !roster.tags.is_empty() %}
   <nav class="filters" aria-label="Filter by tag">
     <a href="{{ base }}" class="chip{% if roster.filter.is_none() %} on{% endif %}">all</a>
     {% for t in roster.tags %}
-    <a href="{{ base }}?tag={{ crate::web::urlencode(t.key) }}" class="chip{{ t.paint.class() }}{% if roster.is_filter(t.key) %} on{% endif %}" style="{{ t.paint.style() }}">{{ t.label }}</a>
+    <a href="{{ base }}?tag={{ t.key|urlencode_strict }}" class="chip{{ t.paint.class() }}{% if roster.is_filter(t.key) %} on{% endif %}" style="{{ t.paint.style() }}">{{ t.label }}</a>
     {% endfor %}
   </nav>
-  <details class="colours"{% if roster.colours_open %} open{% endif %}>
+  <details class="colours"{% if roster.form.colours_open %} open{% endif %}>
     <summary>Tag colours</summary>
     <ul class="plain colour-list">
       {% for t in roster.tags %}
       <li>
-        <form method="post" action="{{ base }}/tags/{{ crate::web::urlencode(t.key) }}/colour" class="row"
-          hx-post="{{ base }}/tags/{{ crate::web::urlencode(t.key) }}/colour" hx-target="#roster" hx-swap="outerHTML" hx-trigger="change, submit">
+        <form method="post" action="{{ base }}/tags/{{ t.key|urlencode_strict }}/colour" class="row"
+          hx-post="{{ base }}/tags/{{ t.key|urlencode_strict }}/colour" hx-target="#roster" hx-swap="outerHTML" hx-trigger="change, submit">
           <input type="hidden" name="filter" value="{{ roster.filter_value() }}">
           <input type="color" name="colour" value="{{ t.paint.picker_value() }}" aria-label="Colour for {{ t.label }}">
           <span class="chip{{ t.paint.class() }}" style="{{ t.paint.style() }}">{{ t.label }}</span>
@@ -66,19 +66,21 @@
           {% if !details.is_empty() %}<p class="line sub">{{ details }}</p>{% endif %}
           {% if let Some(seen) = m.last_login %}<p class="line sub">last played {{ seen }}</p>{% endif %}
           {% endif %}
-          {% if m.status == "not_found" %}
+          {% match m.status %}
+          {% when Status::NotFound %}
           <p class="line sub">Not on the Armory: check the spelling, or log the character out once so Battle.net publishes it.</p>
-          {% else if m.status == "failed" %}
+          {% when Status::Failed %}
           <p class="line sub">Couldn't reach the Armory{% if let Some(checked) = m.checked %} ({{ checked }}){% endif %}{% if m.has_profile %}, so this is what it said before{% endif %}; trying again soon.</p>
-          {% else if m.status == "pending" && roster.armory_enabled %}
-          <p class="line sub">{% if m.has_profile %}Updating from{% else %}Looking up on{% endif %} the Armory…</p>
-          {% endif %}
+          {% when Status::Pending %}
+          {% if roster.armory_enabled %}<p class="line sub">{% if m.has_profile %}Updating from{% else %}Looking up on{% endif %} the Armory…</p>{% endif %}
+          {% when Status::Found %}
+          {% endmatch %}
         </div>
       </div>
 
       <div class="tags">
         {% for c in m.tags %}
-        {%- let key = crate::web::urlencode(c.tag.key) %}
+        {%- let key = c.tag.key|urlencode_strict %}
         {% if c.tag.auto %}
         <span class="chip tag auto{{ c.paint.class() }}" style="{{ c.paint.style() }}" title="From the Armory">
           <a href="{{ base }}?tag={{ key }}">{{ c.tag.label }}</a>
@@ -101,23 +103,23 @@
 
       {% if m.has_details() %}
       <details>
-        <summary>Gear, professions{% if !m.pets().is_empty() %}, pets{% endif %}</summary>
-        {% if !m.pets().is_empty() %}
+        <summary>Gear, professions{% if !m.profile.pets.is_empty() %}, pets{% endif %}</summary>
+        {% if !m.profile.pets.is_empty() %}
         <h3>Pets</h3>
         <ul class="plain">
-          {% for p in m.pets() %}<li>{{ p.name }}{% if let Some(c) = p.creature %} ({{ c }}){% endif %}{% if let Some(l) = p.level %}, level {{ l }}{% endif %}{% if p.active %} · active{% endif %}</li>{% endfor %}
+          {% for p in m.profile.pets %}<li>{{ p.name }}{% if let Some(c) = p.creature %} ({{ c }}){% endif %}{% if let Some(l) = p.level %}, level {{ l }}{% endif %}{% if p.active %} · active{% endif %}</li>{% endfor %}
         </ul>
         {% endif %}
-        {% if !m.professions().is_empty() %}
+        {% if !m.profile.professions.is_empty() %}
         <h3>Professions</h3>
         <ul class="plain">
-          {% for p in m.professions() %}<li>{{ p.name }} {{ p.skill }}/{{ p.max }}</li>{% endfor %}
+          {% for p in m.profile.professions %}<li>{{ p.name }} {{ p.skill }}/{{ p.max }}</li>{% endfor %}
         </ul>
         {% endif %}
-        {% if !m.gear().is_empty() %}
+        {% if !m.profile.gear.is_empty() %}
         <h3>Gear</h3>
         <table class="gear">
-          {% for i in m.gear() %}<tr><th scope="row">{{ i.slot }}</th><td class="q-{{ i.quality }}">{{ i.name }}</td><td class="num">{% if let Some(l) = i.level %}{{ l }}{% endif %}</td></tr>{% endfor %}
+          {% for i in m.profile.gear %}<tr><th scope="row">{{ i.slot }}</th><td class="q-{{ i.quality }}">{{ i.name }}</td><td class="num">{% if let Some(l) = i.level %}{{ l }}{% endif %}</td></tr>{% endfor %}
         </table>
         {% endif %}
       </details>

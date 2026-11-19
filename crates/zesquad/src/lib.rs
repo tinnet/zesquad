@@ -4,12 +4,12 @@
 
 pub mod armory;
 mod assets;
-pub mod auth;
+mod auth;
 pub mod cli;
 pub mod db;
-pub mod sync;
+mod sync;
 pub mod version;
-pub mod web;
+mod web;
 
 use std::future::Future;
 use std::net::SocketAddr;

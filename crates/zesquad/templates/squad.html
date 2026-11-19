@@ -2,7 +2,7 @@
 {% block title %}{{ squad.name }} · zesquad{% endblock %}
 {% block content %}
 <section class="squad-head">
-  <form method="post" action="/s/{{ squad.id }}/name" class="rename">
+  <form method="post" action="{{ roster.base() }}/name" class="rename">
     <label>
       <span class="visually-hidden">Squad name</span>
       <input name="name" value="{{ squad.name }}" required maxlength="64" class="squad-name" aria-label="Squad name">

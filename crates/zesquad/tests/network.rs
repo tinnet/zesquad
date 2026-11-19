@@ -16,7 +16,7 @@ fn client() -> Client {
         var("ZESQUAD_BNET_CLIENT_SECRET"),
         "eu".into(),
         None,
-        "https://oauth.battle.net/token",
+        zesquad::armory::TOKEN_URL,
     )
     .unwrap();
     Client::new(config).unwrap()

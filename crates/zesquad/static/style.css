@@ -114,25 +114,23 @@ button.danger:hover { color: var(--danger); border-color: var(--danger); }
 .chip.coloured.on { box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent); }
 
 .colours { margin: -.5rem 0 1rem; }
-.colours summary { cursor: pointer; color: var(--muted); font-size: .9rem; }
 .colour-list { list-style: none; padding: 0; margin: .5rem 0 0; display: grid; gap: .35rem; }
 .colour-list form { gap: .4rem; }
 .colour-list input[type=color] { width: 2.25rem; height: 1.75rem; padding: .1rem; flex: none; cursor: pointer; }
 
 .members { list-style: none; padding: 0; margin: 0; display: grid; gap: .75rem; }
 .member {
-  background: var(--card); border: 1px solid var(--line); border-left: 4px solid var(--line);
+  background: var(--card); border: 1px solid var(--line); border-left: 4px solid var(--class, var(--line));
   border-radius: .6rem; padding: .9rem 1rem;
   display: grid; gap: .5rem;
 }
 .who { display: flex; gap: .8rem; align-items: flex-start; }
 .avatar { width: 56px; height: 56px; border-radius: .5rem; flex: none; object-fit: cover; background: var(--line); }
-.avatar.none { display: inline-block; }
 .name { margin: 0; font-size: 1.15rem; }
 .surname { font-weight: 500; }
 .line { margin: 0; }
 .line.sub { color: var(--muted); font-size: .9rem; }
-.class { font-weight: 600; }
+.class { font-weight: 600; color: var(--class, inherit); }
 .faction { font-size: .75rem; text-transform: uppercase; letter-spacing: .05em; margin-left: .25rem; }
 .faction.alliance { color: var(--alliance); }
 .faction.horde { color: var(--horde); }
@@ -149,16 +147,16 @@ details h3 { font-size: .95rem; margin: .75rem 0 .25rem; }
 .gear th { text-align: left; font-weight: 500; color: var(--muted); padding-right: 1rem; }
 .gear td.num { color: var(--muted); padding-left: 1rem; text-align: right; }
 
-/* Class accents */
-.class-warrior { border-left-color: var(--warrior); } .class-warrior .class { color: var(--warrior); }
-.class-paladin { border-left-color: var(--paladin); } .class-paladin .class { color: var(--paladin); }
-.class-hunter { border-left-color: var(--hunter); } .class-hunter .class { color: var(--hunter); }
-.class-rogue { border-left-color: var(--rogue); } .class-rogue .class { color: var(--rogue); }
-.class-priest { border-left-color: var(--priest); } .class-priest .class { color: var(--priest); }
-.class-shaman { border-left-color: var(--shaman); } .class-shaman .class { color: var(--shaman); }
-.class-mage { border-left-color: var(--mage); } .class-mage .class { color: var(--mage); }
-.class-warlock { border-left-color: var(--warlock); } .class-warlock .class { color: var(--warlock); }
-.class-druid { border-left-color: var(--druid); } .class-druid .class { color: var(--druid); }
+/* Class accents: the member card's border and the class name. */
+.class-warrior { --class: var(--warrior); }
+.class-paladin { --class: var(--paladin); }
+.class-hunter { --class: var(--hunter); }
+.class-rogue { --class: var(--rogue); }
+.class-priest { --class: var(--priest); }
+.class-shaman { --class: var(--shaman); }
+.class-mage { --class: var(--mage); }
+.class-warlock { --class: var(--warlock); }
+.class-druid { --class: var(--druid); }
 
 /* Item quality */
 .q-poor { color: var(--q-poor); } .q-common { color: var(--q-common); } .q-uncommon { color: var(--q-uncommon); }

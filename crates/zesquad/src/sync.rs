@@ -38,12 +38,9 @@ impl Syncer {
         }
     }
 
-    /// Fetches every character that's due; returns how many.
-    ///
-    /// # Errors
-    ///
-    /// On database errors. Battle.net errors are stored per character instead.
-    pub async fn refresh_due(&self) -> anyhow::Result<usize> {
+    /// Fetches every character that's due. Fails only on database errors; Battle.net errors
+    /// are stored per character instead.
+    async fn refresh_due(&self) -> anyhow::Result<()> {
         let interval = i64::try_from(self.interval.as_secs()).unwrap_or(i64::MAX);
         let due = db::due(&self.db, db::now(), interval).await?;
         for (region, key) in &due {
@@ -54,7 +51,7 @@ impl Syncer {
             db::store(&self.db, region, key, fetched).await?;
             tokio::time::sleep(PAUSE).await;
         }
-        Ok(due.len())
+        Ok(())
     }
 
     /// The summary decides whether the character exists; the other endpoints are extras, so a
@@ -66,8 +63,8 @@ impl Syncer {
             Err(e) => return Fetched::Failed(format!("{e:#}")),
         };
         let mut docs = Vec::new();
-        for endpoint in Endpoint::ALL.into_iter().skip(1) {
-            if !Profile::wants(&summary, endpoint) {
+        for endpoint in Endpoint::ALL {
+            if endpoint == Endpoint::Summary || !Profile::wants(&summary, endpoint) {
                 continue;
             }
             match self.client.character(key, endpoint).await {

@@ -14,6 +14,7 @@ use axum::routing::{get, post};
 use reqwest::redirect::Policy;
 use tempfile::TempDir;
 use zesquad::Settings;
+use zesquad_core::armory::Endpoint;
 
 const CLIENT_ID: &str = "test-id";
 const CLIENT_SECRET: &str = "test-secret";
@@ -73,25 +74,23 @@ fn fake_character(
         r#"{"code":404,"type":"BLZWEBAPI00000404","detail":"Not Found"}"#,
     )
         .into_response();
-    let (key, endpoint) = match segments {
-        [key] => (*key, "summary"),
-        [key, endpoint] => (*key, *endpoint),
-        _ => return not_found,
+    let Some((&key, path)) = segments.split_first() else {
+        return not_found;
     };
-    let fixture = match endpoint {
-        "summary" => "summary",
-        "character-media" => "media",
-        "equipment" => "equipment",
-        "specializations" => "specializations",
-        "professions" => "professions",
-        _ => return not_found, // hunter-pets: the fixture character is a rogue
+    // No hunter pets: the fixture character is a rogue.
+    let Some(endpoint) = Endpoint::ALL
+        .into_iter()
+        .find(|e| e.path() == path && *e != Endpoint::HunterPets)
+    else {
+        return not_found;
     };
     if key != KNOWN {
         return not_found;
     }
     let path = format!(
-        "{}/../zesquad-core/fixtures/{fixture}.json",
-        env!("CARGO_MANIFEST_DIR")
+        "{}/../zesquad-core/fixtures/{}.json",
+        env!("CARGO_MANIFEST_DIR"),
+        endpoint.as_str()
     );
     (
         [(header::CONTENT_TYPE, "application/json")],
@@ -780,6 +779,16 @@ async fn with_a_password_everything_but_health_and_static_needs_a_login() {
         app.post("/squads", &[("name", "x")]).await.status(),
         StatusCode::SEE_OTHER
     );
+    // Unknown paths too, so they don't reveal what exists.
+    for path in ["/nope", "/loginx"] {
+        let r = app
+            .http
+            .get(format!("{}{path}", app.base))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(r.status(), StatusCode::SEE_OTHER, "{path}");
+    }
 
     assert_eq!(app.get("/healthz").await.0, StatusCode::OK);
     assert_eq!(app.get("/version").await.0, StatusCode::OK);

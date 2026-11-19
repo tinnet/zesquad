@@ -3,7 +3,8 @@
 //! With `ZESQUAD_PASSWORD` set, every page needs a session cookie, which the login page sets.
 //! The cookie holds `sha256(key, password)`, where the key is random and stored in the
 //! database: it survives restarts, isn't the password, and changing the password logs everyone
-//! out. Health check, version and static files stay open so containers and the login page work.
+//! out. Health check, version and static files stay open so containers and the login page work;
+//! `web::router` keeps those routes outside this middleware.
 
 use std::fmt::Write as _;
 use std::time::Duration;
@@ -16,9 +17,9 @@ use axum::response::{IntoResponse, Redirect, Response};
 use sha2::{Digest as _, Sha256};
 use sqlx::SqlitePool;
 
-use crate::web::AppState;
+use crate::web::{AppState, Htmx};
 
-pub const COOKIE: &str = "zesquad_session";
+const COOKIE: &str = "zesquad_session";
 /// Slows down guessing; one wrong password costs the guesser this long.
 const WRONG_PASSWORD_DELAY: Duration = Duration::from_millis(750);
 
@@ -96,31 +97,25 @@ pub async fn wrong_password_delay() {
     tokio::time::sleep(WRONG_PASSWORD_DELAY).await;
 }
 
-fn is_open(path: &str) -> bool {
-    // Logging out needs no session: it only clears the cookie.
-    matches!(path, "/login" | "/logout" | "/healthz" | "/version") || path.starts_with("/static/")
-}
-
 /// Middleware: lets requests with a session through, sends everyone else to the login page.
 pub async fn require(State(state): State<AppState>, request: Request, next: Next) -> Response {
     let Some(auth) = &state.auth else {
         return next.run(request).await;
     };
-    if is_open(request.uri().path()) || auth.has_session(request.headers()) {
+    if auth.has_session(request.headers()) {
         return next.run(request).await;
     }
     let login = format!(
         "/login?next={}",
         crate::web::urlencode(&return_to(&request))
     );
-    if request.headers().contains_key("hx-request") {
-        // htmx would swap a redirect's target into the page; this makes it navigate instead.
-        let mut response = StatusCode::UNAUTHORIZED.into_response();
+    if Htmx::of(request.headers()) {
+        // htmx would swap a redirect's target into the page; HX-Redirect makes it navigate
+        // instead. htmx only acts on it for responses it processes, so 2xx is the safe choice.
+        let mut response = StatusCode::OK.into_response();
         if let Ok(value) = HeaderValue::from_str(&login) {
             response.headers_mut().insert("hx-redirect", value);
         }
-        // htmx only acts on HX-Redirect for responses it processes; 2xx is the safe choice.
-        *response.status_mut() = StatusCode::OK;
         return response;
     }
     Redirect::to(&login).into_response()
@@ -131,7 +126,7 @@ pub async fn require(State(state): State<AppState>, request: Request, next: Next
 /// post can't be repeated by a GET, so it's the page it came from (`Referer`), or `/`.
 fn return_to(request: &Request) -> String {
     let uri = request.uri();
-    if request.method() == Method::GET && !request.headers().contains_key("hx-request") {
+    if request.method() == Method::GET && !Htmx::of(request.headers()) {
         return uri
             .path_and_query()
             .map_or("/", PathAndQuery::as_str)
@@ -181,13 +176,6 @@ mod tests {
         );
         assert_eq!(cookie(&h, COOKIE), Some("xyz"));
         assert_eq!(cookie(&h, "b"), None);
-    }
-
-    #[test]
-    fn open_paths() {
-        assert!(is_open("/healthz") && is_open("/login") && is_open("/logout"));
-        assert!(is_open("/static/x/style.css"));
-        assert!(!is_open("/") && !is_open("/s/abc") && !is_open("/loginx"));
     }
 
     #[test]

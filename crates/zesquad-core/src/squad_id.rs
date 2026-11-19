@@ -10,7 +10,7 @@
 const ALPHABET: &[u8; 32] = b"0123456789abcdefghjkmnpqrstvwxyz";
 
 /// Length of an encoded id: 128 bits in 5-bit characters, so the first holds only 3 bits.
-pub const LEN: usize = 26;
+const LEN: usize = 26;
 
 /// Writes `bits` as a squad id. The caller supplies the randomness.
 #[must_use]

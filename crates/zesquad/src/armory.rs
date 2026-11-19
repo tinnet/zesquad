@@ -10,6 +10,9 @@ use serde_json::Value;
 use tokio::sync::Mutex;
 use zesquad_core::armory::Endpoint;
 
+/// Battle.net's OAuth token endpoint, for every region.
+pub const TOKEN_URL: &str = "https://oauth.battle.net/token";
+
 /// Where and as whom to call Battle.net.
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -98,7 +101,7 @@ impl Client {
     /// When the HTTP client can't be built (TLS setup).
     pub fn new(config: Config) -> anyhow::Result<Self> {
         let http = reqwest::Client::builder()
-            .user_agent(concat!("zesquad/", env!("CARGO_PKG_VERSION")))
+            .user_agent(format!("zesquad/{}", crate::version::short()))
             .timeout(Duration::from_secs(20))
             .build()?;
         Ok(Self {
@@ -106,11 +109,6 @@ impl Client {
             config,
             token: Mutex::new(None),
         })
-    }
-
-    #[must_use]
-    pub fn config(&self) -> &Config {
-        &self.config
     }
 
     /// Looks up one endpoint of a character by its key (`name-surname`).
