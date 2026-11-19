@@ -2,6 +2,12 @@
 
 What changed in each zesquad release. Versions are dates (CalVer).
 
+## 2026.11.18.1
+
+### Fixes
+
+- Show the release version in --version, not 0.1.0 ([5786e93](https://github.com/tinnet/zesquad/commit/5786e938731ad5bedb8ed3736ea2b95cf64a38ec))
+
 ## 2026.11.18
 
 ### Features
