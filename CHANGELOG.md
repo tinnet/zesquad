@@ -2,6 +2,12 @@
 
 What changed in each zesquad release. Versions are dates (CalVer).
 
+## 2026.11.19
+
+### Features
+
+- **web**: Pick a region per squad ([525e1ba](https://github.com/tinnet/zesquad/commit/525e1ba64e23065e9d3fa416ca5dea357c61ec12))
+
 ## 2026.11.18.2
 
 ### Features
