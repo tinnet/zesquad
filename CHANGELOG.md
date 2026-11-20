@@ -2,6 +2,12 @@
 
 What changed in each zesquad release. Versions are dates (CalVer).
 
+## 2026.11.20
+
+### Features
+
+- **armory**: Follow auction house prices in EU and US ([defdb82](https://github.com/tinnet/zesquad/commit/defdb82030e1b54729b583276fc047bc69eaf77d))
+
 ## 2026.11.19
 
 ### Features
