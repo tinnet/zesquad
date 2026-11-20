@@ -98,14 +98,68 @@ pub const LEATHER: [(u32, &str); 5] = [
     (8170, "Rugged Leather"),
 ];
 
+/// An amount of copper split into the coins the game shows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Money {
+    pub gold: u64,
+    pub silver: u64,
+    pub copper: u64,
+    /// Copper is left out next to gold, see [`Money::brief`].
+    pub brief: bool,
+}
+
+impl Money {
+    #[must_use]
+    pub fn from_copper(copper: u64) -> Self {
+        Self {
+            gold: copper / 10_000,
+            silver: copper / 100 % 100,
+            copper: copper % 100,
+            brief: false,
+        }
+    }
+
+    /// For small print: from a gold up, rounded to the silver and shown without copper.
+    #[must_use]
+    pub fn brief(copper: u64) -> Self {
+        if copper < 10_000 {
+            return Self::from_copper(copper);
+        }
+        Self {
+            brief: true,
+            ..Self::from_copper((copper + 50) / 100 * 100)
+        }
+    }
+
+    /// Whether copper is shown: always, except next to gold in brief.
+    #[must_use]
+    pub fn shows_copper(self) -> bool {
+        !(self.brief && self.gold > 0)
+    }
+
+    /// Whether gold is shown: the game leaves out empty larger units.
+    #[must_use]
+    pub fn shows_gold(self) -> bool {
+        self.gold > 0
+    }
+
+    /// Whether silver is shown: when there's any, or any gold.
+    #[must_use]
+    pub fn shows_silver(self) -> bool {
+        self.gold > 0 || self.silver > 0
+    }
+}
+
 /// Copper as the game shows it: `1g 2s 3c`, leaving out empty larger units (`45c`, `2s 0c`).
 #[must_use]
 pub fn money(copper: u64) -> String {
-    let (gold, silver, copper) = (copper / 10_000, copper / 100 % 100, copper % 100);
-    match (gold, silver) {
-        (0, 0) => format!("{copper}c"),
-        (0, _) => format!("{silver}s {copper}c"),
-        _ => format!("{gold}g {silver}s {copper}c"),
+    let m = Money::from_copper(copper);
+    if m.shows_gold() {
+        format!("{}g {}s {}c", m.gold, m.silver, m.copper)
+    } else if m.shows_silver() {
+        format!("{}s {}c", m.silver, m.copper)
+    } else {
+        format!("{}c", m.copper)
     }
 }
 
@@ -372,6 +426,24 @@ mod tests {
         assert_eq!(money(1_234), "12s 34c");
         assert_eq!(money(4_000_000), "400g 0s 0c");
         assert_eq!(money(10_203), "1g 2s 3c");
+    }
+
+    proptest! {
+        #[test]
+        fn money_adds_back_up(copper in 0u64..10_000_000_000) {
+            let m = Money::from_copper(copper);
+            prop_assert!(m.silver < 100 && m.copper < 100);
+            prop_assert_eq!(m.gold * 10_000 + m.silver * 100 + m.copper, copper);
+        }
+    }
+
+    #[test]
+    fn brief_money_rounds_to_the_silver_from_a_gold_up() {
+        let show = |m: Money| (m.gold, m.silver, m.shows_copper());
+        assert_eq!(show(Money::brief(9_999)), (0, 99, true));
+        assert_eq!(show(Money::brief(17_249)), (1, 72, false));
+        assert_eq!(show(Money::brief(17_250)), (1, 73, false));
+        assert_eq!(show(Money::brief(19_990)), (2, 0, false));
     }
 
     #[test]

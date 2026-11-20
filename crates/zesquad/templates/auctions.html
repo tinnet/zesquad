@@ -1,14 +1,63 @@
 {% extends "base.html" %}
 {% block title %}Auction house · zesquad{% endblock %}
+
+{#- Money as the game shows it: coins after each number, empty larger units left out (and
+    copper next to gold in brief). The
+    letters are for screen readers and copying. -#}
+{%- macro coins(m) -%}
+<span class="money">
+{%- if m.shows_gold() %}<span class="coin gold">{{ m.gold }}<span class="visually-hidden">g</span></span>{% endif -%}
+{%- if m.shows_silver() %}{% if m.shows_gold() %} {% endif %}<span class="coin silver">{{ m.silver }}<span class="visually-hidden">s</span></span>{% endif -%}
+{%- if m.shows_copper() %}{% if m.shows_silver() %} {% endif %}<span class="coin copper">{{ m.copper }}<span class="visually-hidden">c</span></span>{% endif -%}
+</span>
+{%- endmacro -%}
+
 {% block content %}
 <h1>Auction house</h1>
 {%- if !enabled %}
 <p class="hint">Price collection is off. Set <code>ZESQUAD_AUCTIONS=true</code> (with the Battle.net credentials) to start it; what was collected before is shown below.</p>
-{%- else %}
-<p class="hint">Prices are collected from Battle.net about hourly. Snapshots are kept for a week, then only daily prices.</p>
 {%- endif %}
 
+<h2>Leather</h2>
+<p class="hint">Price per unit now, how it moved over the last 7 days, and its lowest and highest in that time. Hover a line for the average.</p>
+{%- for r in regions %}
+<h3>{{ r.region.name() }}</h3>
+<div class="table-wrap">
+<table class="data prices">
+  <thead>
+    <tr><th>Item</th>{% for house in r.houses %}<th class="num faction-{{ house.faction.name()|lower }}">{{ house.label() }}</th>{% endfor %}</tr>
+  </thead>
+  <tbody>
+    {%- for (name, cells) in r.rows %}
+    <tr>
+      <th scope="row">{{ name }}</th>
+      {%- for cell in cells %}
+      {%- if let Some(c) = cell %}
+      <td class="num" title="{{ c.summary }}">
+        {% call coins(c.now) %}{% endcall %}
+        {%- if let Some(line) = c.line %}
+        <svg class="spark" width="{{ spark.0 }}" height="{{ spark.1 }}" viewBox="0 0 {{ spark.0 }} {{ spark.1 }}" role="img" aria-label="{{ c.summary }}">
+          <path d="{{ line.path }}"/>
+          <circle cx="{{ line.last_x }}" cy="{{ line.last_y }}" r="2.5"/>
+        </svg>
+        {%- endif %}
+        <span class="sub range">{% call coins(c.low) %}{% endcall %} – {% call coins(c.high) %}{% endcall %}</span>
+      </td>
+      {%- else %}
+      <td class="num"><span class="sub">no data</span></td>
+      {%- endif %}
+      {%- endfor %}
+    </tr>
+    {%- endfor %}
+  </tbody>
+</table>
+</div>
+{%- endfor %}
+
 <h2>Collecting</h2>
+{%- if enabled %}
+<p class="hint">Prices are collected from Battle.net about hourly. Snapshots are kept for a week, then only daily prices.</p>
+{%- endif %}
 <div class="table-wrap">
 <table class="data">
   <thead>
@@ -30,31 +79,4 @@
   </tbody>
 </table>
 </div>
-
-<h2>Leather, last 7 days</h2>
-<p class="hint">Price per unit: lowest, average and highest of each snapshot's median.</p>
-{%- for r in regions %}
-<h3>{{ r.region.name() }}</h3>
-<div class="table-wrap">
-<table class="data">
-  <thead>
-    <tr><th>Item</th>{% for house in r.houses %}<th class="num">{{ house }}</th>{% endfor %}</tr>
-  </thead>
-  <tbody>
-    {%- for (name, cells) in r.rows %}
-    <tr>
-      <td>{{ name }}</td>
-      {%- for cell in cells %}
-      {%- if let Some(c) = cell %}
-      <td class="num" title="{{ c.snapshots }} snapshots">{{ c.avg }}<span class="sub">{{ c.min }} – {{ c.max }}</span></td>
-      {%- else %}
-      <td class="num"><span class="sub">no data</span></td>
-      {%- endif %}
-      {%- endfor %}
-    </tr>
-    {%- endfor %}
-  </tbody>
-</table>
-</div>
-{%- endfor %}
 {% endblock %}

@@ -7,6 +7,7 @@ pub mod name;
 pub mod redirect;
 pub mod refresh;
 pub mod region;
+pub mod sparkline;
 pub mod squad_id;
 pub mod tags;
 pub mod text;

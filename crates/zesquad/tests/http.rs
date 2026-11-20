@@ -1226,7 +1226,10 @@ async fn auction_prices_are_followed_in_eu_and_us() {
         "house 110",
         "Light Leather",
         "Rugged Leather",
-        "45c<span class=\"sub\">45c – 45c</span>",
+        // 45 copper, shown with a coin, and a line of the one snapshot so far.
+        "<span class=\"coin copper\">45<span class=\"visually-hidden\">c</span></span>",
+        "<svg class=\"spark\"",
+        "7 days: average 45c, lowest 45c, highest 45c, 1 snapshots",
         "503 Service Unavailable",
         "no data",
     ] {

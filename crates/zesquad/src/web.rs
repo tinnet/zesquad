@@ -15,8 +15,9 @@ use serde::Deserialize;
 use sqlx::SqlitePool;
 use tokio::sync::Notify;
 use zesquad_core::armory::Profile;
-use zesquad_core::auctions;
+use zesquad_core::auctions::{self, Money};
 use zesquad_core::refresh::Status;
+use zesquad_core::sparkline::{Sparkline, sparkline};
 use zesquad_core::tags::{self, CharacterTag, Colour};
 use zesquad_core::{CharacterName, Region, SquadName, Tag, parse_tags};
 
@@ -818,6 +819,8 @@ struct AuctionsPage {
     enabled: bool,
     houses: Vec<HouseView>,
     regions: Vec<RegionPrices>,
+    /// The price lines' width and height.
+    spark: (f64, f64),
 }
 
 /// A followed house and how collecting its prices is going.
@@ -835,19 +838,26 @@ struct HouseView {
 /// Leather prices in one region's houses: a row per leather, a cell per house.
 struct RegionPrices {
     region: Region,
-    houses: Vec<String>,
+    houses: Vec<auctions::House>,
     rows: Vec<(&'static str, Vec<Option<PriceCell>>)>,
 }
 
 struct PriceCell {
-    min: String,
-    avg: String,
-    max: String,
-    snapshots: u64,
+    /// The latest snapshot's median.
+    now: Money,
+    low: Money,
+    high: Money,
+    /// For the tooltip.
+    summary: String,
+    line: Option<Sparkline>,
 }
 
 /// How far back the leather prices go.
 const PRICE_DAYS: i64 = 7;
+/// The price lines' size in pixels, and how far their ends stay from the edges.
+const SPARK_WIDTH: f64 = 96.0;
+const SPARK_HEIGHT: f64 = 24.0;
+const SPARK_PAD: f64 = 3.0;
 
 async fn auctions_page(State(state): State<AppState>) -> Result<AuctionsPage> {
     let now = db::now();
@@ -869,6 +879,7 @@ async fn auctions_page(State(state): State<AppState>) -> Result<AuctionsPage> {
         });
 
         let ranges = db::price_ranges(&state.db, house.region, house.id, &leather, since).await?;
+        let series = db::price_series(&state.db, house.region, house.id, &leather, since).await?;
         if regions.last().is_none_or(|r| r.region != house.region) {
             regions.push(RegionPrices {
                 region: house.region,
@@ -882,15 +893,32 @@ async fn auctions_page(State(state): State<AppState>) -> Result<AuctionsPage> {
         let Some(region) = regions.last_mut() else {
             continue;
         };
-        region.houses.push(house.label());
+        region.houses.push(house);
         for (row, &(item, _)) in region.rows.iter_mut().zip(&auctions::LEATHER) {
-            row.1
-                .push(ranges.iter().find(|r| r.item == item).map(|r| PriceCell {
-                    min: auctions::money(r.min),
-                    avg: auctions::money(r.avg),
-                    max: auctions::money(r.max),
-                    snapshots: r.snapshots,
-                }));
+            let points: Vec<(i64, u64)> = series
+                .iter()
+                .filter(|p| p.item == item)
+                .map(|p| (p.at, p.median))
+                .collect();
+            row.1.push(
+                ranges
+                    .iter()
+                    .find(|r| r.item == item)
+                    .zip(points.last())
+                    .map(|(r, &(_, latest))| PriceCell {
+                        now: Money::from_copper(latest),
+                        low: Money::brief(r.min),
+                        high: Money::brief(r.max),
+                        summary: format!(
+                            "{PRICE_DAYS} days: average {}, lowest {}, highest {}, {} snapshots",
+                            auctions::money(r.avg),
+                            auctions::money(r.min),
+                            auctions::money(r.max),
+                            r.snapshots
+                        ),
+                        line: sparkline(&points, since, now, SPARK_WIDTH, SPARK_HEIGHT, SPARK_PAD),
+                    }),
+            );
         }
     }
     Ok(AuctionsPage {
@@ -898,6 +926,7 @@ async fn auctions_page(State(state): State<AppState>) -> Result<AuctionsPage> {
         enabled: state.auctions_enabled,
         houses,
         regions,
+        spark: (SPARK_WIDTH, SPARK_HEIGHT),
     })
 }
 

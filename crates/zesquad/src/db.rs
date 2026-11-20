@@ -936,6 +936,56 @@ pub async fn price_ranges(
         .collect())
 }
 
+/// One snapshot's typical price (median) of an item.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PricePoint {
+    pub item: u32,
+    pub at: i64,
+    pub median: u64,
+}
+
+/// The median price of `items` in each of a house's snapshots since `since`, by item, then
+/// time. Looks each item up in each snapshot by key, like [`price_ranges`].
+///
+/// # Errors
+///
+/// On database errors.
+pub async fn price_series(
+    db: &SqlitePool,
+    region: Region,
+    house: u32,
+    items: &[u32],
+    since: i64,
+) -> anyhow::Result<Vec<PricePoint>> {
+    if items.is_empty() {
+        return Ok(Vec::new());
+    }
+    let items = serde_json::to_string(items)?;
+    let rows: Vec<(u32, i64, i64)> = sqlx::query_as(
+        "SELECT s.item, s.at, s.median_price
+         FROM auction_snapshot_times t
+         JOIN auction_snapshots s
+           ON s.region = t.region AND s.house = t.house AND s.at = t.at
+          AND s.item IN (SELECT value FROM json_each(?))
+         WHERE t.region = ? AND t.house = ? AND t.at >= ?
+         ORDER BY s.item, s.at",
+    )
+    .bind(items)
+    .bind(region.as_str())
+    .bind(house)
+    .bind(since)
+    .fetch_all(db)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|(item, at, median)| PricePoint {
+            item,
+            at,
+            median: uint(median),
+        })
+        .collect())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1123,6 +1173,24 @@ mod tests {
             .await
             .unwrap();
         assert_eq!((later[0].min, later[0].snapshots), (23, 2));
+        let series = price_series(&db, Region::Eu, 110, &[2589, 999], 200)
+            .await
+            .unwrap();
+        assert_eq!(
+            series,
+            [
+                PricePoint {
+                    item: 2589,
+                    at: 200,
+                    median: 30
+                },
+                PricePoint {
+                    item: 2589,
+                    at: 300,
+                    median: 23
+                },
+            ]
+        );
         assert_eq!(
             price_ranges(&db, Region::Eu, 111, &[2589], 0)
                 .await

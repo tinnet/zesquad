@@ -77,10 +77,11 @@ Fetching and reading a house's two dumps takes about a second.
 few items' prices by looking each one up in each snapshot by key (about 170 snapshots a week),
 instead of scanning the week's millions of rows.
 
-`/auctions`, linked in the header, shows how collecting is going for each house and, as a first
-use of the data, the lowest, average and highest median price of five leathers over the last
-seven days. Item names aren't fetched yet, so the leathers are named in
-`zesquad_core::auctions::LEATHER`.
+`/auctions`, linked in the header, shows, as a first use of the data, five leathers' median
+price in each house now, a line of it over the last seven days (an SVG path drawn on the
+server, `zesquad_core::sparkline`, so no script), its lowest and highest, and the average on
+hover; then how collecting is going for each house. Money is shown with coins like the game.
+Item names aren't fetched yet, so the leathers are named in `zesquad_core::auctions::LEATHER`.
 
 A failed fetch is logged and stored in `auction_houses.error`, and tried again on the next
 check; the house's snapshots stay.

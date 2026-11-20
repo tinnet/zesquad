@@ -157,6 +157,35 @@ details h3 { font-size: .95rem; margin: .75rem 0 .25rem; }
 .data th { font-weight: 600; color: var(--muted); white-space: nowrap; }
 .data td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .data .sub { display: block; color: var(--muted); font-size: .8rem; }
+.data th.num { text-align: right; }
+.data tbody th { font-weight: 600; color: var(--text); white-space: nowrap; }
+/* Price tables scroll sideways on a phone; the item names stay put. */
+.prices tbody th, .prices thead th:first-child {
+  position: sticky; left: 0; z-index: 1; background: var(--card);
+  box-shadow: inset 0 -1px var(--line); /* collapsed borders don't stick along */
+}
+.data .faction-alliance { color: var(--alliance); }
+.data .faction-horde { color: var(--horde); }
+
+/* Money as the game shows it: each number followed by its coin. */
+.money { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.coin::after {
+  content: ""; display: inline-block; width: .62em; height: .62em; margin-left: .12em;
+  border-radius: 50%; vertical-align: -.02em;
+  background: radial-gradient(circle at 35% 30%, var(--coin-hi) 0 18%, var(--coin) 52%, var(--coin-lo) 100%);
+  box-shadow: inset 0 0 0 .06em var(--coin-lo);
+}
+.coin.gold { --coin-hi: #fff2b0; --coin: #e9b62c; --coin-lo: #8f6300; }
+.coin.silver { --coin-hi: #ffffff; --coin: #c3c7cf; --coin-lo: #6f747d; }
+.coin.copper { --coin-hi: #ffd2ad; --coin: #c8743c; --coin-lo: #6e3412; }
+
+/* Price cells: the price now, a light line of the last days, and their range. */
+.prices td.num { padding-top: .55rem; padding-bottom: .55rem; }
+.prices td.num > .money { font-weight: 600; }
+.spark { display: block; margin: .2rem 0 .1rem auto; overflow: visible; }
+.spark path { fill: none; stroke: var(--accent); stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round; opacity: .85; }
+.spark circle { fill: var(--accent); stroke: var(--card); stroke-width: 1.5; }
+.prices .range { font-size: .75rem; }
 
 /* Class accents: the member card's border and the class name. */
 .class-warrior { --class: var(--warrior); }
