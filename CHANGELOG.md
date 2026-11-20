@@ -2,6 +2,12 @@
 
 What changed in each zesquad release. Versions are dates (CalVer).
 
+## 2026.11.20.2
+
+### Features
+
+- **web**: Show auction prices with coins and a line of the last week ([036b619](https://github.com/tinnet/zesquad/commit/036b61986b9dc03f644ba0b10d7891e4310a18f1))
+
 ## 2026.11.20.1
 
 ### Features
