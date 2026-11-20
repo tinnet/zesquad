@@ -33,8 +33,8 @@ erDiagram
   refreshed.
 - `tag_colours` holds the colours picked for a squad's tags, by tag key, separate from the
   tags themselves: a colour stays when a tag goes away and comes back.
-- `auction_houses`, `auction_snapshots` and `auction_daily` hold auction prices by region and
-  house, apart from squads (see Auction prices).
+- `auction_houses`, `auction_snapshots`, `auction_snapshot_times` and `auction_daily` hold
+  auction prices by region and house, apart from squads (see Auction prices).
 - `armory_documents` keeps each endpoint's raw JSON from the last good fetch; the pages parse it
   the first time a character is shown after a fetch and keep the result in memory. Showing a new
   field needs no refetch, and a failed fetch keeps the old data.
@@ -72,6 +72,15 @@ Sizes, measured on 2026-11-20: a big house has about 6,600-7,000 different items
 snapshots is about 54,000 rows, 2.2 MB in SQLite. Hourly for a week that's about 9 million
 rows, under 400 MB. `auction_daily` grows by the same 2.2 MB a day, about 800 MB a year.
 Fetching and reading a house's two dumps takes about a second.
+
+`auction_snapshot_times` has a row per stored snapshot. Pages count snapshots there, and find a
+few items' prices by looking each one up in each snapshot by key (about 170 snapshots a week),
+instead of scanning the week's millions of rows.
+
+`/auctions`, linked in the header, shows how collecting is going for each house and, as a first
+use of the data, the lowest, average and highest median price of five leathers over the last
+seven days. Item names aren't fetched yet, so the leathers are named in
+`zesquad_core::auctions::LEATHER`.
 
 A failed fetch is logged and stored in `auction_houses.error`, and tried again on the next
 check; the house's snapshots stay.

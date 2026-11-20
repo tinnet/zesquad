@@ -16,11 +16,31 @@ pub enum Faction {
     Horde,
 }
 
+impl Faction {
+    #[must_use]
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Alliance => "Alliance",
+            Self::Horde => "Horde",
+        }
+    }
+}
+
 /// Which servers a house serves. The API doesn't say; see [`HOUSES`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Pool {
     Pvp,
     Pve,
+}
+
+impl Pool {
+    #[must_use]
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Pvp => "PvP",
+            Self::Pve => "PvE",
+        }
+    }
 }
 
 /// An auction house zesquad follows. House ids are the same in every region.
@@ -30,6 +50,14 @@ pub struct House {
     pub id: u32,
     pub faction: Faction,
     pub pool: Pool,
+}
+
+impl House {
+    /// For people: `Alliance PvP`.
+    #[must_use]
+    pub fn label(self) -> String {
+        format!("{} {}", self.faction.name(), self.pool.name())
+    }
 }
 
 /// The regions whose houses are followed.
@@ -58,6 +86,27 @@ pub fn followed() -> impl Iterator<Item = House> {
             pool,
         })
     })
+}
+
+/// Leather, from the lightest; item ids as in Classic. Item names aren't fetched yet, so they're
+/// written here.
+pub const LEATHER: [(u32, &str); 5] = [
+    (2318, "Light Leather"),
+    (2319, "Medium Leather"),
+    (4234, "Heavy Leather"),
+    (4304, "Thick Leather"),
+    (8170, "Rugged Leather"),
+];
+
+/// Copper as the game shows it: `1g 2s 3c`, leaving out empty larger units (`45c`, `2s 0c`).
+#[must_use]
+pub fn money(copper: u64) -> String {
+    let (gold, silver, copper) = (copper / 10_000, copper / 100 % 100, copper % 100);
+    match (gold, silver) {
+        (0, 0) => format!("{copper}c"),
+        (0, _) => format!("{silver}s {copper}c"),
+        _ => format!("{gold}g {silver}s {copper}c"),
+    }
 }
 
 /// One item's prices in one snapshot of a house, in copper per unit.
@@ -249,6 +298,7 @@ mod tests {
             snapshot.items,
             [
                 // Commodities: a median by units, not by auctions.
+                prices(2318, 45, 45, 10, 1),
                 prices(2589, 10, 10, 26, 3),
                 prices(2592, 40, 40, 6, 2),
                 // Items: a buyout for two is 150 each.
@@ -312,6 +362,22 @@ mod tests {
             }
         );
         assert_eq!(daily(7, &[]), None);
+    }
+
+    #[test]
+    fn money_reads_like_the_game() {
+        assert_eq!(money(0), "0c");
+        assert_eq!(money(45), "45c");
+        assert_eq!(money(200), "2s 0c");
+        assert_eq!(money(1_234), "12s 34c");
+        assert_eq!(money(4_000_000), "400g 0s 0c");
+        assert_eq!(money(10_203), "1g 2s 3c");
+    }
+
+    #[test]
+    fn houses_have_labels() {
+        let house = followed().next().unwrap();
+        assert_eq!((house.id, house.label().as_str()), (110, "Alliance PvP"));
     }
 
     #[test]

@@ -1170,9 +1170,9 @@ async fn auction_prices_are_followed_in_eu_and_us() {
             .unwrap()
             .unwrap();
         let ids: Vec<u32> = prices.iter().map(|p| p.item).collect();
-        assert_eq!(ids, [2589, 2592, 4306, 11208, 19019], "{region}");
+        assert_eq!(ids, [2318, 2589, 2592, 4306, 11208, 19019], "{region}");
         assert_eq!(
-            prices[0],
+            prices[1],
             ItemPrices {
                 item: 2589,
                 min_price: 10,
@@ -1214,6 +1214,36 @@ async fn auction_prices_are_followed_in_eu_and_us() {
         15,
         "both dumps of each house, once: {requests:?}"
     );
+
+    // The page shows the collecting and the leather prices.
+    let (status, page) = app.get("/auctions").await;
+    assert_eq!(status, StatusCode::OK);
+    for shown in [
+        "Europe",
+        "Americas",
+        "Alliance PvP",
+        "Horde PvE",
+        "house 110",
+        "Light Leather",
+        "Rugged Leather",
+        "45c<span class=\"sub\">45c – 45c</span>",
+        "503 Service Unavailable",
+        "no data",
+    ] {
+        assert!(page.contains(shown), "missing {shown:?} in {page}");
+    }
+    assert!(!page.contains("collection is off"));
+}
+
+#[tokio::test]
+async fn the_auction_page_is_linked_and_says_when_collecting_is_off() {
+    let app = app(false).await;
+    let (_, home) = app.get("/").await;
+    assert!(home.contains("href=\"/auctions\""));
+    let (status, page) = app.get("/auctions").await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(page.contains("Price collection is off"), "{page}");
+    assert!(page.contains("never"), "nothing checked yet: {page}");
 }
 
 #[tokio::test]

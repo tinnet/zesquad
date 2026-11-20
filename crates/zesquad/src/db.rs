@@ -594,6 +594,17 @@ pub async fn store_auctions(
             .await?;
         }
     }
+    if changed {
+        sqlx::query(
+            "INSERT OR REPLACE INTO auction_snapshot_times (region, house, at, items) VALUES (?, ?, ?, ?)",
+        )
+        .bind(region.as_str())
+        .bind(house)
+        .bind(at)
+        .bind(i64::try_from(snapshot.items.len()).unwrap_or(i64::MAX))
+        .execute(&mut *tx)
+        .await?;
+    }
     sqlx::query(
         "INSERT INTO auction_houses (region, house, checked_at, fingerprint) VALUES (?, ?, ?, ?)
          ON CONFLICT (region, house) DO UPDATE
@@ -803,8 +814,126 @@ pub async fn condense_auctions(
             .bind(keep_from)
             .execute(db)
             .await?;
+        sqlx::query("DELETE FROM auction_snapshot_times WHERE region = ? AND house = ? AND at < ?")
+            .bind(region.as_str())
+            .bind(house)
+            .bind(keep_from)
+            .execute(db)
+            .await?;
     }
     Ok(())
+}
+
+/// How collecting a house's prices is going.
+#[derive(Debug, Default)]
+pub struct HouseStatus {
+    /// Last time it was asked for.
+    pub checked_at: Option<i64>,
+    /// Why the last check failed.
+    pub error: Option<String>,
+    /// Snapshots kept (about a week's).
+    pub snapshots: i64,
+    pub first_at: Option<i64>,
+    pub last_at: Option<i64>,
+    /// Items in the latest snapshot.
+    pub last_items: i64,
+}
+
+/// # Errors
+///
+/// On database errors.
+pub async fn house_status(
+    db: &SqlitePool,
+    region: Region,
+    house: u32,
+) -> anyhow::Result<HouseStatus> {
+    let checked: Option<(Option<i64>, Option<String>)> = sqlx::query_as(
+        "SELECT checked_at, error FROM auction_houses WHERE region = ? AND house = ?",
+    )
+    .bind(region.as_str())
+    .bind(house)
+    .fetch_optional(db)
+    .await?;
+    let (snapshots, first_at, last_at): (i64, Option<i64>, Option<i64>) = sqlx::query_as(
+        "SELECT COUNT(*), MIN(at), MAX(at) FROM auction_snapshot_times WHERE region = ? AND house = ?",
+    )
+    .bind(region.as_str())
+    .bind(house)
+    .fetch_one(db)
+    .await?;
+    let last_items: Option<(i64,)> = sqlx::query_as(
+        "SELECT items FROM auction_snapshot_times WHERE region = ? AND house = ? AND at = ?",
+    )
+    .bind(region.as_str())
+    .bind(house)
+    .bind(last_at)
+    .fetch_optional(db)
+    .await?;
+    let (checked_at, error) = checked.unwrap_or_default();
+    Ok(HouseStatus {
+        checked_at,
+        error,
+        snapshots,
+        first_at,
+        last_at,
+        last_items: last_items.map_or(0, |(n,)| n),
+    })
+}
+
+/// An item's typical price (each snapshot's median) over a stretch of time.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PriceRange {
+    pub item: u32,
+    pub min: u64,
+    pub avg: u64,
+    pub max: u64,
+    /// Snapshots that had the item.
+    pub snapshots: u64,
+}
+
+/// The price ranges of `items` in a house's snapshots since `since`, for the items that were on
+/// sale. Looks each item up in each snapshot by key, so it stays quick with a week of data.
+///
+/// # Errors
+///
+/// On database errors.
+pub async fn price_ranges(
+    db: &SqlitePool,
+    region: Region,
+    house: u32,
+    items: &[u32],
+    since: i64,
+) -> anyhow::Result<Vec<PriceRange>> {
+    if items.is_empty() {
+        return Ok(Vec::new());
+    }
+    let items = serde_json::to_string(items)?;
+    let rows: Vec<(u32, i64, i64, i64, i64)> = sqlx::query_as(
+        "SELECT s.item, MIN(s.median_price), CAST(ROUND(AVG(s.median_price)) AS INTEGER),
+                MAX(s.median_price), COUNT(*)
+         FROM auction_snapshot_times t
+         JOIN auction_snapshots s
+           ON s.region = t.region AND s.house = t.house AND s.at = t.at
+          AND s.item IN (SELECT value FROM json_each(?))
+         WHERE t.region = ? AND t.house = ? AND t.at >= ?
+         GROUP BY s.item",
+    )
+    .bind(items)
+    .bind(region.as_str())
+    .bind(house)
+    .bind(since)
+    .fetch_all(db)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|(item, min, avg, max, snapshots)| PriceRange {
+            item,
+            min: uint(min),
+            avg: uint(avg),
+            max: uint(max),
+            snapshots: uint(snapshots),
+        })
+        .collect())
 }
 
 #[cfg(test)]
@@ -950,6 +1079,11 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(left.0, 1);
+        let times: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM auction_snapshot_times")
+            .fetch_one(&db)
+            .await
+            .unwrap();
+        assert_eq!(times.0, 1, "snapshot times are pruned with the snapshots");
         assert_eq!(
             daily_auctions(&db, Region::Eu, 110, 20_000)
                 .await
@@ -957,6 +1091,56 @@ mod tests {
                 .len(),
             1
         );
+    }
+
+    #[tokio::test]
+    async fn price_ranges_and_status_over_the_snapshots_kept() {
+        let (_dir, db) = temp_db().await;
+        assert_eq!(
+            house_status(&db, Region::Eu, 110).await.unwrap().snapshots,
+            0
+        );
+        for (i, (at, median)) in [(100, 10), (200, 30), (300, 23)].into_iter().enumerate() {
+            store_auctions(&db, Region::Eu, 110, at, &snapshot(i as u64, median))
+                .await
+                .unwrap();
+        }
+        let ranges = price_ranges(&db, Region::Eu, 110, &[2589, 999], 0)
+            .await
+            .unwrap();
+        assert_eq!(
+            ranges,
+            [PriceRange {
+                item: 2589,
+                min: 10,
+                avg: 21,
+                max: 30,
+                snapshots: 3
+            }],
+            "items not on sale are left out"
+        );
+        let later = price_ranges(&db, Region::Eu, 110, &[2589], 200)
+            .await
+            .unwrap();
+        assert_eq!((later[0].min, later[0].snapshots), (23, 2));
+        assert_eq!(
+            price_ranges(&db, Region::Eu, 111, &[2589], 0)
+                .await
+                .unwrap(),
+            []
+        );
+
+        let status = house_status(&db, Region::Eu, 110).await.unwrap();
+        assert_eq!(
+            (
+                status.snapshots,
+                status.first_at,
+                status.last_at,
+                status.last_items
+            ),
+            (3, Some(100), Some(300), 1)
+        );
+        assert_eq!(status.checked_at, Some(300));
     }
 
     #[tokio::test]

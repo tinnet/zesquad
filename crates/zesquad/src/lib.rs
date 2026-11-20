@@ -62,6 +62,7 @@ pub async fn start(
     let wake = Arc::new(Notify::new());
 
     let mut syncs = Vec::new();
+    let mut auctions_enabled = false;
     if let Some(config) = settings.armory {
         let client = Arc::new(armory::Client::new(config)?);
         syncs.push(tokio::spawn(
@@ -74,6 +75,7 @@ pub async fn start(
             .run(),
         ));
         if settings.auctions {
+            auctions_enabled = true;
             syncs.push(tokio::spawn(
                 auctions::AuctionSync {
                     db: db.clone(),
@@ -99,6 +101,7 @@ pub async fn start(
         wake,
         default_region: settings.default_region,
         armory_enabled,
+        auctions_enabled,
         armory_cache: Arc::default(),
         auth,
     };

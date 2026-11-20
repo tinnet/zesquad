@@ -15,6 +15,7 @@ use serde::Deserialize;
 use sqlx::SqlitePool;
 use tokio::sync::Notify;
 use zesquad_core::armory::Profile;
+use zesquad_core::auctions;
 use zesquad_core::refresh::Status;
 use zesquad_core::tags::{self, CharacterTag, Colour};
 use zesquad_core::{CharacterName, Region, SquadName, Tag, parse_tags};
@@ -29,6 +30,8 @@ pub struct AppState {
     /// The region the new-squad form starts on.
     pub default_region: Region,
     pub armory_enabled: bool,
+    /// The auction sync runs.
+    pub auctions_enabled: bool,
     pub armory_cache: Arc<db::ArmoryCache>,
     /// Set when a password protects the app.
     pub auth: Option<Arc<crate::auth::Auth>>,
@@ -49,6 +52,7 @@ pub fn router(state: AppState) -> Router {
         .route("/logout", post(logout));
     let protected = Router::new()
         .route("/", get(index))
+        .route("/auctions", get(auctions_page))
         .route("/squads", post(create_squad))
         .route("/s/{squad}", get(squad_page))
         .route("/s/{squad}/roster", get(roster_partial))
@@ -803,6 +807,98 @@ async fn refresh(
     db::request_refresh(&state.db, &squad.id, path.id).await?;
     state.wake.notify_one();
     respond(&state, htmx, squad, form.filter, Outcome::default()).await
+}
+
+// ---- auction prices ----
+
+#[derive(Template, WebTemplate)]
+#[template(path = "auctions.html")]
+struct AuctionsPage {
+    logout: bool,
+    enabled: bool,
+    houses: Vec<HouseView>,
+    regions: Vec<RegionPrices>,
+}
+
+/// A followed house and how collecting its prices is going.
+struct HouseView {
+    region: Region,
+    id: u32,
+    label: String,
+    checked: Option<String>,
+    error: Option<String>,
+    snapshots: i64,
+    since: Option<String>,
+    last_items: i64,
+}
+
+/// Leather prices in one region's houses: a row per leather, a cell per house.
+struct RegionPrices {
+    region: Region,
+    houses: Vec<String>,
+    rows: Vec<(&'static str, Vec<Option<PriceCell>>)>,
+}
+
+struct PriceCell {
+    min: String,
+    avg: String,
+    max: String,
+    snapshots: u64,
+}
+
+/// How far back the leather prices go.
+const PRICE_DAYS: i64 = 7;
+
+async fn auctions_page(State(state): State<AppState>) -> Result<AuctionsPage> {
+    let now = db::now();
+    let since = now - PRICE_DAYS * auctions::DAY;
+    let leather: Vec<u32> = auctions::LEATHER.iter().map(|&(id, _)| id).collect();
+    let mut houses = Vec::new();
+    let mut regions: Vec<RegionPrices> = Vec::new();
+    for house in auctions::followed() {
+        let status = db::house_status(&state.db, house.region, house.id).await?;
+        houses.push(HouseView {
+            region: house.region,
+            id: house.id,
+            label: house.label(),
+            checked: status.checked_at.map(|at| ago(now - at)),
+            error: status.error,
+            snapshots: status.snapshots,
+            since: status.first_at.map(|at| ago(now - at)),
+            last_items: status.last_items,
+        });
+
+        let ranges = db::price_ranges(&state.db, house.region, house.id, &leather, since).await?;
+        if regions.last().is_none_or(|r| r.region != house.region) {
+            regions.push(RegionPrices {
+                region: house.region,
+                houses: Vec::new(),
+                rows: auctions::LEATHER
+                    .iter()
+                    .map(|&(_, name)| (name, Vec::new()))
+                    .collect(),
+            });
+        }
+        let Some(region) = regions.last_mut() else {
+            continue;
+        };
+        region.houses.push(house.label());
+        for (row, &(item, _)) in region.rows.iter_mut().zip(&auctions::LEATHER) {
+            row.1
+                .push(ranges.iter().find(|r| r.item == item).map(|r| PriceCell {
+                    min: auctions::money(r.min),
+                    avg: auctions::money(r.avg),
+                    max: auctions::money(r.max),
+                    snapshots: r.snapshots,
+                }));
+        }
+    }
+    Ok(AuctionsPage {
+        logout: state.auth.is_some(),
+        enabled: state.auctions_enabled,
+        houses,
+        regions,
+    })
 }
 
 async fn healthz(State(state): State<AppState>) -> Response {
