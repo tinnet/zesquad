@@ -2,6 +2,12 @@
 
 What changed in each zesquad release. Versions are dates (CalVer).
 
+## 2026.11.20.3
+
+### Performance
+
+- **armory**: Ask Battle.net whether auction dumps changed before downloading them ([16bd049](https://github.com/tinnet/zesquad/commit/16bd0498317537b85f09bbdb581764f27eb8fda5))
+
 ## 2026.11.20.2
 
 ### Features
