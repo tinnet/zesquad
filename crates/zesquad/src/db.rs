@@ -620,6 +620,85 @@ pub async fn store_auctions(
     Ok(changed)
 }
 
+/// The `Last-Modified` of a house's items and commodities dumps in its last stored snapshot.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DumpsModified {
+    pub items: Option<String>,
+    pub commodities: Option<String>,
+}
+
+/// See [`DumpsModified`]; both `None` for a house never stored.
+///
+/// # Errors
+///
+/// On database errors.
+pub async fn auctions_modified(
+    db: &SqlitePool,
+    region: Region,
+    house: u32,
+) -> anyhow::Result<DumpsModified> {
+    let row: Option<(Option<String>, Option<String>)> = sqlx::query_as(
+        "SELECT items_modified, commodities_modified FROM auction_houses
+         WHERE region = ? AND house = ?",
+    )
+    .bind(region.as_str())
+    .bind(house)
+    .fetch_optional(db)
+    .await?;
+    Ok(
+        row.map_or_else(DumpsModified::default, |(items, commodities)| {
+            DumpsModified { items, commodities }
+        }),
+    )
+}
+
+/// Remembers the `Last-Modified` of the dumps just stored (after [`store_auctions`]).
+///
+/// # Errors
+///
+/// On database errors.
+pub async fn set_auctions_modified(
+    db: &SqlitePool,
+    region: Region,
+    house: u32,
+    modified: &DumpsModified,
+) -> anyhow::Result<()> {
+    sqlx::query(
+        "UPDATE auction_houses SET items_modified = ?, commodities_modified = ?
+         WHERE region = ? AND house = ?",
+    )
+    .bind(modified.items.as_deref())
+    .bind(modified.commodities.as_deref())
+    .bind(region.as_str())
+    .bind(house)
+    .execute(db)
+    .await?;
+    Ok(())
+}
+
+/// Records a check that found both dumps unchanged since the last snapshot (Battle.net answered
+/// 304): nothing new to store.
+///
+/// # Errors
+///
+/// On database errors.
+pub async fn auctions_unchanged(
+    db: &SqlitePool,
+    region: Region,
+    house: u32,
+    at: i64,
+) -> anyhow::Result<()> {
+    sqlx::query(
+        "UPDATE auction_houses SET checked_at = ?, error = NULL WHERE region = ? AND house = ?",
+    )
+    .bind(at)
+    .bind(region.as_str())
+    .bind(house)
+    .execute(db)
+    .await?;
+    Ok(())
+}
+
 /// Records a failed check; the snapshots so far stay.
 ///
 /// # Errors

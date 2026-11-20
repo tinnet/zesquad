@@ -3,7 +3,7 @@
 //! `ZESQUAD_TEST_REGION` (default `eu`). Real character names stay out of the repo, so the
 //! character comes from the environment.
 
-use zesquad::armory::{Client, Config, Lookup};
+use zesquad::armory::{Client, Config, Dump, Lookup};
 use zesquad_core::armory::{Documents, Endpoint, Profile};
 use zesquad_core::auctions;
 use zesquad_core::{CharacterName, Region};
@@ -77,9 +77,28 @@ async fn unknown_characters_are_not_found() {
 async fn reads_real_auction_houses_in_eu_and_us() {
     let client = client();
     for region in auctions::REGIONS {
-        let items = client.auctions(region, 110, false).await.unwrap();
-        let commodities = client.auctions(region, 110, true).await.unwrap();
-        let snapshot = auctions::snapshot(&[&items, &commodities]).unwrap();
+        let mut dumps = Vec::new();
+        for commodities in [false, true] {
+            let Dump::Changed {
+                body,
+                last_modified,
+            } = client
+                .auctions(region, 110, commodities, None)
+                .await
+                .unwrap()
+            else {
+                panic!("{region}: a plain request gets the dump");
+            };
+            // Asking again with its Last-Modified gets a 304 instead of the dump.
+            let since = last_modified.expect("dumps have a Last-Modified");
+            let again = client
+                .auctions(region, 110, commodities, Some(&since))
+                .await
+                .unwrap();
+            assert!(matches!(again, Dump::NotModified), "{region}");
+            dumps.push(body);
+        }
+        let snapshot = auctions::snapshot(&[&dumps[0], &dumps[1]]).unwrap();
         // A busy house: thousands of items (about 7,000 in November 2026).
         assert!(
             snapshot.items.len() > 1000,

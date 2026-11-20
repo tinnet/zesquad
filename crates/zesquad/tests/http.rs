@@ -32,9 +32,13 @@ struct Fake {
     gate: Arc<tokio::sync::RwLock<()>>,
     /// Character lookups answer 503.
     down: Arc<AtomicBool>,
-    /// Auction dumps asked for, as `region/house[/commodities]`.
+    /// Auction dumps asked for, as `region/house[/commodities]`, with ` if-modified-since`
+    /// for conditional requests.
     auction_requests: Arc<std::sync::Mutex<Vec<String>>>,
 }
+
+/// When the fake's auction dumps last changed.
+const DUMPS_MODIFIED: &str = "Fri, 20 Nov 2026 20:23:48 GMT";
 
 async fn fake_token(headers: HeaderMap) -> Response {
     // base64("test-id:test-secret")
@@ -130,10 +134,13 @@ async fn fake_auctions(
     if !(1..=3).contains(&ruleset) && ruleset != 15 {
         return StatusCode::NOT_FOUND.into_response();
     }
-    fake.auction_requests
-        .lock()
-        .unwrap()
-        .push(format!("{region}/{rest}"));
+    let since = headers
+        .get(header::IF_MODIFIED_SINCE)
+        .and_then(|v| v.to_str().ok());
+    fake.auction_requests.lock().unwrap().push(match since {
+        Some(_) => format!("{region}/{rest} if-modified-since"),
+        None => format!("{region}/{rest}"),
+    });
     let (house, commodities) = match rest.split_once('/') {
         Some((house, "commodities")) => (house, true),
         None => (rest.as_str(), false),
@@ -141,6 +148,15 @@ async fn fake_auctions(
     };
     if (region, house) == ("us", "111") {
         return StatusCode::SERVICE_UNAVAILABLE.into_response();
+    }
+    // EU house 113's commodities changed later than the rest.
+    let modified = if (region, house, commodities) == ("eu", "113", true) {
+        "Fri, 20 Nov 2026 21:23:48 GMT"
+    } else {
+        DUMPS_MODIFIED
+    };
+    if since == Some(DUMPS_MODIFIED) && modified == DUMPS_MODIFIED {
+        return StatusCode::NOT_MODIFIED.into_response();
     }
     let body = if house == "110" {
         let name = if commodities {
@@ -156,7 +172,14 @@ async fn fake_auctions(
     } else {
         r#"{"auctions":[]}"#.to_owned()
     };
-    ([(header::CONTENT_TYPE, "application/json")], body).into_response()
+    (
+        [
+            (header::CONTENT_TYPE, "application/json"),
+            (header::LAST_MODIFIED, modified),
+        ],
+        body,
+    )
+        .into_response()
 }
 
 async fn start_fake() -> (String, Fake) {
@@ -1236,6 +1259,80 @@ async fn auction_prices_are_followed_in_eu_and_us() {
         assert!(page.contains(shown), "missing {shown:?} in {page}");
     }
     assert!(!page.contains("collection is off"));
+}
+
+#[tokio::test]
+async fn unchanged_auction_dumps_are_not_downloaded_again() {
+    use zesquad::auctions::AuctionSync;
+    use zesquad::db;
+    use zesquad_core::auctions::followed;
+
+    let (fake_url, fake) = start_fake().await;
+    let dir = tempfile::tempdir().unwrap();
+    let db = db::open(&dir.path().join("zesquad.db"), Region::Eu)
+        .await
+        .unwrap();
+    let config = zesquad::armory::Config::new(
+        CLIENT_ID.into(),
+        CLIENT_SECRET.into(),
+        Some(&fake_url),
+        &format!("{fake_url}/token"),
+    )
+    .unwrap();
+    let sync = AuctionSync {
+        db: db.clone(),
+        client: Arc::new(zesquad::armory::Client::new(config).unwrap()),
+    };
+    let eu = |id| {
+        followed()
+            .find(|h| h.region == Region::Eu && h.id == id)
+            .unwrap()
+    };
+    let requests = || std::mem::take(&mut *fake.auction_requests.lock().unwrap());
+
+    // The first time, both dumps are fetched plainly and their Last-Modified kept.
+    sync.update(eu(110), 1_000).await.unwrap();
+    assert_eq!(requests(), ["eu/110", "eu/110/commodities"]);
+    assert_eq!(
+        db::auctions_modified(&db, Region::Eu, 110).await.unwrap(),
+        db::DumpsModified {
+            items: Some(DUMPS_MODIFIED.into()),
+            commodities: Some(DUMPS_MODIFIED.into()),
+        }
+    );
+
+    // Then Battle.net is asked whether they changed; they haven't, so nothing new is stored.
+    sync.update(eu(110), 2_000).await.unwrap();
+    assert_eq!(
+        requests(),
+        [
+            "eu/110 if-modified-since",
+            "eu/110/commodities if-modified-since"
+        ]
+    );
+    let status = db::house_status(&db, Region::Eu, 110).await.unwrap();
+    assert_eq!((status.snapshots, status.checked_at), (1, Some(2_000)));
+    assert_eq!(status.error, None);
+
+    // When only one dump changed, the other is fetched again to make a whole snapshot.
+    sync.update(eu(113), 1_000).await.unwrap();
+    requests();
+    sync.update(eu(113), 2_000).await.unwrap();
+    assert_eq!(
+        requests(),
+        [
+            "eu/113 if-modified-since",
+            "eu/113/commodities if-modified-since",
+            "eu/113"
+        ]
+    );
+    assert_eq!(
+        db::house_status(&db, Region::Eu, 113)
+            .await
+            .unwrap()
+            .checked_at,
+        Some(2_000)
+    );
 }
 
 #[tokio::test]

@@ -4,7 +4,7 @@
 
 pub mod armory;
 mod assets;
-mod auctions;
+pub mod auctions;
 mod auth;
 pub mod cli;
 pub mod db;

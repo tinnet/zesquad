@@ -5,7 +5,7 @@
 use std::time::{Duration, Instant};
 
 use anyhow::{Context as _, bail};
-use reqwest::{StatusCode, Url};
+use reqwest::{StatusCode, Url, header};
 use serde::Deserialize;
 use serde_json::Value;
 use tokio::sync::Mutex;
@@ -57,6 +57,23 @@ impl Config {
             None => Ok(Url::parse(&format!("https://{region}.api.blizzard.com"))?),
         }
     }
+}
+
+/// An auction dump, or that it hasn't changed since the time asked about.
+pub enum Dump {
+    Changed {
+        body: String,
+        /// Battle.net's `Last-Modified`, to send back as `If-Modified-Since` next time.
+        last_modified: Option<String>,
+    },
+    NotModified,
+}
+
+/// A response: its status, body and `Last-Modified`.
+struct Reply {
+    status: StatusCode,
+    body: String,
+    last_modified: Option<String>,
 }
 
 /// What a lookup found.
@@ -118,12 +135,13 @@ impl Client {
     ) -> anyhow::Result<Lookup> {
         let mut segments = vec!["profile", "wow", "character", key];
         segments.extend_from_slice(endpoint.path());
-        let (status, body) = self
+        let Reply { status, body, .. } = self
             .get(
                 region,
                 &segments,
                 &region.profile_namespace(),
                 LOOKUP_TIMEOUT,
+                None,
             )
             .await?;
         match status {
@@ -135,29 +153,42 @@ impl Client {
         }
     }
 
-    /// A house's auctions as JSON: its items, or with `commodities` its stackables.
+    /// A house's auctions as JSON: its items, or with `commodities` its stackables. With
+    /// `if_modified_since` (a `Last-Modified` from before), a dump that hasn't changed since
+    /// isn't sent again.
     ///
     /// # Errors
     ///
-    /// On network errors, bad credentials or any status but 200.
+    /// On network errors, bad credentials or statuses other than 200 and 304.
     pub async fn auctions(
         &self,
         region: Region,
         house: u32,
         commodities: bool,
-    ) -> anyhow::Result<String> {
+        if_modified_since: Option<&str>,
+    ) -> anyhow::Result<Dump> {
         let (ruleset, house_id) = (RULESET.to_string(), house.to_string());
         let mut segments = vec!["data", "wow", "ruleset", &ruleset, "auctions", &house_id];
         if commodities {
             segments.push("commodities");
         }
-        let (status, body) = self
-            .get(region, &segments, &region.dynamic_namespace(), DUMP_TIMEOUT)
+        let reply = self
+            .get(
+                region,
+                &segments,
+                &region.dynamic_namespace(),
+                DUMP_TIMEOUT,
+                if_modified_since,
+            )
             .await?;
-        if status != StatusCode::OK {
-            bail!("Battle.net answered {status} for auction house {house}");
+        match reply.status {
+            StatusCode::OK => Ok(Dump::Changed {
+                body: reply.body,
+                last_modified: reply.last_modified,
+            }),
+            StatusCode::NOT_MODIFIED if if_modified_since.is_some() => Ok(Dump::NotModified),
+            other => bail!("Battle.net answered {other} for auction house {house}"),
         }
-        Ok(body)
     }
 
     /// GETs any API path and returns the status and body, for exploring the API.
@@ -172,7 +203,10 @@ impl Client {
         namespace: &str,
     ) -> anyhow::Result<(StatusCode, String)> {
         let segments: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
-        self.get(region, &segments, namespace, DUMP_TIMEOUT).await
+        let reply = self
+            .get(region, &segments, namespace, DUMP_TIMEOUT, None)
+            .await?;
+        Ok((reply.status, reply.body))
     }
 
     /// One retry with a fresh token on 401, in case Battle.net revoked the cached one early.
@@ -182,7 +216,8 @@ impl Client {
         segments: &[&str],
         namespace: &str,
         timeout: Duration,
-    ) -> anyhow::Result<(StatusCode, String)> {
+        if_modified_since: Option<&str>,
+    ) -> anyhow::Result<Reply> {
         let mut url = self.config.api_url(region)?;
         url.path_segments_mut()
             .map_err(|()| anyhow::anyhow!("API URL can't have a path"))?
@@ -194,16 +229,27 @@ impl Client {
         let mut retried = false;
         loop {
             let token = self.token().await?;
-            let response = self
+            let mut request = self
                 .http
                 .get(url.clone())
                 .bearer_auth(token)
-                .timeout(timeout)
-                .send()
-                .await?;
+                .timeout(timeout);
+            if let Some(since) = if_modified_since {
+                request = request.header(header::IF_MODIFIED_SINCE, since);
+            }
+            let response = request.send().await?;
             let status = response.status();
             if status != StatusCode::UNAUTHORIZED {
-                return Ok((status, response.text().await?));
+                let last_modified = response
+                    .headers()
+                    .get(header::LAST_MODIFIED)
+                    .and_then(|v| v.to_str().ok())
+                    .map(str::to_owned);
+                return Ok(Reply {
+                    status,
+                    body: response.text().await?,
+                    last_modified,
+                });
             }
             if retried {
                 bail!("Battle.net rejected a fresh token (401); check the client id and secret");

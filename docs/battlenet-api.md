@@ -202,8 +202,14 @@ Forever has no realms (see Verified), so auctions hang off **rulesets** instead,
 - **Size**: one big house is about 150k item auctions (28 MB of formatted JSON) plus 125k
   commodity auctions (19 MB); about 2.6 MB gzipped. Both dumps arrive in a few seconds with
   `Accept-Encoding: gzip`.
-- **How often it changes**: a third-party price site says about hourly. Not verified; whether
-  `Last-Modified` / `If-Modified-Since` work is unknown.
+- **How often it changes**: about hourly, all followed houses in both regions together, at no
+  fixed minute: new dumps showed up between about :20 and :35 past the hour (our server's logs,
+  November 2026). Both dumps of a house carry the same `Last-Modified`.
+- **Conditional requests work**: responses have `Last-Modified` and
+  `Cache-Control: public, max-age=86400`, no `ETag`. Sending that `Last-Modified` back as
+  `If-Modified-Since` gets `304` with an empty body; an older date gets the full `200`. Tried by
+  hand on EU and US house 110, items and commodities, 2026-11-20;
+  `reads_real_auction_houses_in_eu_and_us` in `tests/network.rs` checks it.
 - The forum says the index needs its trailing slash (`.../auctions/`). Our client drops trailing
   slashes, and `.../auctions/index` works.
 - `/data/wow/auctions/commodities` (retail's region-wide commodities) answers 404.

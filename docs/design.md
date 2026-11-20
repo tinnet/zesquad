@@ -62,8 +62,12 @@ through the houses:
   into one snapshot off the async threads. Per item: lowest unit price, median by units (so one
   cheap stack of 20 outweighs one dear single), units on sale, and auctions. Bid-only auctions
   are left out; item variants count as the plain item.
-- Battle.net updates the dumps about hourly, so most checks find the same auctions: a snapshot
-  whose fingerprint (from the auction ids) matches the last one isn't stored again.
+- Battle.net updates the dumps about hourly, so most checks find the same auctions. Each dump
+  is asked for with `If-Modified-Since` set to the `Last-Modified` of the one stored last
+  (`auction_houses.items_modified` / `commodities_modified`); when both answer 304 nothing is
+  downloaded or stored. When only one changed, the other is fetched again to make a whole
+  snapshot. As a backstop, a snapshot whose fingerprint (from the auction ids) matches the last
+  one isn't stored again.
 - Finished UTC days are condensed into `auction_daily`: lowest price, median and highest of the
   snapshots' medians, average units, number of snapshots. `condensed_through` remembers how far.
 - Snapshots older than seven whole days are deleted, but never before their day is condensed.
