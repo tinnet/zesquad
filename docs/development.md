@@ -17,7 +17,9 @@ just run                   # http://127.0.0.1:8080, database in data/
   database and a fake Battle.net in the same process, serving the made-up character in
   `crates/zesquad-core/fixtures/`. No network needed.
 - `just network-test`: calls the real API with `.env`'s credentials. Set
-  `ZESQUAD_TEST_CHARACTER=Name-Surname` (in `.env` is fine) to a Forever character in EU.
+  `ZESQUAD_TEST_CHARACTER=Name-Surname` (in `.env` is fine) to a Forever character, and
+  `ZESQUAD_TEST_REGION` to its region if that isn't `eu`. Any public character will do; never
+  commit one.
 - `just ci`: format check, clippy (pedantic, warnings are errors), tests. CI runs exactly this.
 
 Fixtures and tests use made-up characters only; real names never go in the repo.

@@ -17,6 +17,7 @@ test *args:
     cargo test --workspace {{ args }}
 
 # Run the tests that call the real Battle.net API; needs .env and ZESQUAD_TEST_CHARACTER=Name-Surname
+# (in ZESQUAD_TEST_REGION, default eu)
 network-test:
     cargo test --workspace -- --ignored
 

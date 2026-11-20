@@ -1,6 +1,7 @@
 //! Calls the real Battle.net API. Ignored by `just test`; `just network-test` runs it with the
-//! credentials from .env and a real character in `ZESQUAD_TEST_CHARACTER` (`Name-Surname`, EU).
-//! Real character names stay out of the repo, so the character comes from the environment.
+//! credentials from .env and a real character in `ZESQUAD_TEST_CHARACTER` (`Name-Surname`), in
+//! `ZESQUAD_TEST_REGION` (default `eu`). Real character names stay out of the repo, so the
+//! character comes from the environment.
 
 use zesquad::armory::{Client, Config, Lookup};
 use zesquad_core::armory::{Documents, Endpoint, Profile};
@@ -27,19 +28,26 @@ fn client() -> Client {
 async fn looks_up_a_real_forever_character() {
     let _ = dotenvy::dotenv();
     let name: CharacterName = std::env::var("ZESQUAD_TEST_CHARACTER")
-        .expect("set ZESQUAD_TEST_CHARACTER=Name-Surname to a Forever character in EU")
+        .expect("set ZESQUAD_TEST_CHARACTER=Name-Surname to a Forever character")
         .parse()
+        .unwrap();
+    let region: Region = std::env::var("ZESQUAD_TEST_REGION")
+        .map_or(Ok(Region::Eu), |r| r.parse())
         .unwrap();
     let client = client();
     let mut docs = Documents::default();
     for endpoint in [Endpoint::Summary, Endpoint::Media, Endpoint::Equipment] {
         match client
-            .character(Region::Eu, &name.key(), endpoint)
+            .character(region, &name.key(), endpoint)
             .await
             .unwrap()
         {
             Lookup::Found(doc) => docs.set(endpoint, doc),
-            Lookup::NotFound => panic!("{} not found on {}", endpoint.as_str(), name.key()),
+            Lookup::NotFound => panic!(
+                "{} not found on {} in {region}",
+                endpoint.as_str(),
+                name.key()
+            ),
         }
     }
     let profile = Profile::from_documents(&docs);
