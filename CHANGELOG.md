@@ -2,6 +2,12 @@
 
 What changed in each zesquad release. Versions are dates (CalVer).
 
+## 2026.11.20.1
+
+### Features
+
+- **web**: Show auction house collection and leather prices ([049e1f6](https://github.com/tinnet/zesquad/commit/049e1f643c5872c89f89bbc7741798d89eee3d0b))
+
 ## 2026.11.20
 
 ### Features
