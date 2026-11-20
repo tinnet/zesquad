@@ -4,6 +4,7 @@
 
 use zesquad::armory::{Client, Config, Lookup};
 use zesquad_core::armory::{Documents, Endpoint, Profile};
+use zesquad_core::auctions;
 use zesquad_core::{CharacterName, Region};
 
 fn client() -> Client {
@@ -61,4 +62,50 @@ async fn unknown_characters_are_not_found() {
         .await
         .unwrap();
     assert!(matches!(lookup, Lookup::NotFound));
+}
+
+#[tokio::test]
+#[ignore = "calls the real Battle.net API"]
+async fn reads_real_auction_houses_in_eu_and_us() {
+    let client = client();
+    for region in auctions::REGIONS {
+        let items = client.auctions(region, 110, false).await.unwrap();
+        let commodities = client.auctions(region, 110, true).await.unwrap();
+        let snapshot = auctions::snapshot(&[&items, &commodities]).unwrap();
+        // A busy house: thousands of items (about 7,000 in November 2026).
+        assert!(
+            snapshot.items.len() > 1000,
+            "{region}: {}",
+            snapshot.items.len()
+        );
+    }
+}
+
+/// The followed houses are hard-coded; this notices if Blizzard renumbers them.
+#[tokio::test]
+#[ignore = "calls the real Battle.net API"]
+async fn the_followed_auction_houses_still_exist() {
+    let client = client();
+    for region in auctions::REGIONS {
+        let path = format!("/data/wow/ruleset/{}/auctions/index", auctions::RULESET);
+        let (status, body) = client
+            .raw(region, &path, &region.dynamic_namespace())
+            .await
+            .unwrap();
+        assert_eq!(status, 200, "{region}: {body}");
+        let index: serde_json::Value = serde_json::from_str(&body).unwrap();
+        let houses = index["auctions"].as_array().unwrap();
+        for (id, faction, _) in auctions::HOUSES {
+            let name = houses
+                .iter()
+                .find(|h| h["id"] == id)
+                .and_then(|h| h["name"].as_str())
+                .unwrap_or_else(|| panic!("{region}: no house {id} in {body}"));
+            let expected = match faction {
+                auctions::Faction::Alliance => "Alliance",
+                auctions::Faction::Horde => "Horde",
+            };
+            assert!(name.contains(expected), "{region}: house {id} is {name:?}");
+        }
+    }
 }

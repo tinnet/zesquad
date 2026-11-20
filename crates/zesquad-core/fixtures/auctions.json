@@ -1,0 +1,16 @@
+{
+  "_links": { "self": { "href": "https://eu.api.blizzard.com/data/wow/ruleset/2/auctions/110?namespace=dynamic-forever-eu" } },
+  "id": 110,
+  "name": "Alliance Auction House",
+  "ruleset": { "href": "https://eu.api.blizzard.com/data/wow/ruleset/2?namespace=dynamic-forever-eu" },
+  "commodities": { "href": "https://eu.api.blizzard.com/data/wow/ruleset/2/auctions/110/commodities?namespace=dynamic-forever-eu" },
+  "auctions": [
+    { "id": 1001, "item": { "id": 11208, "context": 1, "modifiers": [{ "type": 28, "value": 6326 }] }, "buyout": 1600, "quantity": 1, "time_left": "LONG" },
+    { "id": 1002, "item": { "id": 11208 }, "buyout": 1401, "quantity": 1, "time_left": "SHORT" },
+    { "id": 1003, "item": { "id": 11208 }, "bid": 1200, "buyout": 1500, "quantity": 1, "time_left": "MEDIUM" },
+    { "id": 1004, "item": { "id": 19019 }, "buyout": 5000000, "quantity": 1, "time_left": "VERY_LONG" },
+    { "id": 1005, "item": { "id": 19019 }, "buyout": 4000000, "quantity": 1, "time_left": "LONG" },
+    { "id": 1006, "item": { "id": 4306 }, "buyout": 300, "quantity": 2, "time_left": "SHORT" },
+    { "id": 1007, "item": { "id": 7005 }, "bid": 100, "quantity": 1, "time_left": "SHORT" }
+  ]
+}

@@ -32,6 +32,8 @@ struct Fake {
     gate: Arc<tokio::sync::RwLock<()>>,
     /// Character lookups answer 503.
     down: Arc<AtomicBool>,
+    /// Auction dumps asked for, as `region/house[/commodities]`.
+    auction_requests: Arc<std::sync::Mutex<Vec<String>>>,
 }
 
 async fn fake_token(headers: HeaderMap) -> Response {
@@ -104,11 +106,68 @@ fn fake_character(
         .into_response()
 }
 
+/// House 110 has the fixture auctions in every region and other houses are empty, except US
+/// house 111, which is down.
+async fn fake_auctions(
+    State(fake): State<Fake>,
+    headers: HeaderMap,
+    Query(q): Query<std::collections::HashMap<String, String>>,
+    Path((ruleset, rest)): Path<(u32, String)>,
+) -> Response {
+    let authorised = headers
+        .get(header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        == Some(&format!("Bearer {TOKEN}"));
+    if !authorised {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    let region = match q.get("namespace").map(String::as_str) {
+        Some("dynamic-forever-eu") => "eu",
+        Some("dynamic-forever-us") => "us",
+        Some("dynamic-forever-tw") => "tw",
+        _ => return StatusCode::FORBIDDEN.into_response(),
+    };
+    if !(1..=3).contains(&ruleset) && ruleset != 15 {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+    fake.auction_requests
+        .lock()
+        .unwrap()
+        .push(format!("{region}/{rest}"));
+    let (house, commodities) = match rest.split_once('/') {
+        Some((house, "commodities")) => (house, true),
+        None => (rest.as_str(), false),
+        Some(_) => return StatusCode::NOT_FOUND.into_response(),
+    };
+    if (region, house) == ("us", "111") {
+        return StatusCode::SERVICE_UNAVAILABLE.into_response();
+    }
+    let body = if house == "110" {
+        let name = if commodities {
+            "commodities"
+        } else {
+            "auctions"
+        };
+        std::fs::read_to_string(format!(
+            "{}/../zesquad-core/fixtures/{name}.json",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .unwrap()
+    } else {
+        r#"{"auctions":[]}"#.to_owned()
+    };
+    ([(header::CONTENT_TYPE, "application/json")], body).into_response()
+}
+
 async fn start_fake() -> (String, Fake) {
     let fake = Fake::default();
     let app = Router::new()
         .route("/token", post(fake_token))
         .route("/profile/wow/character/{*rest}", get(fake_character_path))
+        .route(
+            "/data/wow/ruleset/{ruleset}/auctions/{*rest}",
+            get(fake_auctions),
+        )
         .with_state(fake.clone());
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -142,6 +201,10 @@ async fn app(with_armory: bool) -> App {
 }
 
 async fn app_with(with_armory: bool, password: Option<&str>) -> App {
+    app_with_auctions(with_armory, password, false).await
+}
+
+async fn app_with_auctions(with_armory: bool, password: Option<&str>, auctions: bool) -> App {
     let dir = tempfile::tempdir().unwrap();
     let (fake_url, fake) = start_fake().await;
     let armory = with_armory.then(|| {
@@ -160,6 +223,7 @@ async fn app_with(with_armory: bool, password: Option<&str>) -> App {
         default_region: Region::Eu,
         armory,
         password: password.map(str::to_owned),
+        auctions,
     };
     let running = zesquad::start(settings, std::future::pending())
         .await
@@ -1066,4 +1130,100 @@ async fn without_a_password_there_is_no_login() {
         .await
         .unwrap();
     assert_eq!(r.headers()[header::LOCATION], "/s/x");
+}
+
+// ---- auction prices ----
+
+#[tokio::test]
+async fn auction_prices_are_followed_in_eu_and_us() {
+    use zesquad::db;
+    use zesquad_core::auctions::ItemPrices;
+
+    let app = app_with_auctions(true, None, true).await;
+    let db = db::open(&app.dir.path().join("zesquad.db"), Region::Eu)
+        .await
+        .unwrap();
+    let followed = [110, 111, 113, 114];
+    let mut checked = false;
+    for _ in 0..100 {
+        let mut all = true;
+        for region in [Region::Eu, Region::Us] {
+            for house in followed {
+                all &= db::auctions_checked_at(&db, region, house)
+                    .await
+                    .unwrap()
+                    .is_some();
+            }
+        }
+        if all {
+            checked = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert!(checked, "every followed house gets checked");
+
+    // Items and commodities make one snapshot of the house.
+    for region in [Region::Eu, Region::Us] {
+        let (_, prices) = db::latest_auctions(&db, region, 110)
+            .await
+            .unwrap()
+            .unwrap();
+        let ids: Vec<u32> = prices.iter().map(|p| p.item).collect();
+        assert_eq!(ids, [2589, 2592, 4306, 11208, 19019], "{region}");
+        assert_eq!(
+            prices[0],
+            ItemPrices {
+                item: 2589,
+                min_price: 10,
+                median_price: 10,
+                quantity: 26,
+                auctions: 3
+            }
+        );
+    }
+    // Empty houses have nothing to show; a house that's down doesn't stop the others.
+    assert_eq!(
+        db::latest_auctions(&db, Region::Eu, 114).await.unwrap(),
+        None
+    );
+    assert_eq!(
+        db::latest_auctions(&db, Region::Us, 111).await.unwrap(),
+        None
+    );
+
+    let mut requests = app.fake.auction_requests.lock().unwrap().clone();
+    requests.sort();
+    assert!(requests.contains(&"us/114/commodities".to_owned()));
+    assert!(
+        !requests.contains(&"us/111/commodities".to_owned()),
+        "stops at the failure"
+    );
+    assert!(
+        requests.iter().all(|r| !r.starts_with("tw/")),
+        "Taiwan isn't followed"
+    );
+    assert!(
+        requests
+            .iter()
+            .all(|r| ["110", "111", "113", "114"].contains(&&r[3..6])),
+        "only the followed houses: {requests:?}"
+    );
+    assert_eq!(
+        requests.len(),
+        15,
+        "both dumps of each house, once: {requests:?}"
+    );
+}
+
+#[tokio::test]
+async fn auction_prices_are_off_unless_asked_for() {
+    let app = app(true).await;
+    let squad = app.squad("Raiders").await;
+    app.add(&squad, "aldric-thornwood", "").await;
+    app.wait_for(&squad, "Night Elf").await;
+    assert_eq!(
+        *app.fake.auction_requests.lock().unwrap(),
+        Vec::<String>::new()
+    );
 }

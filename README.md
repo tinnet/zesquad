@@ -45,6 +45,7 @@ working directory is read too):
 | `ZESQUAD_LISTEN`             | `127.0.0.1:8080`    | address to listen on (`0.0.0.0:8080` in Docker) |
 | `ZESQUAD_DATABASE`           | `data/zesquad.db`  | SQLite file, created if missing                 |
 | `ZESQUAD_REFRESH_MINUTES`    | `60`                | how often a character's details are refreshed   |
+| `ZESQUAD_AUCTIONS`           | `false`             | follow auction house prices (EU, US)            |
 | `ZESQUAD_LOG_JSON`           | `false`             | log JSON lines instead of text                  |
 | `RUST_LOG`                    | `info`              | log level, e.g. `zesquad=debug`                |
 

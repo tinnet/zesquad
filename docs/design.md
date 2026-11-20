@@ -5,10 +5,12 @@
 - `zesquad-core`: no I/O. Character names (`Name-Surname`, normalised; the lower-case key is
   what the database and the API use), tags (case-insensitive, first spelling kept), squad
   names, regions, when a character is due for a refresh, reading Battle.net JSON into a `Profile`, and
-  the tags and tag colours that come from it.
+  the tags and tag colours that come from it; the auction houses followed and turning their
+  dumps into prices per item and per day.
   Parsing is lenient because Forever's responses are undocumented.
 - `zesquad`: the binary. `cli` (clap, every option also an env var), `db` (sqlx + SQLite, all
-  queries), `armory` (Battle.net client), `sync` (background refresh), `web` (axum handlers,
+  queries), `armory` (Battle.net client), `sync` (background refresh), `auctions` (background
+  auction prices), `web` (axum handlers,
   askama templates), `assets` (CSS and htmx embedded with rust-embed).
 
 ## Data
@@ -31,6 +33,8 @@ erDiagram
   refreshed.
 - `tag_colours` holds the colours picked for a squad's tags, by tag key, separate from the
   tags themselves: a colour stays when a tag goes away and comes back.
+- `auction_houses`, `auction_snapshots` and `auction_daily` hold auction prices by region and
+  house, apart from squads (see Auction prices).
 - `armory_documents` keeps each endpoint's raw JSON from the last good fetch; the pages parse it
   the first time a character is shown after a fetch and keep the result in memory. Showing a new
   field needs no refetch, and a failed fetch keeps the old data.
@@ -46,6 +50,31 @@ media, equipment, specializations, professions and, for hunters, hunter pets. A 
 those is skipped; any other error marks the whole fetch failed. The app token is cached until
 five minutes before it expires (halfway, for one that lives shorter), and a 401 gets one retry
 with a new token; a second 401 fails the fetch.
+
+## Auction prices
+
+With `ZESQUAD_AUCTIONS` (and credentials), a second task follows the big PvP and PvE houses of
+both factions in EU and US (`zesquad_core::auctions::HOUSES`; the rest is a TODO there). It runs
+apart from the Armory sync so a 50 MB dump never delays a character. Every minute it goes
+through the houses:
+
+- A house not asked for in 15 minutes is fetched: its item and commodity dumps (gzipped), read
+  into one snapshot off the async threads. Per item: lowest unit price, median by units (so one
+  cheap stack of 20 outweighs one dear single), units on sale, and auctions. Bid-only auctions
+  are left out; item variants count as the plain item.
+- Battle.net updates the dumps about hourly, so most checks find the same auctions: a snapshot
+  whose fingerprint (from the auction ids) matches the last one isn't stored again.
+- Finished UTC days are condensed into `auction_daily`: lowest price, median and highest of the
+  snapshots' medians, average units, number of snapshots. `condensed_through` remembers how far.
+- Snapshots older than seven whole days are deleted, but never before their day is condensed.
+
+Sizes, measured on 2026-11-20: a big house has about 6,600-7,000 different items, so a round of
+snapshots is about 54,000 rows, 2.2 MB in SQLite. Hourly for a week that's about 9 million
+rows, under 400 MB. `auction_daily` grows by the same 2.2 MB a day, about 800 MB a year.
+Fetching and reading a house's two dumps takes about a second.
+
+A failed fetch is logged and stored in `auction_houses.error`, and tried again on the next
+check; the house's snapshots stay.
 
 ## Tags
 

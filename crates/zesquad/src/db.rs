@@ -10,6 +10,7 @@ use anyhow::Context as _;
 use serde_json::Value;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqlitePoolOptions};
 use zesquad_core::armory::{Documents, Endpoint, Profile};
+use zesquad_core::auctions;
 use zesquad_core::refresh::{Status, is_due};
 use zesquad_core::tags::Colour;
 use zesquad_core::{CharacterName, Region, SquadName, Tag};
@@ -520,4 +521,460 @@ pub async fn store(
     }
     tx.commit().await?;
     Ok(())
+}
+
+// ---- auctions ----
+
+/// Copper and counts are `u64` in core; SQLite stores `i64`.
+fn int(n: u64) -> i64 {
+    i64::try_from(n).unwrap_or(i64::MAX)
+}
+
+fn uint(n: i64) -> u64 {
+    u64::try_from(n).unwrap_or(0)
+}
+
+/// When a house was last asked for; `None` if never.
+///
+/// # Errors
+///
+/// On database errors.
+pub async fn auctions_checked_at(
+    db: &SqlitePool,
+    region: Region,
+    house: u32,
+) -> anyhow::Result<Option<i64>> {
+    let at: Option<(Option<i64>,)> =
+        sqlx::query_as("SELECT checked_at FROM auction_houses WHERE region = ? AND house = ?")
+            .bind(region.as_str())
+            .bind(house)
+            .fetch_optional(db)
+            .await?;
+    Ok(at.and_then(|(at,)| at))
+}
+
+/// Stores a house's snapshot taken at `at`, unless it has the same auctions as the last one
+/// stored (Battle.net hasn't updated the dump yet). `true` when stored.
+///
+/// # Errors
+///
+/// On database errors.
+pub async fn store_auctions(
+    db: &SqlitePool,
+    region: Region,
+    house: u32,
+    at: i64,
+    snapshot: &auctions::Snapshot,
+) -> anyhow::Result<bool> {
+    let fingerprint = format!("{:016x}", snapshot.fingerprint);
+    let mut tx = db.begin().await?;
+    let last: Option<(Option<String>,)> =
+        sqlx::query_as("SELECT fingerprint FROM auction_houses WHERE region = ? AND house = ?")
+            .bind(region.as_str())
+            .bind(house)
+            .fetch_optional(&mut *tx)
+            .await?;
+    let changed = last.and_then(|(f,)| f).as_deref() != Some(fingerprint.as_str());
+    if changed {
+        for p in &snapshot.items {
+            sqlx::query(
+                "INSERT OR REPLACE INTO auction_snapshots
+                 (region, house, at, item, min_price, median_price, quantity, auctions)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            )
+            .bind(region.as_str())
+            .bind(house)
+            .bind(at)
+            .bind(p.item)
+            .bind(int(p.min_price))
+            .bind(int(p.median_price))
+            .bind(int(p.quantity))
+            .bind(int(p.auctions))
+            .execute(&mut *tx)
+            .await?;
+        }
+    }
+    sqlx::query(
+        "INSERT INTO auction_houses (region, house, checked_at, fingerprint) VALUES (?, ?, ?, ?)
+         ON CONFLICT (region, house) DO UPDATE
+         SET checked_at = excluded.checked_at, fingerprint = excluded.fingerprint, error = NULL",
+    )
+    .bind(region.as_str())
+    .bind(house)
+    .bind(at)
+    .bind(&fingerprint)
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
+    Ok(changed)
+}
+
+/// Records a failed check; the snapshots so far stay.
+///
+/// # Errors
+///
+/// On database errors.
+pub async fn auctions_failed(
+    db: &SqlitePool,
+    region: Region,
+    house: u32,
+    at: i64,
+    error: &str,
+) -> anyhow::Result<()> {
+    sqlx::query(
+        "INSERT INTO auction_houses (region, house, checked_at, error) VALUES (?, ?, ?, ?)
+         ON CONFLICT (region, house) DO UPDATE
+         SET checked_at = excluded.checked_at, error = excluded.error",
+    )
+    .bind(region.as_str())
+    .bind(house)
+    .bind(at)
+    .bind(error)
+    .execute(db)
+    .await?;
+    Ok(())
+}
+
+/// The latest snapshot of a house: when it was taken and its prices by item.
+///
+/// # Errors
+///
+/// On database errors.
+pub async fn latest_auctions(
+    db: &SqlitePool,
+    region: Region,
+    house: u32,
+) -> anyhow::Result<Option<(i64, Vec<auctions::ItemPrices>)>> {
+    let at: Option<(i64,)> = sqlx::query_as(
+        "SELECT MAX(at) FROM auction_snapshots WHERE region = ? AND house = ? HAVING COUNT(*) > 0",
+    )
+    .bind(region.as_str())
+    .bind(house)
+    .fetch_optional(db)
+    .await?;
+    let Some((at,)) = at else {
+        return Ok(None);
+    };
+    Ok(Some((at, snapshots(db, region, house, at, at + 1).await?)))
+}
+
+/// A house's item prices from snapshots in `[from, to)`, by item, then time.
+async fn snapshots(
+    db: &SqlitePool,
+    region: Region,
+    house: u32,
+    from: i64,
+    to: i64,
+) -> anyhow::Result<Vec<auctions::ItemPrices>> {
+    let rows: Vec<(u32, i64, i64, i64, i64)> = sqlx::query_as(
+        "SELECT item, min_price, median_price, quantity, auctions FROM auction_snapshots
+         WHERE region = ? AND house = ? AND at >= ? AND at < ? ORDER BY item, at",
+    )
+    .bind(region.as_str())
+    .bind(house)
+    .bind(from)
+    .bind(to)
+    .fetch_all(db)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(
+            |(item, min, median, quantity, auctions)| auctions::ItemPrices {
+                item,
+                min_price: uint(min),
+                median_price: uint(median),
+                quantity: uint(quantity),
+                auctions: uint(auctions),
+            },
+        )
+        .collect())
+}
+
+/// A house's daily prices for `day` (days since the epoch, UTC), by item.
+///
+/// # Errors
+///
+/// On database errors.
+pub async fn daily_auctions(
+    db: &SqlitePool,
+    region: Region,
+    house: u32,
+    day: i64,
+) -> anyhow::Result<Vec<auctions::DailyPrices>> {
+    let rows: Vec<(u32, i64, i64, i64, i64, i64)> = sqlx::query_as(
+        "SELECT item, min_price, median_price, max_price, quantity, snapshots FROM auction_daily
+         WHERE region = ? AND house = ? AND day = ? ORDER BY item",
+    )
+    .bind(region.as_str())
+    .bind(house)
+    .bind(day)
+    .fetch_all(db)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(
+            |(item, min, median, max, quantity, snapshots)| auctions::DailyPrices {
+                item,
+                min_price: uint(min),
+                median_price: uint(median),
+                max_price: uint(max),
+                quantity: uint(quantity),
+                snapshots: uint(snapshots),
+            },
+        )
+        .collect())
+}
+
+/// Condenses a house's finished days (before `now`'s, UTC) into daily prices, then deletes
+/// snapshots older than `keep_days` whole days. Snapshots are only deleted once their day is
+/// condensed, so a long pause loses nothing.
+///
+/// # Errors
+///
+/// On database errors.
+pub async fn condense_auctions(
+    db: &SqlitePool,
+    region: Region,
+    house: u32,
+    now: i64,
+    keep_days: i64,
+) -> anyhow::Result<()> {
+    let today = auctions::day(now);
+    let through: Option<(Option<i64>,)> = sqlx::query_as(
+        "SELECT condensed_through FROM auction_houses WHERE region = ? AND house = ?",
+    )
+    .bind(region.as_str())
+    .bind(house)
+    .fetch_optional(db)
+    .await?;
+    let mut through = through.and_then(|(t,)| t);
+    let from = through.map_or(i64::MIN, |t| (t + 1) * auctions::DAY);
+    let first: (Option<i64>,) = sqlx::query_as(
+        "SELECT MIN(at) FROM auction_snapshots WHERE region = ? AND house = ? AND at >= ?",
+    )
+    .bind(region.as_str())
+    .bind(house)
+    .bind(from)
+    .fetch_one(db)
+    .await?;
+    if let Some(first) = first.0 {
+        for day in auctions::day(first)..today {
+            let start = day * auctions::DAY;
+            let rows = snapshots(db, region, house, start, start + auctions::DAY).await?;
+            let mut tx = db.begin().await?;
+            for item_rows in rows.chunk_by(|a, b| a.item == b.item) {
+                let Some(d) = auctions::daily(item_rows[0].item, item_rows) else {
+                    continue;
+                };
+                sqlx::query(
+                    "INSERT OR REPLACE INTO auction_daily
+                     (region, house, day, item, min_price, median_price, max_price, quantity, snapshots)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                )
+                .bind(region.as_str())
+                .bind(house)
+                .bind(day)
+                .bind(d.item)
+                .bind(int(d.min_price))
+                .bind(int(d.median_price))
+                .bind(int(d.max_price))
+                .bind(int(d.quantity))
+                .bind(int(d.snapshots))
+                .execute(&mut *tx)
+                .await?;
+            }
+            sqlx::query(
+                "UPDATE auction_houses SET condensed_through = ? WHERE region = ? AND house = ?",
+            )
+            .bind(day)
+            .bind(region.as_str())
+            .bind(house)
+            .execute(&mut *tx)
+            .await?;
+            tx.commit().await?;
+            through = Some(day);
+        }
+    }
+    if let Some(through) = through {
+        let keep_from = (today - keep_days).min(through + 1) * auctions::DAY;
+        sqlx::query("DELETE FROM auction_snapshots WHERE region = ? AND house = ? AND at < ?")
+            .bind(region.as_str())
+            .bind(house)
+            .bind(keep_from)
+            .execute(db)
+            .await?;
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use zesquad_core::auctions::{DAY, ItemPrices, Snapshot};
+
+    async fn temp_db() -> (tempfile::TempDir, SqlitePool) {
+        let dir = tempfile::tempdir().unwrap();
+        let db = open(&dir.path().join("test.db"), Region::Eu).await.unwrap();
+        (dir, db)
+    }
+
+    fn snapshot(fingerprint: u64, median: u64) -> Snapshot {
+        Snapshot {
+            items: vec![ItemPrices {
+                item: 2589,
+                min_price: median / 2,
+                median_price: median,
+                quantity: 10,
+                auctions: 2,
+            }],
+            fingerprint,
+        }
+    }
+
+    #[tokio::test]
+    async fn unchanged_dumps_are_not_stored_twice() {
+        let (_dir, db) = temp_db().await;
+        assert!(
+            store_auctions(&db, Region::Eu, 110, 100, &snapshot(1, 10))
+                .await
+                .unwrap()
+        );
+        assert!(
+            !store_auctions(&db, Region::Eu, 110, 200, &snapshot(1, 10))
+                .await
+                .unwrap()
+        );
+        assert_eq!(
+            auctions_checked_at(&db, Region::Eu, 110).await.unwrap(),
+            Some(200)
+        );
+        let (at, _) = latest_auctions(&db, Region::Eu, 110)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(at, 100, "the repeat isn't a new snapshot");
+        assert!(
+            store_auctions(&db, Region::Eu, 110, 300, &snapshot(2, 10))
+                .await
+                .unwrap()
+        );
+        // Same auctions in another house or region are that house's own.
+        assert!(
+            store_auctions(&db, Region::Us, 110, 300, &snapshot(2, 10))
+                .await
+                .unwrap()
+        );
+        assert_eq!(latest_auctions(&db, Region::Eu, 111).await.unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn failures_keep_the_snapshots() {
+        let (_dir, db) = temp_db().await;
+        store_auctions(&db, Region::Eu, 110, 100, &snapshot(1, 10))
+            .await
+            .unwrap();
+        auctions_failed(&db, Region::Eu, 110, 200, "503")
+            .await
+            .unwrap();
+        assert_eq!(
+            auctions_checked_at(&db, Region::Eu, 110).await.unwrap(),
+            Some(200)
+        );
+        assert!(
+            latest_auctions(&db, Region::Eu, 110)
+                .await
+                .unwrap()
+                .is_some()
+        );
+        // The fingerprint survives a failure, so the same dump afterwards isn't stored again.
+        assert!(
+            !store_auctions(&db, Region::Eu, 110, 300, &snapshot(1, 10))
+                .await
+                .unwrap()
+        );
+    }
+
+    #[tokio::test]
+    async fn finished_days_are_condensed_and_old_snapshots_pruned() {
+        let (_dir, db) = temp_db().await;
+        let first_day = 20_000 * DAY;
+        // Day 0: three snapshots; day 1: one.
+        for (i, (at, median)) in [
+            (first_day, 100),
+            (first_day + 3600, 140),
+            (first_day + 7200, 120),
+            (first_day + DAY, 90),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            store_auctions(&db, Region::Eu, 110, at, &snapshot(i as u64, median))
+                .await
+                .unwrap();
+        }
+
+        // During day 1, only day 0 is finished.
+        condense_auctions(&db, Region::Eu, 110, first_day + DAY + 60, 7)
+            .await
+            .unwrap();
+        let days = daily_auctions(&db, Region::Eu, 110, 20_000).await.unwrap();
+        assert_eq!(days.len(), 1);
+        assert_eq!(
+            (
+                days[0].min_price,
+                days[0].median_price,
+                days[0].max_price,
+                days[0].snapshots
+            ),
+            (50, 120, 140, 3)
+        );
+        assert_eq!(
+            daily_auctions(&db, Region::Eu, 110, 20_001).await.unwrap(),
+            []
+        );
+
+        // A week on, day 0's snapshots go; day 1 is condensed on the way, and its snapshots
+        // stay while they're within the week.
+        condense_auctions(&db, Region::Eu, 110, first_day + 8 * DAY, 7)
+            .await
+            .unwrap();
+        assert_eq!(
+            daily_auctions(&db, Region::Eu, 110, 20_001)
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
+        let left: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM auction_snapshots")
+            .fetch_one(&db)
+            .await
+            .unwrap();
+        assert_eq!(left.0, 1);
+        assert_eq!(
+            daily_auctions(&db, Region::Eu, 110, 20_000)
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn snapshots_are_only_pruned_once_condensed() {
+        let (_dir, db) = temp_db().await;
+        let first_day = 20_000 * DAY;
+        store_auctions(&db, Region::Eu, 110, first_day, &snapshot(1, 10))
+            .await
+            .unwrap();
+        // Nothing condensed for this house yet and today is day 0: nothing goes.
+        condense_auctions(&db, Region::Eu, 110, first_day + 60, 0)
+            .await
+            .unwrap();
+        assert!(
+            latest_auctions(&db, Region::Eu, 110)
+                .await
+                .unwrap()
+                .is_some()
+        );
+    }
 }

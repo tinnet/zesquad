@@ -18,6 +18,8 @@ Update this file when something changes.
 | [Character renders][renders] | Avatar images and fallbacks | Official |
 | [Forum: "World of Warcraft: Forever API Namespace?"][forum-forever] | Community probe of Forever namespaces, 2026-11-02 (pre-launch) | Unofficial, unconfirmed by Blizzard |
 | [wowforevertierlist.com/armory][tierlist] | Third-party status page, as of 2026-10-18 | Unofficial |
+| [Forum: "WoW: Forever API: what works so far"][forum-works] | Community notes on rulesets and auction houses, 2026-11-05/06 | Unofficial |
+| [Goldbook issue #96][goldbook-houses] | Auction house ids probed in US; labels PvP/PvE houses, 2026-11-09 | Unofficial; the labels are the author's guess |
 
 The developer portal renders its docs with JavaScript, so a plain fetch of the pages above returns
 an empty shell. The content is served as JSON at
@@ -166,6 +168,48 @@ Character renders: `character-media` lists `avatar`, `inset`, `main` image URLs,
 logout. A missing avatar can fall back to a generic one with
 `?alt=/shadow/avatar/{race-id}-{gender-id}.jpg` (gender 0 male, 1 female). [renders]
 
+## Auction houses
+
+Forever has no realms (see Verified), so auctions hang off **rulesets** instead, in
+`dynamic-forever-{region}`. Auctions went live around 2026-11-06. [forum-works]
+
+| Path | Answer |
+|------|--------|
+| `/data/wow/ruleset/index` | 1 PvP, 2 Normal, 3 Roleplay, 15 Roleplay PvP |
+| `/data/wow/ruleset/{id}` | `id`, `name`, `status {type: "UP"}`, a link to `.../auctions/` |
+| `/data/wow/ruleset/{id}/auctions/index` | 15 houses: `id` and `name` (Alliance / Horde / Blackwater Auction House) |
+| `/data/wow/ruleset/{id}/auctions/{house}` | Item auctions: `id`, `item {id, context?, modifiers?}`, `bid?`, `buyout?`, `quantity`, `time_left` |
+| `/data/wow/ruleset/{id}/auctions/{house}/commodities` | Stackables: `id`, `item {id}`, `quantity`, `unit_price`, `time_left` |
+
+- **The ruleset in the path doesn't filter anything.** Every ruleset lists the same 15 house ids,
+  and house 110 under rulesets 1 and 2 returned the same 148,941 auctions. [forum-works], verified
+- **House ids are the same in EU and US**: Alliance 110, 111, 112, 119, 123; Horde 113, 114,
+  115, 120, 124; Blackwater (neutral) 116, 117, 118, 121, 125. [goldbook-houses], verified
+- **Which house serves which servers isn't in the API.** By size there are two big houses per
+  faction, a PvP and a PvE one (Goldbook labels 110/113 PvP and 111/114 PvE), then smaller ones,
+  probably the roleplay rulesets. Item counts on 2026-11-20 (ruleset 1):
+
+  | Houses | EU | US |
+  |--------|----|----|
+  | 110, 111 (Alliance) | 148,941; 153,067 | 91,641; 96,731 |
+  | 113, 114 (Horde) | 152,064; 143,936 | 99,147; 105,875 |
+  | 119, 123 / 120, 124 | 12-23k each | 17-25k each |
+  | 116, 117 (Blackwater) | 14,845; 16,314 | 9,244; 10,104 |
+  | 121, 125 (Blackwater) | 382; 378 | 431; 609 |
+  | 112, 115, 118 | 0 | 0 |
+- **Items and commodities are separate**: no auction id or item id is in both dumps of a house.
+  Item auctions all had `quantity` 1; 5 of 148,941 had no `buyout` (bid only).
+- **Size**: one big house is about 150k item auctions (28 MB of formatted JSON) plus 125k
+  commodity auctions (19 MB); about 2.6 MB gzipped. Both dumps arrive in a few seconds with
+  `Accept-Encoding: gzip`.
+- **How often it changes**: a third-party price site says about hourly. Not verified; whether
+  `Last-Modified` / `If-Modified-Since` work is unknown.
+- The forum says the index needs its trailing slash (`.../auctions/`). Our client drops trailing
+  slashes, and `.../auctions/index` works.
+- `/data/wow/auctions/commodities` (retail's region-wide commodities) answers 404.
+- The forum reports that 43% of the item ids on an EU Alliance house 404 on the item endpoint.
+  Not verified.
+
 ## Limits and errors
 
 - 36,000 requests per hour per client, 100 per second. Going over the per-second limit gives 429
@@ -176,7 +220,8 @@ logout. A missing avatar can fall back to a generic one with
 ## Verified with our client
 
 Requests made with zesquad's own client credentials (app token, EU host) on 2026-11-17, two
-weeks after launch. `just api <path>` repeats any of them.
+weeks after launch; the auction rows on 2026-11-20, on the EU and US hosts. `just api <path>`
+repeats any of them.
 
 | Request | Result |
 |---------|--------|
@@ -194,6 +239,10 @@ weeks after launch. `just api <path>` repeats any of them.
 | `/profile/wow/character/x-y?namespace=profile-forever-us` on the EU host | 403: namespace region must match the host |
 | `/profile/user/wow?namespace=profile-forever-eu` | 403: needs a player token, as documented |
 
+| `/data/wow/auctions`, `/auctions/index`, `/region/93/auctions` (`dynamic-forever-eu`, 2026-11-20) | 404, empty body: not routed |
+| `/data/wow/auctions/commodities`, `/connected-realm/93/auctions[/index]` (same) | 404, JSON body |
+| `/data/wow/ruleset/index`, `/ruleset/{1,2,3,15}/auctions/index` (EU and US, 2026-11-20) | **200**, see Auction houses |
+| `/data/wow/ruleset/{1,2}/auctions/{house}[/commodities]` for every house id, EU and US | **200**, see Auction houses |
 | `/data/wow/guild/{slug}`, `/roster` for a real guild | **200**, see Endpoints |
 | `/profile/wow/character/{name}-{surname}[/...]` for real level 10-30 characters | **200** for the summary and every sub-endpoint listed above, except `hunter-pets` (404; neither is a hunter) |
 
@@ -210,6 +259,10 @@ launch. Now the path is routed: real characters return data, and unknown ones ge
   race, class, faction, guild, item level, last login, avatar, talents, professions, gear and
   pets. A 404 on the summary shows "not on
   the Armory": a typo, or a character that hasn't logged out since it was created.
+- With `ZESQUAD_AUCTIONS`, a second background job follows auction houses 110, 111, 113 and 114
+  in EU and US (both factions, PvP and PvE). It reads both dumps of a house about hourly and
+  keeps prices per item (lowest, median by units, quantity, auctions) for a week, and condensed
+  per day for good. Not yet: the roleplay and Blackwater houses, item names.
 - Possible later: import a guild's roster into a squad (the roster lists every member's
   name and surname).
 - Not built: "sign in with Battle.net" to import a player's characters through
@@ -226,3 +279,5 @@ launch. Now the path is routed: real characters return data, and unknown ones ge
 [renders]: https://community.developer.battle.net/documentation/world-of-warcraft/guides/character-renders
 [forum-forever]: https://us.forums.blizzard.com/en/blizzard/t/world-of-warcraft-forever-api-namespace/59774
 [tierlist]: https://wowforevertierlist.com/armory
+[forum-works]: https://us.forums.blizzard.com/en/blizzard/t/wow-forever-api-what-works-so-far-plus-a-ts-client/60334
+[goldbook-houses]: https://github.com/jkc-be/goldbook/issues/96

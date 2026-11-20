@@ -1,0 +1,10 @@
+{
+  "_links": { "self": { "href": "https://eu.api.blizzard.com/data/wow/ruleset/2/auctions/110/commodities?namespace=dynamic-forever-eu" } },
+  "auctions": [
+    { "id": 2001, "item": { "id": 2589 }, "quantity": 20, "unit_price": 10, "time_left": "LONG" },
+    { "id": 2002, "item": { "id": 2589 }, "quantity": 5, "unit_price": 12, "time_left": "SHORT" },
+    { "id": 2003, "item": { "id": 2589 }, "quantity": 1, "unit_price": 50, "time_left": "MEDIUM" },
+    { "id": 2004, "item": { "id": 2592 }, "quantity": 3, "unit_price": 60, "time_left": "LONG" },
+    { "id": 2005, "item": { "id": 2592 }, "quantity": 3, "unit_price": 40, "time_left": "LONG" }
+  ]
+}

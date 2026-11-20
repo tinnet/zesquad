@@ -60,6 +60,10 @@ pub struct ServeArgs {
     /// Password everyone must enter before seeing any squad. Empty or unset: no password.
     #[arg(long, env = "ZESQUAD_PASSWORD", hide_env_values = true)]
     pub password: Option<String>,
+    /// Follow auction house prices (EU and US, PVE and PVP, both factions): a snapshot about
+    /// hourly, kept a week, and daily prices kept for good. Needs the Battle.net credentials.
+    #[arg(long, env = "ZESQUAD_AUCTIONS")]
+    pub auctions: bool,
     /// Log JSON lines instead of text.
     #[arg(long, env = "ZESQUAD_LOG_JSON")]
     pub log_json: bool,

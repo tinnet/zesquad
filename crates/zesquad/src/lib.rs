@@ -4,6 +4,7 @@
 
 pub mod armory;
 mod assets;
+mod auctions;
 mod auth;
 pub mod cli;
 pub mod db;
@@ -34,6 +35,8 @@ pub struct Settings {
     pub armory: Option<armory::Config>,
     /// The shared password; `None` leaves the app open.
     pub password: Option<String>,
+    /// Follow auction house prices (needs `armory`).
+    pub auctions: bool,
 }
 
 /// A started server.
@@ -43,8 +46,9 @@ pub struct Running {
     pub server: tokio::task::JoinHandle<anyhow::Result<()>>,
 }
 
-/// Opens the database, binds the listener and spawns the server and the Armory sync. The server
-/// stops (finishing open requests) when `shutdown` completes; the sync stops with it.
+/// Opens the database, binds the listener and spawns the server, the Armory sync and, when
+/// asked for, the auction sync. The server stops (finishing open requests) when `shutdown`
+/// completes; the syncs stop with it.
 ///
 /// # Errors
 ///
@@ -57,18 +61,34 @@ pub async fn start(
     let db = db::open(&settings.database, settings.default_region).await?;
     let wake = Arc::new(Notify::new());
 
-    let syncer = if let Some(config) = settings.armory {
-        let syncer = sync::Syncer {
-            db: db.clone(),
-            client: Arc::new(armory::Client::new(config)?),
-            interval: settings.refresh,
-            wake: wake.clone(),
-        };
-        Some(tokio::spawn(syncer.run()))
+    let mut syncs = Vec::new();
+    if let Some(config) = settings.armory {
+        let client = Arc::new(armory::Client::new(config)?);
+        syncs.push(tokio::spawn(
+            sync::Syncer {
+                db: db.clone(),
+                client: client.clone(),
+                interval: settings.refresh,
+                wake: wake.clone(),
+            }
+            .run(),
+        ));
+        if settings.auctions {
+            syncs.push(tokio::spawn(
+                auctions::AuctionSync {
+                    db: db.clone(),
+                    client,
+                }
+                .run(),
+            ));
+        }
     } else {
         tracing::warn!("no Battle.net credentials: Armory lookups are off");
-        None
-    };
+        if settings.auctions {
+            tracing::warn!("no Battle.net credentials: auction prices are off");
+        }
+    }
+    let armory_enabled = !syncs.is_empty();
 
     let auth = match settings.password.as_deref().filter(|p| !p.is_empty()) {
         Some(password) => Some(Arc::new(auth::Auth::new(&db, password).await?)),
@@ -78,7 +98,7 @@ pub async fn start(
         db,
         wake,
         default_region: settings.default_region,
-        armory_enabled: syncer.is_some(),
+        armory_enabled,
         armory_cache: Arc::default(),
         auth,
     };
@@ -96,8 +116,8 @@ pub async fn start(
         let served = axum::serve(listener, app)
             .with_graceful_shutdown(shutdown)
             .await;
-        if let Some(syncer) = syncer {
-            syncer.abort();
+        for sync in syncs {
+            sync.abort();
         }
         served.context("serving HTTP")
     });

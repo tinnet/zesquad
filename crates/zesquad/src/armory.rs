@@ -1,5 +1,6 @@
-//! The Battle.net API client: an app token from the client credentials, and character lookups
-//! in WoW: Forever's realmless form, in any region. See `docs/battlenet-api.md`.
+//! The Battle.net API client: an app token from the client credentials, character lookups in
+//! WoW: Forever's realmless form, and auction house dumps, in any region. See
+//! `docs/battlenet-api.md`.
 
 use std::time::{Duration, Instant};
 
@@ -10,9 +11,15 @@ use serde_json::Value;
 use tokio::sync::Mutex;
 use zesquad_core::Region;
 use zesquad_core::armory::Endpoint;
+use zesquad_core::auctions::RULESET;
 
 /// Battle.net's OAuth token endpoint, for every region.
 pub const TOKEN_URL: &str = "https://oauth.battle.net/token";
+
+/// For a character lookup or a token.
+const LOOKUP_TIMEOUT: Duration = Duration::from_secs(20);
+/// For an auction dump: 20-30 MB of JSON (2-3 MB gzipped).
+const DUMP_TIMEOUT: Duration = Duration::from_mins(2);
 
 /// As whom to call Battle.net, and where when not the region's own host.
 #[derive(Debug, Clone)]
@@ -89,7 +96,7 @@ impl Client {
     pub fn new(config: Config) -> anyhow::Result<Self> {
         let http = reqwest::Client::builder()
             .user_agent(format!("zesquad/{}", crate::version::short()))
-            .timeout(Duration::from_secs(20))
+            .timeout(LOOKUP_TIMEOUT)
             .build()?;
         Ok(Self {
             http,
@@ -112,7 +119,12 @@ impl Client {
         let mut segments = vec!["profile", "wow", "character", key];
         segments.extend_from_slice(endpoint.path());
         let (status, body) = self
-            .get(region, &segments, &region.profile_namespace())
+            .get(
+                region,
+                &segments,
+                &region.profile_namespace(),
+                LOOKUP_TIMEOUT,
+            )
             .await?;
         match status {
             StatusCode::OK => Ok(Lookup::Found(
@@ -121,6 +133,31 @@ impl Client {
             StatusCode::NOT_FOUND => Ok(Lookup::NotFound),
             other => bail!("Battle.net answered {other} for {}", endpoint.as_str()),
         }
+    }
+
+    /// A house's auctions as JSON: its items, or with `commodities` its stackables.
+    ///
+    /// # Errors
+    ///
+    /// On network errors, bad credentials or any status but 200.
+    pub async fn auctions(
+        &self,
+        region: Region,
+        house: u32,
+        commodities: bool,
+    ) -> anyhow::Result<String> {
+        let (ruleset, house_id) = (RULESET.to_string(), house.to_string());
+        let mut segments = vec!["data", "wow", "ruleset", &ruleset, "auctions", &house_id];
+        if commodities {
+            segments.push("commodities");
+        }
+        let (status, body) = self
+            .get(region, &segments, &region.dynamic_namespace(), DUMP_TIMEOUT)
+            .await?;
+        if status != StatusCode::OK {
+            bail!("Battle.net answered {status} for auction house {house}");
+        }
+        Ok(body)
     }
 
     /// GETs any API path and returns the status and body, for exploring the API.
@@ -135,7 +172,7 @@ impl Client {
         namespace: &str,
     ) -> anyhow::Result<(StatusCode, String)> {
         let segments: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
-        self.get(region, &segments, namespace).await
+        self.get(region, &segments, namespace, DUMP_TIMEOUT).await
     }
 
     /// One retry with a fresh token on 401, in case Battle.net revoked the cached one early.
@@ -144,6 +181,7 @@ impl Client {
         region: Region,
         segments: &[&str],
         namespace: &str,
+        timeout: Duration,
     ) -> anyhow::Result<(StatusCode, String)> {
         let mut url = self.config.api_url(region)?;
         url.path_segments_mut()
@@ -156,7 +194,13 @@ impl Client {
         let mut retried = false;
         loop {
             let token = self.token().await?;
-            let response = self.http.get(url.clone()).bearer_auth(token).send().await?;
+            let response = self
+                .http
+                .get(url.clone())
+                .bearer_auth(token)
+                .timeout(timeout)
+                .send()
+                .await?;
             let status = response.status();
             if status != StatusCode::UNAUTHORIZED {
                 return Ok((status, response.text().await?));

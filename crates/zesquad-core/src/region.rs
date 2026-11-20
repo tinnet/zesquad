@@ -53,6 +53,12 @@ impl Region {
     pub fn profile_namespace(self) -> String {
         format!("profile-forever-{}", self.as_str())
     }
+
+    /// The namespace for Forever's changing game data here, such as auctions.
+    #[must_use]
+    pub fn dynamic_namespace(self) -> String {
+        format!("dynamic-forever-{}", self.as_str())
+    }
 }
 
 impl FromStr for Region {
@@ -113,6 +119,7 @@ mod tests {
     fn namespaces_and_locales() {
         assert_eq!(Region::Eu.profile_namespace(), "profile-forever-eu");
         assert_eq!(Region::Tw.profile_namespace(), "profile-forever-tw");
+        assert_eq!(Region::Us.dynamic_namespace(), "dynamic-forever-us");
         assert_eq!(Region::Eu.locale(), "en_GB");
         assert_eq!(Region::Us.locale(), "en_US");
     }

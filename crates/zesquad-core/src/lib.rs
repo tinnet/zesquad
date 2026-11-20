@@ -2,6 +2,7 @@
 //! turning Battle.net responses into what the pages show. Nothing here does I/O.
 
 pub mod armory;
+pub mod auctions;
 pub mod name;
 pub mod redirect;
 pub mod refresh;
