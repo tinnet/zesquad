@@ -93,6 +93,31 @@ pub async fn squad(db: &SqlitePool, id: &str) -> anyhow::Result<Option<Squad>> {
     )
 }
 
+/// A squad as listed on the front page.
+#[derive(Debug, sqlx::FromRow)]
+pub struct SquadSummary {
+    pub id: String,
+    pub name: String,
+    pub characters: i64,
+}
+
+/// The squads with these ids that exist, in the order given.
+///
+/// # Errors
+///
+/// On database errors.
+pub async fn squad_summaries(db: &SqlitePool, ids: &[String]) -> anyhow::Result<Vec<SquadSummary>> {
+    let mut found: Vec<SquadSummary> = sqlx::query_as(
+        "SELECT s.id, s.name, (SELECT COUNT(*) FROM characters c WHERE c.squad_id = s.id) AS characters
+         FROM squads s WHERE s.id IN (SELECT value FROM json_each(?))",
+    )
+    .bind(serde_json::to_string(ids)?)
+    .fetch_all(db)
+    .await?;
+    found.sort_by_key(|s| ids.iter().position(|id| *id == s.id));
+    Ok(found)
+}
+
 /// # Errors
 ///
 /// On database errors.

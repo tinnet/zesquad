@@ -72,19 +72,25 @@ impl Auth {
             .is_some_and(|v| constant_time_eq(v.as_bytes(), self.token.as_bytes()))
     }
 
-    /// The `Set-Cookie` value after a successful login. `Secure` when the request came over
-    /// HTTPS through a proxy; plain-HTTP local runs would lose the cookie otherwise.
+    /// The `Set-Cookie` value after a successful login.
     #[must_use]
     pub fn session_cookie(&self, headers: &HeaderMap) -> String {
-        let secure = headers
-            .get("x-forwarded-proto")
-            .is_some_and(|v| v.as_bytes().eq_ignore_ascii_case(b"https"));
         format!(
             "{COOKIE}={}; Path=/; HttpOnly; SameSite=Lax; Max-Age=31536000{}",
             self.token,
-            if secure { "; Secure" } else { "" }
+            secure(headers)
         )
     }
+}
+
+/// `; Secure` when the request came over HTTPS through a proxy, for the end of a `Set-Cookie`;
+/// plain-HTTP local runs would lose the cookie otherwise.
+#[must_use]
+pub fn secure(headers: &HeaderMap) -> &'static str {
+    let https = headers
+        .get("x-forwarded-proto")
+        .is_some_and(|v| v.as_bytes().eq_ignore_ascii_case(b"https"));
+    if https { "; Secure" } else { "" }
 }
 
 /// Clears the session cookie.
@@ -140,7 +146,8 @@ fn return_to(request: &Request) -> String {
     zesquad_core::redirect::safe_next(page.as_deref()).to_owned()
 }
 
-fn cookie<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
+#[must_use]
+pub fn cookie<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
     headers
         .get_all(header::COOKIE)
         .iter()

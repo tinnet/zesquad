@@ -1,5 +1,22 @@
 {% extends "base.html" %}
 {% block content %}
+{% if !recent.is_empty() %}
+<section class="recent">
+  <h1>Your squads</h1>
+  <ul class="plain recent-list">
+    {% for s in recent %}
+    <li class="row">
+      <a href="/s/{{ s.id }}" class="grow">{{ s.name }}</a>
+      <span class="hint">{{ s.characters }} character{% if s.characters != 1 %}s{% endif %}</span>
+      <form method="post" action="/recent/{{ s.id }}/forget">
+        <button type="submit" class="quiet" title="Take it off this list; the squad itself stays">Forget</button>
+      </form>
+    </li>
+    {% endfor %}
+  </ul>
+  <p class="hint">Squads you opened in this browser.</p>
+</section>
+{% endif %}
 <section class="intro">
   <h1>Start a squad</h1>
   <p>

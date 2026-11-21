@@ -89,6 +89,14 @@ button.danger:hover { color: var(--danger); border-color: var(--danger); }
   position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap;
 }
 
+.recent-list { list-style: none; padding: 0; display: grid; gap: .35rem; }
+.recent-list li {
+  background: var(--card); border: 1px solid var(--line); border-radius: .6rem; padding: .4rem .5rem .4rem 1rem;
+}
+.recent-list a { font-weight: 600; text-decoration: none; }
+.recent-list a:hover { text-decoration: underline; }
+.recent + .intro h1 { font-size: 1.25rem; margin-top: 2rem; }
+
 .squad-head .rename { display: flex; gap: .5rem; align-items: center; margin-top: 1rem; }
 .squad-head label { flex: 1; }
 .squad-name { font-size: 1.5rem; font-weight: 700; border-color: transparent; background: transparent; padding-left: 0; }

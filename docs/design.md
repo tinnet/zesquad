@@ -115,6 +115,12 @@ While any character is still pending, the roster polls itself every 3 seconds.
 Static files are served under `/static/<version>/` with a one-year cache in release builds, so a
 new version is never stuck behind old CSS.
 
+The front page lists the squads this browser opened lately, from a cookie (`zesquad_recent`,
+HttpOnly, `SameSite=Lax`) holding up to ten squad ids, newest first (`recent.rs` in core). A
+squad page puts its id first; **Forget** takes one off. Ids of squads that are gone are dropped
+and the cookie written back. The cookie only holds ids the browser already had, so it reveals
+nothing new.
+
 A squad's id, a random UUID v4 written in Crockford base32 (`squad_id.rs` in core), is its
 secret; squads made before that have the dashed UUID form, which still works. Anything that
 changes a squad checks the character belongs to that squad. Optionally, `ZESQUAD_PASSWORD`

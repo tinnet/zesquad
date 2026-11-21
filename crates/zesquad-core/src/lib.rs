@@ -4,6 +4,7 @@
 pub mod armory;
 pub mod auctions;
 pub mod name;
+pub mod recent;
 pub mod redirect;
 pub mod refresh;
 pub mod region;

@@ -8,7 +8,7 @@ use askama_web::WebTemplate;
 use axum::extract::{Form, FromRequestParts, Path, Query, RawPathParams, State};
 use axum::http::request::Parts;
 use axum::http::{HeaderMap, StatusCode, header};
-use axum::response::{IntoResponse, Redirect, Response};
+use axum::response::{AppendHeaders, IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde::Deserialize;
@@ -16,6 +16,7 @@ use sqlx::SqlitePool;
 use tokio::sync::Notify;
 use zesquad_core::armory::Profile;
 use zesquad_core::auctions::{self, Money};
+use zesquad_core::recent::Recent;
 use zesquad_core::refresh::Status;
 use zesquad_core::sparkline::{Sparkline, sparkline};
 use zesquad_core::tags::{self, CharacterTag, Colour};
@@ -55,6 +56,7 @@ pub fn router(state: AppState) -> Router {
         .route("/", get(index))
         .route("/auctions", get(auctions_page))
         .route("/squads", post(create_squad))
+        .route("/recent/{squad}/forget", post(forget_squad))
         .route("/s/{squad}", get(squad_page))
         .route("/s/{squad}/roster", get(roster_partial))
         .route("/s/{squad}/name", post(rename))
@@ -371,6 +373,8 @@ pub fn urlencode(s: &str) -> String {
 struct IndexPage {
     /// Show the log-out button (a password is set).
     logout: bool,
+    /// Squads this browser opened lately, newest first.
+    recent: Vec<db::SquadSummary>,
     error: Option<String>,
     name_input: String,
     /// The region picked in the form.
@@ -456,13 +460,62 @@ async fn logout() -> Response {
         .into_response()
 }
 
-async fn index(State(state): State<AppState>) -> IndexPage {
-    IndexPage {
+// ---- recently opened squads ----
+
+const RECENT_COOKIE: &str = "zesquad_recent";
+
+fn recent(headers: &HeaderMap) -> Recent {
+    crate::auth::cookie(headers, RECENT_COOKIE).map_or_else(Recent::default, Recent::parse)
+}
+
+/// The `Set-Cookie` header that remembers `recent`; an empty list clears the cookie.
+fn recent_cookie(headers: &HeaderMap, recent: &Recent) -> (header::HeaderName, String) {
+    let max_age = if recent.is_empty() { 0 } else { 31_536_000 };
+    (
+        header::SET_COOKIE,
+        format!(
+            "{RECENT_COOKIE}={}; Path=/; HttpOnly; SameSite=Lax; Max-Age={max_age}{}",
+            recent.to_cookie(),
+            crate::auth::secure(headers)
+        ),
+    )
+}
+
+/// The squads this browser opened lately that still exist, and the cookie to write back when
+/// some are gone.
+async fn recent_squads(
+    state: &AppState,
+    headers: &HeaderMap,
+) -> Result<(Vec<db::SquadSummary>, Option<(header::HeaderName, String)>)> {
+    let mut recent = recent(headers);
+    if recent.is_empty() {
+        return Ok((Vec::new(), None));
+    }
+    let squads = db::squad_summaries(&state.db, recent.ids()).await?;
+    let mut cookie = None;
+    if squads.len() < recent.ids().len() {
+        recent.retain(|id| squads.iter().any(|s| s.id == id));
+        cookie = Some(recent_cookie(headers, &recent));
+    }
+    Ok((squads, cookie))
+}
+
+async fn index(State(state): State<AppState>, headers: HeaderMap) -> Result<Response> {
+    let (recent, cookie) = recent_squads(&state, &headers).await?;
+    let page = IndexPage {
         logout: state.auth.is_some(),
+        recent,
         error: None,
         name_input: String::new(),
         region: state.default_region,
-    }
+    };
+    Ok((AppendHeaders(cookie), page).into_response())
+}
+
+async fn forget_squad(headers: HeaderMap, Path(squad): Path<String>) -> Response {
+    let mut recent = recent(&headers);
+    recent.forget(&squad);
+    ([recent_cookie(&headers, &recent)], Redirect::to("/")).into_response()
 }
 
 #[derive(Deserialize)]
@@ -479,6 +532,7 @@ struct NewSquadForm {
 
 async fn create_squad(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Form(form): Form<NewSquadForm>,
 ) -> Result<Response> {
     let region = form
@@ -494,8 +548,10 @@ async fn create_squad(
             Ok(Redirect::to(&squad_path(&id)).into_response())
         }
         Err(error) => {
+            let (recent, _) = recent_squads(&state, &headers).await?;
             let page = IndexPage {
                 logout: state.auth.is_some(),
+                recent,
                 error: Some(error),
                 name_input: form.name,
                 region: region.unwrap_or(state.default_region),
@@ -555,15 +611,19 @@ async fn build_roster(
 
 async fn squad_page(
     State(state): State<AppState>,
+    headers: HeaderMap,
     squad: db::Squad,
     Query(q): Query<FilterQuery>,
-) -> Result<SquadPage> {
+) -> Result<Response> {
     let roster = build_roster(&state, &squad.id, tag_filter(q.tag), Outcome::default()).await?;
-    Ok(SquadPage {
+    let mut recent = recent(&headers);
+    recent.visit(&squad.id);
+    let page = SquadPage {
         logout: state.auth.is_some(),
         squad,
         roster,
-    })
+    };
+    Ok(([recent_cookie(&headers, &recent)], page).into_response())
 }
 
 async fn roster_partial(

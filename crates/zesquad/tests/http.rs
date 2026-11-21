@@ -419,6 +419,143 @@ async fn unknown_squads_and_pages_are_404() {
     assert_eq!(r.status(), StatusCode::NOT_FOUND);
 }
 
+/// The `zesquad_recent` cookie a response sets, as `name=value`.
+fn recent_cookie(r: &reqwest::Response) -> String {
+    r.headers()
+        .get_all(header::SET_COOKIE)
+        .iter()
+        .filter_map(|v| v.to_str().ok())
+        .find(|v| v.starts_with("zesquad_recent="))
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_owned()
+}
+
+impl App {
+    /// GETs `path` with `cookie`, returning the response.
+    async fn get_with(&self, path: &str, cookie: &str) -> reqwest::Response {
+        self.http
+            .get(format!("{}{path}", self.base))
+            .header(header::COOKIE, cookie)
+            .send()
+            .await
+            .unwrap()
+    }
+}
+
+#[tokio::test]
+async fn the_front_page_lists_squads_you_opened() {
+    let app = app(false).await;
+    let (_, page) = app.get("/").await;
+    assert!(!page.contains("Your squads"), "{page}");
+
+    let raiders = app.squad("Raiders").await;
+    let alts = app.squad("Alt army").await;
+    app.add(&raiders, "Aldric-Thornwood", "").await;
+
+    // Each squad page remembers itself, newest first.
+    let r = app.get_with(&raiders, "").await;
+    let set = r.headers()[header::SET_COOKIE].to_str().unwrap().to_owned();
+    assert!(
+        set.contains("HttpOnly") && set.contains("SameSite=Lax") && !set.contains("Secure"),
+        "{set}"
+    );
+    let cookie = recent_cookie(&r);
+    let cookie = recent_cookie(&app.get_with(&alts, &cookie).await);
+    let page = app.get_with("/", &cookie).await.text().await.unwrap();
+    let (first, second) = (
+        page.find("Alt army").unwrap(),
+        page.find("Raiders").unwrap(),
+    );
+    assert!(first < second, "{page}");
+    assert!(
+        page.contains("1 character<") && page.contains("0 characters"),
+        "{page}"
+    );
+    assert!(page.contains(&format!("href=\"{raiders}\"")), "{page}");
+
+    // Opening one again moves it to the top.
+    let cookie = recent_cookie(&app.get_with(&raiders, &cookie).await);
+    let page = app.get_with("/", &cookie).await.text().await.unwrap();
+    assert!(page.find("Raiders").unwrap() < page.find("Alt army").unwrap());
+
+    // Forgetting takes it off the list and leaves the squad alone.
+    let alts_id = alts.strip_prefix("/s/").unwrap();
+    let r = app
+        .http
+        .post(format!("{}/recent/{alts_id}/forget", app.base))
+        .header(header::COOKIE, &cookie)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::SEE_OTHER);
+    assert_eq!(r.headers()[header::LOCATION], "/");
+    let cookie = recent_cookie(&r);
+    let page = app.get_with("/", &cookie).await.text().await.unwrap();
+    assert!(
+        page.contains("Raiders") && !page.contains("Alt army"),
+        "{page}"
+    );
+    assert_eq!(app.get(&alts).await.0, StatusCode::OK);
+
+    // Forgetting the last one clears the cookie.
+    let raiders_id = raiders.strip_prefix("/s/").unwrap();
+    let r = app
+        .http
+        .post(format!("{}/recent/{raiders_id}/forget", app.base))
+        .header(header::COOKIE, &cookie)
+        .send()
+        .await
+        .unwrap();
+    assert!(
+        r.headers()[header::SET_COOKIE]
+            .to_str()
+            .unwrap()
+            .contains("Max-Age=0")
+    );
+}
+
+#[tokio::test]
+async fn squads_that_are_gone_or_made_up_drop_off_the_list() {
+    let app = app(false).await;
+    let raiders = app.squad("Raiders").await;
+    let raiders_id = raiders.strip_prefix("/s/").unwrap();
+    let gone = "00000000000000000000000001";
+    let cookie = format!("zesquad_recent={gone}.{raiders_id}.<b>nope</b>");
+    let r = app.get_with("/", &cookie).await;
+    assert_eq!(r.status(), StatusCode::OK);
+    // The cookie is written back without the squad that doesn't exist.
+    assert_eq!(recent_cookie(&r), format!("zesquad_recent={raiders_id}"));
+    let page = r.text().await.unwrap();
+    assert!(page.contains("Raiders") && !page.contains("nope"), "{page}");
+
+    // A 404 isn't remembered.
+    let r = app.get_with(&format!("/s/{gone}"), "").await;
+    assert_eq!(r.status(), StatusCode::NOT_FOUND);
+    assert!(r.headers().get(header::SET_COOKIE).is_none());
+}
+
+#[tokio::test]
+async fn the_recent_cookie_is_secure_behind_https() {
+    let app = app(false).await;
+    let squad = app.squad("Raiders").await;
+    let r = app
+        .http
+        .get(format!("{}{squad}", app.base))
+        .header("x-forwarded-proto", "https")
+        .send()
+        .await
+        .unwrap();
+    assert!(
+        r.headers()[header::SET_COOKIE]
+            .to_str()
+            .unwrap()
+            .contains("; Secure")
+    );
+}
+
 #[tokio::test]
 async fn renaming_a_squad() {
     let app = app(false).await;
