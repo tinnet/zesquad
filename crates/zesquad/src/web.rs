@@ -344,6 +344,8 @@ fn ago(secs: i64) -> String {
 pub struct Roster {
     pub squad_id: String,
     pub members: Vec<MemberView>,
+    /// Characters in the squad, before the tag filter.
+    pub total: usize,
     pub tags: Vec<SquadTag>,
     /// Key of the tag being filtered on.
     pub filter: Option<String>,
@@ -420,6 +422,18 @@ struct SquadPage {
     /// The page's full link, to copy; just the path when the request's host looks wrong.
     link: String,
     roster: Roster,
+}
+
+impl SquadPage {
+    /// One line about the squad for link previews: "6 characters in Europe on zesquad, …".
+    fn summary(&self) -> String {
+        let n = self.roster.total;
+        format!(
+            "{n} character{} in {} on zesquad, friend squads for WoW: Forever.",
+            if n == 1 { "" } else { "s" },
+            self.squad.region.name()
+        )
+    }
 }
 
 #[derive(Template, WebTemplate)]
@@ -628,12 +642,14 @@ async fn build_roster(
             key,
         })
         .collect();
+    let total = members.len();
     if let Some(key) = &filter {
         members.retain(|m| m.tags.iter().any(|c| &c.tag.key == key));
     }
     Ok(Roster {
         squad_id: squad_id.to_owned(),
         members,
+        total,
         tags,
         filter,
         armory_enabled: state.armory_enabled,

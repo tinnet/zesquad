@@ -1,5 +1,11 @@
 {% extends "base.html" %}
 {% block title %}{{ squad.name }} · zesquad{% endblock %}
+{% block meta %}
+  {%- let summary = summary() %}
+  <meta name="description" content="{{ summary }}">
+  <meta property="og:title" content="{{ squad.name }}">
+  <meta property="og:description" content="{{ summary }}">
+{%- endblock %}
 {% block content %}
 <section class="squad-head">
   <form method="post" action="{{ roster.base() }}/name" class="rename">

@@ -605,6 +605,45 @@ async fn a_squad_page_shows_its_full_link_to_copy() {
 }
 
 #[tokio::test]
+async fn link_previews_show_the_squad_and_pages_have_an_icon() {
+    let app = app(false).await;
+    let (_, front) = app.get("/").await;
+    assert!(
+        front.contains(r#"<meta property="og:title" content="zesquad">"#),
+        "{front}"
+    );
+    let icon = front
+        .split("href=\"")
+        .find_map(|s| s.split('"').next().filter(|h| h.ends_with("favicon.svg")))
+        .unwrap();
+    let r = app
+        .http
+        .get(format!("{}{icon}", app.base))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::OK);
+    assert_eq!(r.headers()[header::CONTENT_TYPE], "image/svg+xml");
+
+    let squad = app.squad("Thursday <raiders>").await;
+    app.add(&squad, "Aldric-Thornwood", "raid").await;
+    app.add(&squad, "Brena-Ashvale", "").await;
+    // The count is the whole squad's, whatever the filter.
+    let (_, page) = app.get(&format!("{squad}?tag=raid")).await;
+    assert!(
+        page.contains(r#"<meta property="og:title" content="Thursday &#60;raiders&#62;">"#),
+        "{page}"
+    );
+    assert!(
+        page.contains(
+            r#"<meta property="og:description" content="2 characters in Europe on zesquad"#
+        ),
+        "{page}"
+    );
+    assert_eq!(page.matches("property=\"og:title\"").count(), 1, "{page}");
+}
+
+#[tokio::test]
 async fn renaming_a_squad() {
     let app = app(false).await;
     let squad = app.squad("Old name").await;

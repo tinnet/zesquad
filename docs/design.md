@@ -120,6 +120,10 @@ button stays hidden without script). The link is built from the request's `X-For
 or `Host` and `X-Forwarded-Proto`, only if the host looks like one (`link.rs` in core); else
 it's just the path.
 
+Pages carry a favicon, `theme-color` and Open Graph tags, so a squad link pasted into a chat
+previews as the squad's name and character count. The preview shows nothing the page doesn't.
+With `ZESQUAD_PASSWORD` set, previews get the login page instead.
+
 The front page lists the squads this browser opened lately, from a cookie (`zesquad_recent`,
 HttpOnly, `SameSite=Lax`) holding up to ten squad ids, newest first (`recent.rs` in core). A
 squad page puts its id first; **Forget** takes one off. Ids of squads that are gone are dropped
