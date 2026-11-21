@@ -114,6 +114,36 @@ impl<S: Send + Sync> FromRequestParts<S> for Htmx {
     }
 }
 
+/// `scheme://host` the request was sent to, as the browser sees it (through a proxy too);
+/// `None` when the host doesn't look like one.
+pub struct Origin(Option<String>);
+
+impl Origin {
+    fn of(headers: &HeaderMap) -> Self {
+        let host = ["x-forwarded-host", header::HOST.as_str()]
+            .iter()
+            .find_map(|name| headers.get(*name)?.to_str().ok());
+        let https = !crate::auth::secure(headers).is_empty();
+        Self(host.and_then(|host| zesquad_core::link::origin(https, host)))
+    }
+
+    /// The full link to `path`; just the path without an origin.
+    fn link(&self, path: &str) -> String {
+        format!("{}{path}", self.0.as_deref().unwrap_or_default())
+    }
+}
+
+impl<S: Send + Sync> FromRequestParts<S> for Origin {
+    type Rejection = std::convert::Infallible;
+
+    fn from_request_parts(
+        parts: &mut Parts,
+        _: &S,
+    ) -> impl Future<Output = std::result::Result<Self, Self::Rejection>> + Send {
+        std::future::ready(Ok(Self::of(&parts.headers)))
+    }
+}
+
 /// A squad's page; every form on it posts below this.
 #[must_use]
 pub fn squad_path(id: &str) -> String {
@@ -387,6 +417,8 @@ struct SquadPage {
     /// Show the log-out button (a password is set).
     logout: bool,
     squad: db::Squad,
+    /// The page's full link, to copy; just the path when the request's host looks wrong.
+    link: String,
     roster: Roster,
 }
 
@@ -618,8 +650,10 @@ async fn squad_page(
     let roster = build_roster(&state, &squad.id, tag_filter(q.tag), Outcome::default()).await?;
     let mut recent = recent(&headers);
     recent.visit(&squad.id);
+    let origin = Origin::of(&headers);
     let page = SquadPage {
         logout: state.auth.is_some(),
+        link: origin.link(&squad_path(&squad.id)),
         squad,
         roster,
     };
@@ -672,6 +706,7 @@ impl Outcome {
 async fn respond(
     state: &AppState,
     Htmx(htmx): Htmx,
+    origin: &Origin,
     squad: db::Squad,
     filter: Option<String>,
     outcome: Outcome,
@@ -693,6 +728,7 @@ async fn respond(
     };
     let page = SquadPage {
         logout: state.auth.is_some(),
+        link: origin.link(&squad_path(&squad.id)),
         squad,
         roster,
     };
@@ -712,6 +748,7 @@ async fn add_character(
     State(state): State<AppState>,
     squad: db::Squad,
     htmx: Htmx,
+    origin: Origin,
     Form(form): Form<AddForm>,
 ) -> Result<Response> {
     let parsed = form
@@ -739,7 +776,7 @@ async fn add_character(
             ..Outcome::default()
         },
     };
-    respond(&state, htmx, squad, form.filter, outcome).await
+    respond(&state, htmx, &origin, squad, form.filter, outcome).await
 }
 
 #[derive(Deserialize)]
@@ -772,6 +809,7 @@ async fn add_tags(
     squad: db::Squad,
     Path(path): Path<CharacterPath>,
     htmx: Htmx,
+    origin: Origin,
     Form(form): Form<TagsForm>,
 ) -> Result<Response> {
     let outcome = match parse_tags(&form.tags) {
@@ -781,7 +819,7 @@ async fn add_tags(
         }
         Err(e) => Outcome::error(e.to_string()),
     };
-    respond(&state, htmx, squad, form.filter, outcome).await
+    respond(&state, htmx, &origin, squad, form.filter, outcome).await
 }
 
 #[derive(Deserialize)]
@@ -795,10 +833,19 @@ async fn remove_tag(
     squad: db::Squad,
     Path(path): Path<CharacterTagPath>,
     htmx: Htmx,
+    origin: Origin,
     Form(form): Form<FilterForm>,
 ) -> Result<Response> {
     db::remove_tag(&state.db, &squad.id, path.id, &path.tag).await?;
-    respond(&state, htmx, squad, form.filter, Outcome::default()).await
+    respond(
+        &state,
+        htmx,
+        &origin,
+        squad,
+        form.filter,
+        Outcome::default(),
+    )
+    .await
 }
 
 #[derive(Deserialize)]
@@ -817,6 +864,7 @@ async fn set_colour(
     squad: db::Squad,
     Path(path): Path<TagPath>,
     htmx: Htmx,
+    origin: Origin,
     Form(form): Form<ColourForm>,
 ) -> Result<Response> {
     let colour = if form.reset.is_some() {
@@ -837,6 +885,7 @@ async fn set_colour(
     respond(
         &state,
         htmx,
+        &origin,
         squad,
         form.filter,
         Outcome {
@@ -852,10 +901,19 @@ async fn remove_character(
     squad: db::Squad,
     Path(path): Path<CharacterPath>,
     htmx: Htmx,
+    origin: Origin,
     Form(form): Form<FilterForm>,
 ) -> Result<Response> {
     db::remove_character(&state.db, &squad.id, path.id).await?;
-    respond(&state, htmx, squad, form.filter, Outcome::default()).await
+    respond(
+        &state,
+        htmx,
+        &origin,
+        squad,
+        form.filter,
+        Outcome::default(),
+    )
+    .await
 }
 
 async fn refresh(
@@ -863,11 +921,20 @@ async fn refresh(
     squad: db::Squad,
     Path(path): Path<CharacterPath>,
     htmx: Htmx,
+    origin: Origin,
     Form(form): Form<FilterForm>,
 ) -> Result<Response> {
     db::request_refresh(&state.db, &squad.id, path.id).await?;
     state.wake.notify_one();
-    respond(&state, htmx, squad, form.filter, Outcome::default()).await
+    respond(
+        &state,
+        htmx,
+        &origin,
+        squad,
+        form.filter,
+        Outcome::default(),
+    )
+    .await
 }
 
 // ---- auction prices ----

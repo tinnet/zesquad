@@ -557,6 +557,54 @@ async fn the_recent_cookie_is_secure_behind_https() {
 }
 
 #[tokio::test]
+async fn a_squad_page_shows_its_full_link_to_copy() {
+    let app = app(false).await;
+    let squad = app.squad("Raiders").await;
+    let (_, page) = app.get(&squad).await;
+    let link = format!("{}{squad}", app.base);
+    assert!(
+        page.contains(&format!("value=\"{link}\" readonly")),
+        "{page}"
+    );
+    assert!(page.contains("data-copy=\"squad-link\""), "{page}");
+    let script = page
+        .split("src=\"")
+        .find_map(|s| s.split('"').next().filter(|h| h.ends_with("share.js")))
+        .unwrap();
+    assert_eq!(app.get(script).await.0, StatusCode::OK);
+
+    // Behind a proxy, the link is the one the browser used.
+    let page = app
+        .http
+        .get(format!("{}{squad}", app.base))
+        .header("x-forwarded-host", "squads.example")
+        .header("x-forwarded-proto", "https")
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(
+        page.contains(&format!("value=\"https://squads.example{squad}\"")),
+        "{page}"
+    );
+
+    // A host that isn't one leaves just the path.
+    let page = app
+        .http
+        .get(format!("{}{squad}", app.base))
+        .header("x-forwarded-host", "evil.example/\"><script>")
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(page.contains(&format!("value=\"{squad}\"")), "{page}");
+}
+
+#[tokio::test]
 async fn renaming_a_squad() {
     let app = app(false).await;
     let squad = app.squad("Old name").await;

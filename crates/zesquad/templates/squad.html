@@ -9,7 +9,15 @@
     </label>
     <button type="submit" class="quiet">Rename</button>
   </form>
-  <p class="hint">Characters from {{ squad.region.name() }}. Share this page's link with your squad. Anyone who has it can edit the squad.</p>
+  <div class="share row">
+    <label class="grow">
+      <span class="visually-hidden">Squad link</span>
+      <input id="squad-link" value="{{ link }}" readonly>
+    </label>
+    <button type="button" class="quiet" data-copy="squad-link" hidden>Copy link</button>
+  </div>
+  <p class="hint">Characters from {{ squad.region.name() }}. Share this link with your squad: anyone who has it can see and edit the squad.</p>
 </section>
+<script src="{{ crate::assets::base() }}/share.js" defer></script>
 {% include "roster.html" %}
 {% endblock %}

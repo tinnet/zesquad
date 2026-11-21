@@ -115,6 +115,11 @@ While any character is still pending, the roster polls itself every 3 seconds.
 Static files are served under `/static/<version>/` with a one-year cache in release builds, so a
 new version is never stuck behind old CSS.
 
+A squad page shows its full link in a field with a **Copy link** button (`static/share.js`; the
+button stays hidden without script). The link is built from the request's `X-Forwarded-Host`
+or `Host` and `X-Forwarded-Proto`, only if the host looks like one (`link.rs` in core); else
+it's just the path.
+
 The front page lists the squads this browser opened lately, from a cookie (`zesquad_recent`,
 HttpOnly, `SameSite=Lax`) holding up to ten squad ids, newest first (`recent.rs` in core). A
 squad page puts its id first; **Forget** takes one off. Ids of squads that are gone are dropped

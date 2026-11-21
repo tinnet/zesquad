@@ -102,6 +102,10 @@ button.danger:hover { color: var(--danger); border-color: var(--danger); }
 .squad-name { font-size: 1.5rem; font-weight: 700; border-color: transparent; background: transparent; padding-left: 0; }
 .squad-name:hover, .squad-name:focus { border-color: var(--line); background: var(--card); padding-left: .7rem; }
 
+.share { margin-top: .25rem; }
+.share input { font-size: .9rem; color: var(--muted); }
+.share + .hint { margin-top: .35rem; }
+
 .add { margin: 1rem 0 .5rem; }
 
 .filters { display: flex; flex-wrap: wrap; gap: .4rem; margin: 1rem 0; }

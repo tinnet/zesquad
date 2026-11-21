@@ -3,6 +3,7 @@
 
 pub mod armory;
 pub mod auctions;
+pub mod link;
 pub mod name;
 pub mod recent;
 pub mod redirect;
