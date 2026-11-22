@@ -2,6 +2,13 @@
 
 What changed in each zesquad release. Versions are dates (CalVer).
 
+## 2026.11.22.1
+
+### Features
+
+- **web**: Log in with Battle.net ([4d26fe5](https://github.com/tinnet/zesquad/commit/4d26fe5ab22ff1b810ac12dd9b4de5f8434e3109))
+- **web**: See and delete what zesquad keeps about you ([7f0be82](https://github.com/tinnet/zesquad/commit/7f0be8224242b3733c4653e959f86ab9ea3f88f4))
+
 ## 2026.11.22
 
 ### Features
