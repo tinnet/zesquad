@@ -51,6 +51,11 @@ working directory is read too):
 | `ZESQUAD_DATABASE`           | `data/zesquad.db`  | SQLite file, created if missing                 |
 | `ZESQUAD_REFRESH_MINUTES`    | `60`                | how often a character's details are refreshed   |
 | `ZESQUAD_AUCTIONS`           | `false`             | follow auction house prices (EU, US)            |
+| `ZESQUAD_ARCHIVE_DIR`        |                     | keep every auction dump (zstd) in this folder   |
+| `ZESQUAD_ARCHIVE_S3_URL`     |                     | upload them to this bucket, path-style (`https://ENDPOINT/BUCKET`) |
+| `ZESQUAD_ARCHIVE_S3_REGION`  | `auto`              | the bucket's signing region (`auto` for R2)     |
+| `ZESQUAD_ARCHIVE_S3_ACCESS_KEY_ID`     |           | the bucket's access key id                      |
+| `ZESQUAD_ARCHIVE_S3_SECRET_ACCESS_KEY` |           | the bucket's secret access key                  |
 | `ZESQUAD_LOG_JSON`           | `false`             | log JSON lines instead of text                  |
 | `RUST_LOG`                    | `info`              | log level, e.g. `zesquad=debug`                |
 

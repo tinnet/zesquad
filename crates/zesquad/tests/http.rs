@@ -1,6 +1,7 @@
 //! Black-box tests: the real app on a random port with a temporary database, talking to a fake
 //! Battle.net in the same process, driven over HTTP the way a browser (or htmx) would.
 
+use std::fmt::Write as _;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -10,7 +11,7 @@ use axum::Router;
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
+use axum::routing::{get, post, put};
 use reqwest::redirect::Policy;
 use tempfile::TempDir;
 use zesquad::Settings;
@@ -35,6 +36,68 @@ struct Fake {
     /// Auction dumps asked for, as `region/house[/commodities]`, with ` if-modified-since`
     /// for conditional requests.
     auction_requests: Arc<std::sync::Mutex<Vec<String>>>,
+    /// The fake bucket: what was uploaded, by path (bucket and key).
+    archived: Arc<std::sync::Mutex<std::collections::BTreeMap<String, Vec<u8>>>>,
+    /// Uploads answer 503.
+    archive_down: Arc<AtomicBool>,
+}
+
+const ARCHIVE_KEY_ID: &str = "test-archive-key";
+
+/// A bucket that takes signed PUTs: the signature itself is checked against AWS's example in
+/// `s3.rs`; here, that one is sent and that it covers the body.
+async fn fake_archive(
+    State(fake): State<Fake>,
+    headers: HeaderMap,
+    Path(path): Path<String>,
+    body: axum::body::Bytes,
+) -> Response {
+    use sha2::{Digest as _, Sha256};
+    let header = |name: &str| headers.get(name).and_then(|v| v.to_str().ok());
+    let signed = header("authorization").is_some_and(|a| {
+        a.starts_with(&format!("AWS4-HMAC-SHA256 Credential={ARCHIVE_KEY_ID}/"))
+            && a.contains("/auto/s3/aws4_request, SignedHeaders=host;x-amz-content-sha256;x-amz-date, Signature=")
+    });
+    let hash = Sha256::digest(&body)
+        .iter()
+        .fold(String::new(), |mut s, b| {
+            let _ = write!(s, "{b:02x}");
+            s
+        });
+    if !signed || header("x-amz-content-sha256") != Some(hash.as_str()) {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    if fake.archive_down.load(Ordering::SeqCst) {
+        return StatusCode::SERVICE_UNAVAILABLE.into_response();
+    }
+    fake.archived.lock().unwrap().insert(path, body.to_vec());
+    StatusCode::OK.into_response()
+}
+
+/// Archives into `dir`, uploading to the fake's bucket under a prefix.
+fn archive_config(fake_url: &str, dir: &std::path::Path) -> zesquad::archive::Config {
+    zesquad::archive::Config {
+        dir: dir.to_owned(),
+        bucket: Some(zesquad::archive::BucketConfig {
+            url: format!("{fake_url}/bucket/zesquad/").parse().unwrap(),
+            region: "auto".into(),
+            access_key_id: ARCHIVE_KEY_ID.into(),
+            secret_access_key: "test-archive-secret".into(),
+        }),
+    }
+}
+
+/// A dump as archived: zstd-compressed JSON.
+fn unzstd(bytes: &[u8]) -> String {
+    String::from_utf8(zstd::decode_all(bytes).unwrap()).unwrap()
+}
+
+fn fixture(name: &str) -> String {
+    std::fs::read_to_string(format!(
+        "{}/../zesquad-core/fixtures/{name}.json",
+        env!("CARGO_MANIFEST_DIR")
+    ))
+    .unwrap()
 }
 
 /// When the fake's auction dumps last changed.
@@ -231,6 +294,7 @@ async fn start_fake() -> (String, Fake) {
             "/data/wow/ruleset/{ruleset}/auctions/{*rest}",
             get(fake_auctions),
         )
+        .route("/bucket/{*path}", put(fake_archive))
         .with_state(fake.clone());
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -303,6 +367,7 @@ async fn app_full(with_armory: bool, password: Option<&str>, auctions: bool, log
             token_url: reqwest::Url::parse(&format!("{fake_url}/token")).unwrap(),
             public_url: reqwest::Url::parse(PUBLIC_URL).unwrap(),
         }),
+        archive: auctions.then(|| archive_config(&fake_url, &dir.path().join("archive"))),
     };
     let running = zesquad::start(settings, std::future::pending())
         .await
@@ -2006,6 +2071,117 @@ async fn auction_prices_are_followed_in_eu_and_us() {
 }
 
 #[tokio::test]
+async fn followed_auction_dumps_are_archived() {
+    let app = app_with_auctions(true, None, true).await;
+    // Every dump fetched is uploaded after the round; US 111 is down.
+    let mut archived = Vec::new();
+    for _ in 0..100 {
+        archived = app.fake.archived.lock().unwrap().keys().cloned().collect();
+        if archived.len() >= 14 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert_eq!(archived.len(), 14, "{archived:?}");
+    assert!(
+        archived.contains(&"zesquad/us/110/2026-11-20/20261120T202348Z-items.json.zst".to_owned()),
+        "{archived:?}"
+    );
+    assert!(!archived.iter().any(|k| k.starts_with("zesquad/us/111/")));
+}
+
+#[tokio::test]
+async fn new_auction_dumps_are_archived_until_uploaded() {
+    use zesquad::archive::Archive;
+    use zesquad::auctions::AuctionSync;
+    use zesquad::db;
+    use zesquad_core::auctions::followed;
+
+    let (fake_url, fake) = start_fake().await;
+    let dir = tempfile::tempdir().unwrap();
+    let db = db::open(&dir.path().join("zesquad.db"), Region::Eu)
+        .await
+        .unwrap();
+    let config = zesquad::armory::Config::new(
+        CLIENT_ID.into(),
+        CLIENT_SECRET.into(),
+        Some(&fake_url),
+        &format!("{fake_url}/token"),
+    )
+    .unwrap();
+    let spool = dir.path().join("archive");
+    let archive = Arc::new(Archive::new(archive_config(&fake_url, &spool)).unwrap());
+    let sync = AuctionSync {
+        db: db.clone(),
+        client: Arc::new(zesquad::armory::Client::new(config).unwrap()),
+        archive: Some(archive.clone()),
+    };
+    let eu = |id| {
+        followed()
+            .find(|h| h.region == Region::Eu && h.id == id)
+            .unwrap()
+    };
+    let waiting = |key: &str| spool.join(key);
+
+    // Each new dump is kept as sent, named by its Last-Modified, until it's uploaded.
+    fake.archive_down.store(true, Ordering::SeqCst);
+    sync.update(eu(110), 1_000).await.unwrap();
+    let items = "eu/110/2026-11-20/20261120T202348Z-items.json.zst";
+    let commodities = "eu/110/2026-11-20/20261120T202348Z-commodities.json.zst";
+    assert_eq!(
+        unzstd(&std::fs::read(waiting(items)).unwrap()),
+        fixture("auctions")
+    );
+    assert_eq!(
+        unzstd(&std::fs::read(waiting(commodities)).unwrap()),
+        fixture("commodities")
+    );
+
+    // While the bucket is down, they wait.
+    assert!(archive.upload().await.is_err());
+    assert!(waiting(items).exists());
+    assert!(fake.archived.lock().unwrap().is_empty());
+
+    // Then they're uploaded and removed, day folder and all.
+    fake.archive_down.store(false, Ordering::SeqCst);
+    assert_eq!(archive.upload().await.unwrap(), 2);
+    assert!(!waiting(items).exists() && !waiting(commodities).exists());
+    assert!(!spool.join("eu/110/2026-11-20").exists());
+    {
+        let archived = fake.archived.lock().unwrap();
+        assert_eq!(
+            unzstd(&archived[&format!("zesquad/{items}")]),
+            fixture("auctions")
+        );
+        assert_eq!(archived.len(), 2);
+    }
+
+    // A dump that hasn't changed isn't kept again.
+    sync.update(eu(110), 2_000).await.unwrap();
+    assert_eq!(archive.upload().await.unwrap(), 0);
+
+    // Nor one only fetched again to complete a snapshot: when only EU 113's commodities
+    // changed, only they are new.
+    sync.update(eu(113), 1_000).await.unwrap();
+    assert_eq!(archive.upload().await.unwrap(), 2);
+    sync.update(eu(113), 2_000).await.unwrap();
+    assert!(waiting("eu/113/2026-11-20/20261120T212348Z-commodities.json.zst").exists());
+    assert!(!waiting("eu/113/2026-11-20/20261120T202348Z-items.json.zst").exists());
+    assert_eq!(archive.upload().await.unwrap(), 1);
+    let archived: Vec<String> = fake.archived.lock().unwrap().keys().cloned().collect();
+    assert_eq!(
+        archived,
+        [
+            "zesquad/eu/110/2026-11-20/20261120T202348Z-commodities.json.zst",
+            "zesquad/eu/110/2026-11-20/20261120T202348Z-items.json.zst",
+            "zesquad/eu/113/2026-11-20/20261120T202348Z-items.json.zst",
+            "zesquad/eu/113/2026-11-20/20261120T212348Z-commodities.json.zst",
+        ]
+    );
+    assert_eq!(archive.upload().await.unwrap(), 0, "nothing left");
+}
+
+#[tokio::test]
 async fn unchanged_auction_dumps_are_not_downloaded_again() {
     use zesquad::auctions::AuctionSync;
     use zesquad::db;
@@ -2026,6 +2202,7 @@ async fn unchanged_auction_dumps_are_not_downloaded_again() {
     let sync = AuctionSync {
         db: db.clone(),
         client: Arc::new(zesquad::armory::Client::new(config).unwrap()),
+        archive: None,
     };
     let eu = |id| {
         followed()

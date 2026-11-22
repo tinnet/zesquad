@@ -8,6 +8,7 @@ use anyhow::Context as _;
 use sqlx::SqlitePool;
 use zesquad_core::auctions::{self, House};
 
+use crate::archive::Archive;
 use crate::armory::{Client, Dump};
 use crate::db;
 
@@ -22,6 +23,8 @@ const KEEP_DAYS: i64 = 7;
 pub struct AuctionSync {
     pub db: SqlitePool,
     pub client: Arc<Client>,
+    /// Keeps the raw dumps, when set.
+    pub archive: Option<Arc<Archive>>,
 }
 
 impl AuctionSync {
@@ -31,6 +34,13 @@ impl AuctionSync {
             for house in auctions::followed() {
                 if let Err(e) = self.check(house).await {
                     tracing::warn!(region = %house.region, house = house.id, "auction house check failed: {e:#}");
+                }
+            }
+            if let Some(archive) = &self.archive {
+                match archive.upload().await {
+                    Ok(0) => {}
+                    Ok(uploaded) => tracing::info!(uploaded, "auction dumps archived"),
+                    Err(e) => tracing::warn!("archiving auction dumps failed: {e:#}"),
                 }
             }
             tokio::time::sleep(TICK).await;
@@ -56,7 +66,7 @@ impl AuctionSync {
     /// On database errors.
     pub async fn update(&self, house: House, now: i64) -> anyhow::Result<()> {
         let modified = db::auctions_modified(&self.db, house.region, house.id).await?;
-        match self.fetch(house, &modified).await {
+        match self.fetch(house, &modified, now).await {
             Ok(None) => {
                 tracing::debug!(region = %house.region, house = house.id, "auction house not modified");
                 db::auctions_unchanged(&self.db, house.region, house.id, now).await?;
@@ -85,6 +95,7 @@ impl AuctionSync {
         &self,
         house: House,
         modified: &db::DumpsModified,
+        now: i64,
     ) -> anyhow::Result<Option<(auctions::Snapshot, db::DumpsModified)>> {
         let (region, id) = (house.region, house.id);
         let items = self
@@ -95,6 +106,11 @@ impl AuctionSync {
             .client
             .auctions(region, id, true, modified.commodities.as_deref())
             .await?;
+        // Only dumps Battle.net says are new get archived, not one fetched again below.
+        let new = (
+            matches!(items, Dump::Changed { .. }),
+            matches!(commodities, Dump::Changed { .. }),
+        );
         let (items, commodities) = match (items, commodities) {
             (Dump::NotModified, Dump::NotModified) => return Ok(None),
             // A snapshot needs both: ask again, unconditionally, for the one that didn't change.
@@ -120,6 +136,31 @@ impl AuctionSync {
         else {
             anyhow::bail!("Battle.net answered 304 to a request without If-Modified-Since");
         };
+        let (items, commodities): (Arc<str>, Arc<str>) = (items.into(), commodities.into());
+        // Before reading them, so a dump in a shape we don't understand is kept too.
+        if let Some(archive) = &self.archive {
+            for (is_new, commodities, body, modified) in [
+                (new.0, false, &items, &items_modified),
+                (new.1, true, &commodities, &commodities_modified),
+            ] {
+                if !is_new {
+                    continue;
+                }
+                let saved = archive
+                    .save(
+                        region,
+                        id,
+                        commodities,
+                        modified.as_deref(),
+                        now,
+                        body.clone(),
+                    )
+                    .await;
+                if let Err(e) = saved {
+                    tracing::warn!(%region, house = id, "keeping an auction dump failed: {e:#}");
+                }
+            }
+        }
         // Reading 50 MB of JSON takes a while; keep it off the threads serving pages.
         let snapshot =
             tokio::task::spawn_blocking(move || auctions::snapshot(&[&items, &commodities]))

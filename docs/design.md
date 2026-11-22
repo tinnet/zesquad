@@ -90,6 +90,25 @@ Item names aren't fetched yet, so the leathers are named in `zesquad_core::aucti
 A failed fetch is logged and stored in `auction_houses.error`, and tried again on the next
 check; the house's snapshots stay.
 
+### Raw dumps
+
+With `ZESQUAD_ARCHIVE_DIR`, every dump Battle.net says is new is also kept as it was sent, for
+uses nobody has thought of yet (the snapshots drop single auctions, bids and item variants). A
+dump only fetched again to complete a snapshot isn't kept twice. Each is written, before it's
+read (so a dump we can't read is kept too), as zstd-compressed JSON at
+`{region}/{house}/{YYYY-MM-DD}/{Last-Modified as 20261120T202348Z}-{items|commodities}.json.zst`
+(`zesquad_core::archive`); the fetch time stands in when Battle.net sends no `Last-Modified`.
+
+With a bucket (`ZESQUAD_ARCHIVE_S3_*`: R2, Hetzner or anything else S3-compatible), the folder
+is only a queue: after each round of houses the files there are uploaded, oldest first, and
+removed. A failed upload stops the round and the rest wait for the next one, so an outage
+loses nothing. `s3.rs` signs the PUTs itself (Signature Version 4, checked against AWS's
+example) rather than pulling in an SDK. Without a bucket, the folder is the archive.
+
+Sizes: a house's two dumps are about 2.6 MB gzipped (see `docs/battlenet-api.md`); level 9 zstd
+is about 13% smaller than gzip. With eight houses changing hourly that's roughly 400 MB a day,
+12 GB a month. Kept for good for now; to be looked at again in December 2026.
+
 ## Tags
 
 A character's tags are the ones people typed (`character_tags`) plus automatic ones from its

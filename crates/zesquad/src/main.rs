@@ -50,6 +50,7 @@ async fn serve(args: ServeArgs) -> anyhow::Result<()> {
         password: args.password.clone(),
         auctions: args.auctions,
         login: args.login()?,
+        archive: args.archive.config()?,
     };
     let running = zesquad::start(settings, zesquad::shutdown_signal()).await?;
     tracing::info!(

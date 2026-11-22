@@ -2,6 +2,7 @@
 //! a list of characters, each with free-form tags; character details come from the Battle.net
 //! Armory in the background.
 
+pub mod archive;
 pub mod armory;
 mod assets;
 pub mod auctions;
@@ -9,6 +10,7 @@ mod auth;
 pub mod cli;
 pub mod db;
 pub mod login;
+mod s3;
 mod sync;
 pub mod version;
 mod web;
@@ -40,6 +42,8 @@ pub struct Settings {
     pub auctions: bool,
     /// Logging in with Battle.net; `None` leaves accounts off.
     pub login: Option<login::Config>,
+    /// Keep the raw auction dumps (needs `auctions`).
+    pub archive: Option<archive::Config>,
 }
 
 /// A started server.
@@ -66,6 +70,7 @@ pub async fn start(
 
     let mut syncs = Vec::new();
     let mut auctions_enabled = false;
+    let archiving = settings.archive.is_some();
     if let Some(config) = settings.armory {
         let client = Arc::new(armory::Client::new(config)?);
         syncs.push(tokio::spawn(
@@ -79,10 +84,16 @@ pub async fn start(
         ));
         if settings.auctions {
             auctions_enabled = true;
+            let archive = settings
+                .archive
+                .map(archive::Archive::new)
+                .transpose()?
+                .map(Arc::new);
             syncs.push(tokio::spawn(
                 auctions::AuctionSync {
                     db: db.clone(),
                     client,
+                    archive,
                 }
                 .run(),
             ));
@@ -92,6 +103,9 @@ pub async fn start(
         if settings.auctions {
             tracing::warn!("no Battle.net credentials: auction prices are off");
         }
+    }
+    if archiving && !auctions_enabled {
+        tracing::warn!("auction prices are off, so no dumps are archived");
     }
     let armory_enabled = !syncs.is_empty();
 

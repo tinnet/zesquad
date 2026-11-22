@@ -10,8 +10,8 @@ use clap::{Args, Parser, Subcommand};
 
 use zesquad_core::Region;
 
-use crate::armory;
 use crate::version;
+use crate::{archive, armory, s3};
 
 #[derive(Debug, Parser)]
 #[command(
@@ -65,6 +65,8 @@ pub struct ServeArgs {
     /// hourly, kept a week, and daily prices kept for good. Needs the Battle.net credentials.
     #[arg(long, env = "ZESQUAD_AUCTIONS")]
     pub auctions: bool,
+    #[command(flatten)]
+    pub archive: ArchiveArgs,
     /// Log JSON lines instead of text.
     #[arg(long, env = "ZESQUAD_LOG_JSON")]
     pub log_json: bool,
@@ -106,6 +108,58 @@ impl ServeArgs {
     #[must_use]
     pub fn refresh(&self) -> Duration {
         Duration::from_secs(self.refresh_minutes.saturating_mul(60))
+    }
+}
+
+#[derive(Debug, Args)]
+pub struct ArchiveArgs {
+    /// Keep every auction dump, compressed, in this folder. With a bucket, they're uploaded
+    /// there and the folder only holds what's waiting. Unset: dumps aren't kept.
+    #[arg(long, env = "ZESQUAD_ARCHIVE_DIR")]
+    pub archive_dir: Option<PathBuf>,
+    /// S3-compatible bucket for the dumps, path-style: the endpoint's URL, then /BUCKET (and
+    /// optionally /PREFIX for the keys).
+    #[arg(long, env = "ZESQUAD_ARCHIVE_S3_URL", requires_all = ["archive_dir", "archive_s3_access_key_id", "archive_s3_secret_access_key"])]
+    pub archive_s3_url: Option<String>,
+    /// The bucket's signing region: auto for R2, the location (e.g. fsn1) for Hetzner.
+    #[arg(long, env = "ZESQUAD_ARCHIVE_S3_REGION", default_value = "auto")]
+    pub archive_s3_region: String,
+    /// Access key id for the bucket.
+    #[arg(long, env = "ZESQUAD_ARCHIVE_S3_ACCESS_KEY_ID", hide_env_values = true)]
+    pub archive_s3_access_key_id: Option<String>,
+    /// Secret access key for the bucket.
+    #[arg(
+        long,
+        env = "ZESQUAD_ARCHIVE_S3_SECRET_ACCESS_KEY",
+        hide_env_values = true
+    )]
+    pub archive_s3_secret_access_key: Option<String>,
+}
+
+impl ArchiveArgs {
+    /// `None` when no folder is set.
+    ///
+    /// # Errors
+    ///
+    /// When the bucket URL doesn't parse.
+    pub fn config(&self) -> anyhow::Result<Option<archive::Config>> {
+        let Some(dir) = self.archive_dir.clone() else {
+            return Ok(None);
+        };
+        let bucket = match (
+            &self.archive_s3_url,
+            &self.archive_s3_access_key_id,
+            &self.archive_s3_secret_access_key,
+        ) {
+            (Some(url), Some(id), Some(secret)) => Some(s3::Config {
+                url: url.parse().context("ZESQUAD_ARCHIVE_S3_URL")?,
+                region: self.archive_s3_region.clone(),
+                access_key_id: id.clone(),
+                secret_access_key: secret.clone(),
+            }),
+            _ => None,
+        };
+        Ok(Some(archive::Config { dir, bucket }))
     }
 }
 

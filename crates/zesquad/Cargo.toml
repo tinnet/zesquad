@@ -15,6 +15,9 @@ askama_web = { version = "0.16.0", features = ["axum-0.8"] }
 axum = "0.8.9"
 clap = { version = "4.6.8", features = ["derive", "env"] }
 dotenvy = "0.15.7"
+# For signing archive uploads (S3 Signature V4).
+hmac = "0.13.0"
+httpdate = "1.0.3"
 mime_guess = "2.0.5"
 # musl's malloc is slow under concurrent load.
 mimalloc = "0.1.52"
@@ -33,6 +36,8 @@ tower-http = { version = "0.7.1", features = ["trace", "compression-gzip", "time
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "json"] }
 uuid = { version = "1.29.3", features = ["v4"] }
+# Compresses archived auction dumps; bundles libzstd (C, like libsqlite3).
+zstd = "0.14.4"
 
 [build-dependencies]
 shadow-rs = { version = "2.0.0", default-features = false, features = ["build"] }
