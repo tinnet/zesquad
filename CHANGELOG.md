@@ -2,6 +2,13 @@
 
 What changed in each zesquad release. Versions are dates (CalVer).
 
+## 2026.11.22
+
+### Features
+
+- **web**: Sort a squad by name, level, item level or last played ([953e00f](https://github.com/tinnet/zesquad/commit/953e00f8e6bc8b0e18e667a302ac65fa238c0b95))
+- **web**: Show newcomers how a squad works on the front page ([1dc61ff](https://github.com/tinnet/zesquad/commit/1dc61ff6fc14cc02a3abe940c629f47a2fb4b46f))
+
 ## 2026.11.21
 
 ### Features
