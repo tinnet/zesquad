@@ -133,6 +133,14 @@ button.danger:hover { color: var(--danger); border-color: var(--danger); }
 .colour-list form { gap: .4rem; }
 .colour-list input[type=color] { width: 2.25rem; height: 1.75rem; padding: .1rem; flex: none; cursor: pointer; }
 
+/* The line above the roster: what's in it, and how it's sorted. */
+.overview { margin: .25rem 0 .75rem; font-size: .9rem; color: var(--muted); }
+.overview .summary { margin: 0; flex-basis: 16rem; }
+.sorts { display: flex; flex-wrap: wrap; gap: .15rem .6rem; align-items: baseline; }
+.sorts a { color: var(--muted); text-decoration: none; }
+.sorts a:hover { color: var(--text); text-decoration: underline; }
+.sorts a[aria-current] { color: var(--accent); font-weight: 600; }
+
 .members { list-style: none; padding: 0; margin: 0; display: grid; gap: .75rem; }
 .member {
   background: var(--card); border: 1px solid var(--line); border-left: 4px solid var(--class, var(--line));

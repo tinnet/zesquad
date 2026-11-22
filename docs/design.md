@@ -101,6 +101,12 @@ the Armory also gives is shown once, as automatic, and comes back as a typed one
 character loses the automatic tag. Since tags aren't all in the database, the roster filters
 by tag after loading the squad.
 
+The roster can be sorted (`?sort=` name, level, item level or last played; `zesquad_core::roster`)
+after filtering: numbers highest first, characters without one last, ties by name. Without a
+sort it's the order characters were added. A line above it counts the members shown, how many
+share the highest level, and the factions. Every roster form posts the filter and sort it came
+from, so the page comes back the same.
+
 A tag's colour is the one picked for it in the squad, else its default: class tags default to
 the classic client's class colours (`RAID_CLASS_COLORS`), others to none. Chip text is black or
 white, whichever contrasts more with the colour (WCAG relative luminance).

@@ -873,6 +873,86 @@ async fn a_form_post_returns_to_the_same_filter() {
     );
 }
 
+/// The members' names on a page, in order.
+fn member_names(page: &str) -> Vec<&str> {
+    page.split("<h2 class=\"name\">")
+        .skip(1)
+        .filter_map(|s| s.split(' ').next())
+        .collect()
+}
+
+#[tokio::test]
+async fn the_roster_sorts_and_sums_up() {
+    let app = app(true).await;
+    let squad = app.squad("Raiders").await;
+    app.add(&squad, "Zora-Unknown", "raid").await;
+    app.add(&squad, "Aldric-Thornwood", "raid").await;
+    app.add(&squad, "Bryn-Unknown", "").await;
+    app.wait_for(&squad, "Night Elf").await;
+    app.wait_for(&squad, "Not on the Armory").await;
+
+    let (_, page) = app.get(&squad).await;
+    assert_eq!(member_names(&page), ["Zora", "Aldric", "Bryn"], "{page}");
+    assert!(
+        page.contains("3 characters · 1 at level 26 · 1 Alliance"),
+        "{page}"
+    );
+    // The level sort puts characters with a level first, then by name.
+    let (_, page) = app.get(&format!("{squad}?sort=level")).await;
+    assert_eq!(member_names(&page), ["Aldric", "Bryn", "Zora"], "{page}");
+    assert!(page.contains("aria-current=\"true\">level<"), "{page}");
+    let (_, page) = app.get(&format!("{squad}?sort=name")).await;
+    assert_eq!(member_names(&page), ["Aldric", "Bryn", "Zora"]);
+    // An unknown sort is the default rather than an error.
+    let (status, page) = app.get(&format!("{squad}?sort=nonsense")).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(member_names(&page), ["Zora", "Aldric", "Bryn"]);
+
+    // Filter and sort together: the summary counts what's shown, links keep both.
+    let (_, page) = app.get(&format!("{squad}?tag=raid&sort=name")).await;
+    assert_eq!(member_names(&page), ["Aldric", "Zora"]);
+    assert!(page.contains("2 of 3 characters"), "{page}");
+    assert!(
+        page.contains(&format!("href=\"{squad}?sort=name\"")),
+        "{page}"
+    );
+    assert!(
+        page.contains(&format!("href=\"{squad}?tag=raid&#38;sort=level\"")),
+        "{page}"
+    );
+    assert!(
+        page.contains(&format!("href=\"{squad}?tag=raid\"")),
+        "{page}"
+    );
+
+    // A form posted from that view comes back to it, on its own and through htmx.
+    let id = member_id(&page, 0);
+    let view = [("filter", "raid"), ("sort", "name")];
+    let r = app
+        .post(&format!("{squad}/characters/{id}/refresh"), &view)
+        .await;
+    assert_eq!(
+        r.headers()[header::LOCATION],
+        format!("{squad}?tag=raid&sort=name")
+    );
+    let (_, roster) = app
+        .htmx(
+            &format!("{squad}/characters/{id}/tags"),
+            &[("tags", "alt"), view[0], view[1]],
+        )
+        .await;
+    assert_eq!(member_names(&roster), ["Aldric", "Zora"]);
+    assert!(roster.contains("name=\"sort\" value=\"name\""), "{roster}");
+}
+
+#[tokio::test]
+async fn an_empty_squad_has_no_summary() {
+    let app = app(false).await;
+    let squad = app.squad("Raiders").await;
+    let (_, page) = app.get(&squad).await;
+    assert!(!page.contains("Sort by"), "{page}");
+}
+
 #[tokio::test]
 async fn bad_input_is_explained_and_kept() {
     let app = app(false).await;

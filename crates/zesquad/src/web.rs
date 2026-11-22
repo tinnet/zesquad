@@ -18,6 +18,7 @@ use zesquad_core::armory::Profile;
 use zesquad_core::auctions::{self, Money};
 use zesquad_core::recent::Recent;
 use zesquad_core::refresh::Status;
+use zesquad_core::roster::{self as order, Sort};
 use zesquad_core::sparkline::{Sparkline, sparkline};
 use zesquad_core::tags::{self, CharacterTag, Colour};
 use zesquad_core::{CharacterName, Region, SquadName, Tag, parse_tags};
@@ -241,6 +242,18 @@ impl MemberView {
         }
     }
 
+    /// What the roster sorts this character by; `added` is its place in the squad.
+    fn sort_entry(&self, added: usize) -> order::Entry {
+        let number = |n: Option<u64>| n.and_then(|n| i64::try_from(n).ok());
+        order::Entry {
+            added,
+            name: format!("{} {}", self.name, self.surname).to_lowercase(),
+            level: number(self.profile.level),
+            item_level: number(self.profile.item_level),
+            last_played: self.profile.last_login_ms,
+        }
+    }
+
     /// Guild, item level and talents, separated by dots; empty parts left out.
     #[must_use]
     pub fn details_line(&self) -> String {
@@ -349,6 +362,9 @@ pub struct Roster {
     pub tags: Vec<SquadTag>,
     /// Key of the tag being filtered on.
     pub filter: Option<String>,
+    pub sort: Sort,
+    /// "6 characters · 4 at level 60 · …", for the members shown.
+    pub summary: String,
     pub armory_enabled: bool,
     pub form: Outcome,
 }
@@ -366,9 +382,42 @@ impl Roster {
         self.armory_enabled && self.members.iter().any(|m| m.status == Status::Pending)
     }
 
+    /// `?tag=…&sort=…` for the current filter and sort, empty for neither.
     #[must_use]
-    pub fn filter_query(&self) -> String {
-        filter_query(self.filter.as_deref())
+    pub fn query(&self) -> String {
+        view_query(self.filter.as_deref(), self.sort)
+    }
+
+    /// The squad page filtered on `key`, sorted as now.
+    #[must_use]
+    pub fn tag_link(&self, key: &str) -> String {
+        format!("{}{}", self.base(), view_query(Some(key), self.sort))
+    }
+
+    /// The squad page without a filter, sorted as now.
+    #[must_use]
+    pub fn all_link(&self) -> String {
+        format!("{}{}", self.base(), view_query(None, self.sort))
+    }
+
+    /// The squad page sorted by `sort`, filtered as now.
+    #[must_use]
+    pub fn sort_link(&self, sort: Sort) -> String {
+        format!(
+            "{}{}",
+            self.base(),
+            view_query(self.filter.as_deref(), sort)
+        )
+    }
+
+    #[must_use]
+    pub fn is_sort(&self, sort: Sort) -> bool {
+        self.sort == sort
+    }
+
+    #[must_use]
+    pub fn sort_value(&self) -> &'static str {
+        self.sort.as_str()
     }
 
     #[must_use]
@@ -387,9 +436,21 @@ fn tag_filter(filter: Option<String>) -> Option<String> {
     filter.filter(|t| !t.is_empty()).map(|t| t.to_lowercase())
 }
 
-/// `?tag=<key>` for a tag filter, empty for none.
-fn filter_query(filter: Option<&str>) -> String {
-    filter.map_or_else(String::new, |t| format!("?tag={}", urlencode(t)))
+/// `?tag=<key>&sort=<sort>` for a tag filter and a sort; each left out when not set (the
+/// default sort), so plain links stay plain.
+fn view_query(filter: Option<&str>, sort: Sort) -> String {
+    let parts: Vec<String> = [
+        filter.map(|t| format!("tag={}", urlencode(t))),
+        (sort != Sort::default()).then(|| format!("sort={}", sort.as_str())),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    if parts.is_empty() {
+        String::new()
+    } else {
+        format!("?{}", parts.join("&"))
+    }
 }
 
 /// Percent-encodes everything but unreserved characters, for tags in URLs: askama's
@@ -610,13 +671,15 @@ async fn create_squad(
 #[derive(Deserialize)]
 struct FilterQuery {
     tag: Option<String>,
+    sort: Option<String>,
 }
 
-/// The roster with `filter`, a tag key from `tag_filter`, applied.
+/// The roster with `filter`, a tag key from `tag_filter`, applied, in `sort`'s order.
 async fn build_roster(
     state: &AppState,
     squad_id: &str,
     filter: Option<String>,
+    sort: Sort,
     form: Outcome,
 ) -> Result<Roster> {
     let now = db::now();
@@ -646,12 +709,29 @@ async fn build_roster(
     if let Some(key) = &filter {
         members.retain(|m| m.tags.iter().any(|c| &c.tag.key == key));
     }
+    // Members come in the order they were added.
+    let mut entries: Vec<(order::Entry, MemberView)> = members
+        .into_iter()
+        .enumerate()
+        .map(|(added, m)| (m.sort_entry(added), m))
+        .collect();
+    entries.sort_by(|(a, _), (b, _)| sort.compare(a, b));
+    let members: Vec<MemberView> = entries.into_iter().map(|(_, m)| m).collect();
+    let counted: Vec<order::Counted> = members
+        .iter()
+        .map(|m| order::Counted {
+            level: m.profile.level,
+            faction: m.profile.faction.clone(),
+        })
+        .collect();
     Ok(Roster {
         squad_id: squad_id.to_owned(),
+        summary: order::summary(&counted, total),
         members,
         total,
         tags,
         filter,
+        sort,
         armory_enabled: state.armory_enabled,
         form,
     })
@@ -663,7 +743,15 @@ async fn squad_page(
     squad: db::Squad,
     Query(q): Query<FilterQuery>,
 ) -> Result<Response> {
-    let roster = build_roster(&state, &squad.id, tag_filter(q.tag), Outcome::default()).await?;
+    let sort = Sort::parse(q.sort.as_deref());
+    let roster = build_roster(
+        &state,
+        &squad.id,
+        tag_filter(q.tag),
+        sort,
+        Outcome::default(),
+    )
+    .await?;
     let mut recent = recent(&headers);
     recent.visit(&squad.id);
     let origin = Origin::of(&headers);
@@ -682,7 +770,14 @@ async fn roster_partial(
     Query(q): Query<FilterQuery>,
 ) -> Result<RosterPartial> {
     Ok(RosterPartial {
-        roster: build_roster(&state, &squad.id, tag_filter(q.tag), Outcome::default()).await?,
+        roster: build_roster(
+            &state,
+            &squad.id,
+            tag_filter(q.tag),
+            Sort::parse(q.sort.as_deref()),
+            Outcome::default(),
+        )
+        .await?,
     })
 }
 
@@ -724,16 +819,17 @@ async fn respond(
     Htmx(htmx): Htmx,
     origin: &Origin,
     squad: db::Squad,
-    filter: Option<String>,
+    view: &ViewForm,
     outcome: Outcome,
 ) -> Result<Response> {
-    let filter = tag_filter(filter);
+    let filter = tag_filter(view.filter.clone());
+    let sort = Sort::parse(view.sort.as_deref());
     let failed = outcome.error.is_some();
     if !htmx && !failed {
-        let query = filter_query(filter.as_deref());
+        let query = view_query(filter.as_deref(), sort);
         return Ok(Redirect::to(&format!("{}{query}", squad_path(&squad.id))).into_response());
     }
-    let roster = build_roster(state, &squad.id, filter, outcome).await?;
+    let roster = build_roster(state, &squad.id, filter, sort, outcome).await?;
     if htmx {
         return Ok(RosterPartial { roster }.into_response());
     }
@@ -751,13 +847,22 @@ async fn respond(
     Ok((status, page).into_response())
 }
 
+/// The filter and sort a roster form was posted from, to come back to.
+#[derive(Deserialize, Default)]
+struct ViewForm {
+    #[serde(default)]
+    filter: Option<String>,
+    #[serde(default)]
+    sort: Option<String>,
+}
+
 #[derive(Deserialize)]
 struct AddForm {
     character: String,
     #[serde(default)]
     tags: String,
-    #[serde(default)]
-    filter: Option<String>,
+    #[serde(flatten)]
+    view: ViewForm,
 }
 
 async fn add_character(
@@ -792,15 +897,15 @@ async fn add_character(
             ..Outcome::default()
         },
     };
-    respond(&state, htmx, &origin, squad, form.filter, outcome).await
+    respond(&state, htmx, &origin, squad, &form.view, outcome).await
 }
 
 #[derive(Deserialize)]
 struct TagsForm {
     #[serde(default)]
     tags: String,
-    #[serde(default)]
-    filter: Option<String>,
+    #[serde(flatten)]
+    view: ViewForm,
 }
 
 /// The rest of a path below `/s/{squad}`; the squad itself is the `db::Squad` extractor's.
@@ -835,13 +940,13 @@ async fn add_tags(
         }
         Err(e) => Outcome::error(e.to_string()),
     };
-    respond(&state, htmx, &origin, squad, form.filter, outcome).await
+    respond(&state, htmx, &origin, squad, &form.view, outcome).await
 }
 
 #[derive(Deserialize)]
 struct FilterForm {
-    #[serde(default)]
-    filter: Option<String>,
+    #[serde(flatten)]
+    view: ViewForm,
 }
 
 async fn remove_tag(
@@ -853,15 +958,7 @@ async fn remove_tag(
     Form(form): Form<FilterForm>,
 ) -> Result<Response> {
     db::remove_tag(&state.db, &squad.id, path.id, &path.tag).await?;
-    respond(
-        &state,
-        htmx,
-        &origin,
-        squad,
-        form.filter,
-        Outcome::default(),
-    )
-    .await
+    respond(&state, htmx, &origin, squad, &form.view, Outcome::default()).await
 }
 
 #[derive(Deserialize)]
@@ -871,8 +968,8 @@ struct ColourForm {
     /// Set by the reset button: back to the default colour.
     #[serde(default)]
     reset: Option<String>,
-    #[serde(default)]
-    filter: Option<String>,
+    #[serde(flatten)]
+    view: ViewForm,
 }
 
 async fn set_colour(
@@ -903,7 +1000,7 @@ async fn set_colour(
         htmx,
         &origin,
         squad,
-        form.filter,
+        &form.view,
         Outcome {
             colours_open: true,
             ..outcome
@@ -921,15 +1018,7 @@ async fn remove_character(
     Form(form): Form<FilterForm>,
 ) -> Result<Response> {
     db::remove_character(&state.db, &squad.id, path.id).await?;
-    respond(
-        &state,
-        htmx,
-        &origin,
-        squad,
-        form.filter,
-        Outcome::default(),
-    )
-    .await
+    respond(&state, htmx, &origin, squad, &form.view, Outcome::default()).await
 }
 
 async fn refresh(
@@ -942,15 +1031,7 @@ async fn refresh(
 ) -> Result<Response> {
     db::request_refresh(&state.db, &squad.id, path.id).await?;
     state.wake.notify_one();
-    respond(
-        &state,
-        htmx,
-        &origin,
-        squad,
-        form.filter,
-        Outcome::default(),
-    )
-    .await
+    respond(&state, htmx, &origin, squad, &form.view, Outcome::default()).await
 }
 
 // ---- auction prices ----
