@@ -2,6 +2,12 @@
 
 What changed in each zesquad release. Versions are dates (CalVer).
 
+## 2026.11.22.3
+
+### Features
+
+- **web**: Post new characters and level-ups to a Discord channel ([b61f6ba](https://github.com/tinnet/zesquad/commit/b61f6bac81e33fd93df2ae7a267e727aca5f5e4d))
+
 ## 2026.11.22.2
 
 ### Features
