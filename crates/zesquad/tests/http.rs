@@ -518,6 +518,43 @@ async fn the_front_page_lists_squads_you_opened() {
 }
 
 #[tokio::test]
+async fn the_front_page_shows_newcomers_an_example_squad() {
+    let app = app(false).await;
+    let (_, page) = app.get("/").await;
+    assert!(page.contains("How it works"), "{page}");
+    let example = page.split("What a squad looks like").nth(1).unwrap();
+    assert_eq!(example.matches("class=\"member ").count(), 3, "{example}");
+    assert!(example.contains("Level 60"), "{example}");
+    assert!(
+        example.contains("3 characters · 2 at level 60 · 3 Alliance"),
+        "{example}"
+    );
+    // Class tags from the made-up Armory data, typed tags, and nothing to click that changes
+    // anything or leads to a squad that doesn't exist.
+    assert!(
+        example.contains(">Priest<") && example.contains(">raid<"),
+        "{example}"
+    );
+    for absent in ["<form", "/s/example", "Remove", "+ tag"] {
+        assert!(!example.contains(absent), "{absent} in {example}");
+    }
+
+    // Someone with squads gets their list instead.
+    let squad = app.squad("Raiders").await;
+    let r = app.get_with(&squad, "").await;
+    let page = app
+        .get_with("/", &recent_cookie(&r))
+        .await
+        .text()
+        .await
+        .unwrap();
+    assert!(
+        page.contains("Your squads") && !page.contains("How it works"),
+        "{page}"
+    );
+}
+
+#[tokio::test]
 async fn squads_that_are_gone_or_made_up_drop_off_the_list() {
     let app = app(false).await;
     let raiders = app.squad("Raiders").await;

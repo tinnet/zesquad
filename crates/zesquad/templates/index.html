@@ -41,4 +41,24 @@
   </form>
   {% if let Some(error) = error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
 </section>
+{% if recent.is_empty() %}
+<section class="how">
+  <h2>How it works</h2>
+  <ol class="steps">
+    <li><strong>Start a squad</strong> with a name and your region.</li>
+    <li><strong>Share its link</strong> with your friends. Anyone with it can add characters as <code>Name-Surname</code> and tag them.</li>
+    <li><strong>Watch it fill in.</strong> Level, class, guild, talents, gear and professions come from the Battle.net Armory and refresh every hour.</li>
+  </ol>
+</section>
+<section class="example" aria-labelledby="example-title">
+  <h2 id="example-title">What a squad looks like</h2>
+  {%- let roster = example %}
+  <p class="hint">{{ roster.summary }} (made-up characters)</p>
+  <ul class="members">
+    {% for m in roster.members %}
+    {% include "member.html" %}
+    {% endfor %}
+  </ul>
+</section>
+{% endif %}
 {% endblock %}

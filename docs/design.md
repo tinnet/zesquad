@@ -130,6 +130,10 @@ Pages carry a favicon, `theme-color` and Open Graph tags, so a squad link pasted
 previews as the squad's name and character count. The preview shows nothing the page doesn't.
 With `ZESQUAD_PASSWORD` set, previews get the login page instead.
 
+Someone without squads yet gets, on the front page, "how it works" in three steps and an
+example squad of made-up characters, rendered with the same card (`member.html`) as a real
+roster in its read-only form: no forms, no links.
+
 The front page lists the squads this browser opened lately, from a cookie (`zesquad_recent`,
 HttpOnly, `SameSite=Lax`) holding up to ten squad ids, newest first (`recent.rs` in core). A
 squad page puts its id first; **Forget** takes one off. Ids of squads that are gone are dropped

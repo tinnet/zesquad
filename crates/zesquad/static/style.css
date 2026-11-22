@@ -97,6 +97,11 @@ button.danger:hover { color: var(--danger); border-color: var(--danger); }
 .recent-list a:hover { text-decoration: underline; }
 .recent + .intro h1 { font-size: 1.25rem; margin-top: 2rem; }
 
+/* The front page's "how it works" and example squad, for people who haven't got one yet. */
+.how > h2, .example > h2 { font-size: 1.2rem; margin: 2rem 0 .5rem; }
+.steps { padding-left: 1.4rem; margin: 0; display: grid; gap: .35rem; }
+.steps code { font-size: .9em; white-space: nowrap; }
+
 .squad-head .rename { display: flex; gap: .5rem; align-items: center; margin-top: 1rem; }
 .squad-head label { flex: 1; }
 .squad-name { font-size: 1.5rem; font-weight: 700; border-color: transparent; background: transparent; padding-left: 0; }

@@ -366,6 +366,8 @@ pub struct Roster {
     /// "6 characters · 4 at level 60 · …", for the members shown.
     pub summary: String,
     pub armory_enabled: bool,
+    /// Forms and links to change things are shown; the front page's example has none.
+    pub editable: bool,
     pub form: Outcome,
 }
 
@@ -468,6 +470,8 @@ struct IndexPage {
     logout: bool,
     /// Squads this browser opened lately, newest first.
     recent: Vec<db::SquadSummary>,
+    /// Example characters showing what a squad looks like.
+    example: Roster,
     error: Option<String>,
     name_input: String,
     /// The region picked in the form.
@@ -607,11 +611,118 @@ async fn recent_squads(
     Ok((squads, cookie))
 }
 
+/// The line above a roster for `members` out of `total`.
+fn summarise(members: &[MemberView], total: usize) -> String {
+    let counted: Vec<order::Counted> = members
+        .iter()
+        .map(|m| order::Counted {
+            level: m.profile.level,
+            faction: m.profile.faction.clone(),
+        })
+        .collect();
+    order::summary(&counted, total)
+}
+
+/// Made-up characters for the front page, shown with the same card as a real squad's.
+fn example_roster() -> Roster {
+    const HOUR_MS: i64 = 3_600_000;
+    let now = db::now();
+    let profession = |name: &str, skill| zesquad_core::armory::Profession {
+        name: name.into(),
+        skill,
+        max: 300,
+    };
+    let member = |id,
+                  (name, surname): (&str, &str),
+                  (level, race, class, faction): (u64, &str, &str, &str),
+                  guild: Option<&str>,
+                  item_level,
+                  talents: [(&str, u64); 2],
+                  professions: Vec<zesquad_core::armory::Profession>,
+                  (hours_ago, tags): (i64, &[&str])| {
+        let profile = Profile {
+            name: Some(name.into()),
+            surname: Some(surname.into()),
+            level: Some(level),
+            race: Some(race.into()),
+            class: Some(class.into()),
+            faction: Some(faction.into()),
+            guild: guild.map(Into::into),
+            item_level: Some(item_level),
+            last_login_ms: Some((now * 1000) - hours_ago * HOUR_MS),
+            talents: talents.iter().map(|(t, p)| ((*t).into(), *p)).collect(),
+            professions,
+            ..Profile::default()
+        };
+        let m = db::Member {
+            id,
+            name: name.into(),
+            surname: surname.into(),
+            tags: tags
+                .iter()
+                .map(|t| ((*t).into(), t.to_lowercase()))
+                .collect(),
+            status: Status::Found,
+            fetched_at: Some(now),
+            armory: db::Armory {
+                profile: Arc::new(profile),
+                answered: true,
+            },
+        };
+        MemberView::new(m, now, &Colours(std::collections::HashMap::new()))
+    };
+    let members = vec![
+        member(
+            1,
+            ("Maelis", "Duskwhisper"),
+            (60, "Night Elf", "Priest", "ALLIANCE"),
+            Some("Lanterns of Ashwood"),
+            58,
+            [("Holy", 31), ("Discipline", 20)],
+            vec![profession("Tailoring", 300), profession("Enchanting", 285)],
+            (2, &["raid", "healer"]),
+        ),
+        member(
+            2,
+            ("Torvin", "Emberforge"),
+            (60, "Dwarf", "Warrior", "ALLIANCE"),
+            Some("Lanterns of Ashwood"),
+            61,
+            [("Protection", 31), ("Arms", 20)],
+            vec![profession("Mining", 300), profession("Blacksmithing", 300)],
+            (26, &["raid", "tank"]),
+        ),
+        member(
+            3,
+            ("Sylra", "Thornbrook"),
+            (47, "Gnome", "Mage", "ALLIANCE"),
+            None,
+            39,
+            [("Frost", 26), ("Arcane", 10)],
+            vec![profession("Herbalism", 210)],
+            (120, &["alt"]),
+        ),
+    ];
+    Roster {
+        squad_id: "example".into(),
+        summary: summarise(&members, members.len()),
+        total: members.len(),
+        members,
+        tags: Vec::new(),
+        filter: None,
+        sort: Sort::default(),
+        armory_enabled: true,
+        editable: false,
+        form: Outcome::default(),
+    }
+}
+
 async fn index(State(state): State<AppState>, headers: HeaderMap) -> Result<Response> {
     let (recent, cookie) = recent_squads(&state, &headers).await?;
     let page = IndexPage {
         logout: state.auth.is_some(),
         recent,
+        example: example_roster(),
         error: None,
         name_input: String::new(),
         region: state.default_region,
@@ -659,6 +770,7 @@ async fn create_squad(
             let page = IndexPage {
                 logout: state.auth.is_some(),
                 recent,
+                example: example_roster(),
                 error: Some(error),
                 name_input: form.name,
                 region: region.unwrap_or(state.default_region),
@@ -717,22 +829,16 @@ async fn build_roster(
         .collect();
     entries.sort_by(|(a, _), (b, _)| sort.compare(a, b));
     let members: Vec<MemberView> = entries.into_iter().map(|(_, m)| m).collect();
-    let counted: Vec<order::Counted> = members
-        .iter()
-        .map(|m| order::Counted {
-            level: m.profile.level,
-            faction: m.profile.faction.clone(),
-        })
-        .collect();
     Ok(Roster {
         squad_id: squad_id.to_owned(),
-        summary: order::summary(&counted, total),
+        summary: summarise(&members, total),
         members,
         total,
         tags,
         filter,
         sort,
         armory_enabled: state.armory_enabled,
+        editable: true,
         form,
     })
 }
