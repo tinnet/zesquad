@@ -2,6 +2,14 @@
 
 What changed in each zesquad release. Versions are dates (CalVer).
 
+## 2026.11.21
+
+### Features
+
+- **web**: List the squads you opened on the front page ([f87e9a5](https://github.com/tinnet/zesquad/commit/f87e9a5b61462664956da43aa2a63c7d11d20e37))
+- **web**: Copy a squad's link in one click ([e9c5e48](https://github.com/tinnet/zesquad/commit/e9c5e4864cd470d743d0d24e2006c859cc569cd7))
+- **web**: Show the squad's name when its link is shared ([5446b85](https://github.com/tinnet/zesquad/commit/5446b85d6fceda7a68ef1f083cd577c2b0a411c5))
+
 ## 2026.11.20.3
 
 ### Performance
