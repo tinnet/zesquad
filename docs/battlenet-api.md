@@ -34,11 +34,25 @@ the endpoint list with every path and parameter.
   is `{"access_token", "token_type": "bearer", "expires_in": 86399, ...}`, so a token lasts about
   24 h; cache it and fetch a new one shortly before it expires. [oauth-cc]
 - Send it as `Authorization: Bearer <token>`. [oauth-cc]
-- **Authorization code** (a player's token): needed only for `/profile/user/wow...` endpoints.
+- **Authorization code** (a player's token): for logging in, and for `/profile/user/wow...`.
   Redirect to `https://oauth.battle.net/authorize` with `response_type=code`, `client_id`,
-  `redirect_uri`, `state`, and `scope=wow.profile`, which grants "access to a user's World of Warcraft
-  characters". Players can untick scopes, so the scopes granted may be fewer than requested.
-  [oauth], [oauth-code]
+  `redirect_uri`, `state` and `scope` (space-separated). `redirect_uri` must be one registered
+  with the client, or `https://localhost` for testing. Back at the redirect with `code` and
+  `state`, swap the code at `POST https://oauth.battle.net/token` (basic auth as above,
+  `grant_type=authorization_code`, `code`, the same `redirect_uri`); the token lasts 24 h
+  (`expires_in: 86399`) and the answer lists the scopes granted. "The user may not grant access
+  to any or all requested scopes", so the list may be shorter. [oauth], [oauth-code], [oauth-apis]
+- **Scopes:** "Applications do not require any additional scopes to use Battle.net login.
+  Without scopes, applications can only gain access to a user's account ID and BattleTag."
+  `openid` is "access details about a currently logged in user using OpenID Connect", at
+  `GET https://oauth.battle.net/userinfo`; `wow.profile` is "access to a user's World of
+  Warcraft characters" (`/profile/user/wow`, protected characters, collections). Every endpoint
+  a player's token opens is a GET: nothing can be changed on their behalf. [oauth], [oauth-code]
+- **`/userinfo`** "returns a user's Account ID and BattleTag": `{"sub": "<id>", "id": <id>,
+  "battletag": "Name#1234"}`. zesquad logs in with `scope=openid` and keeps those two only.
+  [oauth-code]
+- Checked against the docs on 2026-11-22. They render with JavaScript, so a plain fetch gets an
+  empty page; a headless browser shows the text.
 - The client needs a Battle.net account with an authenticator, and the API terms must be accepted.
   [getting-started]
 
@@ -278,6 +292,7 @@ launch. Now the path is routed: real characters return data, and unknown ones ge
 [oauth]: https://community.developer.battle.net/documentation/guides/using-oauth
 [oauth-cc]: https://community.developer.battle.net/documentation/guides/using-oauth/client-credentials-flow
 [oauth-code]: https://community.developer.battle.net/documentation/guides/using-oauth/authorization-code-flow
+[oauth-apis]: https://community.developer.battle.net/documentation/battle-net/oauth-apis
 [regionality]: https://community.developer.battle.net/documentation/guides/regionality-and-apis
 [namespaces]: https://community.developer.battle.net/documentation/world-of-warcraft/guides/namespaces
 [classic-profile]: https://community.developer.battle.net/documentation/world-of-warcraft-classic/profile-apis

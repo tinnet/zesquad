@@ -140,6 +140,17 @@ squad page puts its id first; **Forget** takes one off. Ids of squads that are g
 and the cookie written back. The cookie only holds ids the browser already had, so it reveals
 nothing new.
 
+With `ZESQUAD_PUBLIC_URL` and Battle.net credentials, people can log in with Battle.net
+(`login.rs`, authorization code flow, `scope=openid`): zesquad keeps the account id and
+BattleTag in `users`, and nothing else. `/auth/login` puts a random `state` and the page to
+return to in a short-lived cookie (`zesquad_login`, path `/auth`) and redirects to Battle.net;
+`/auth/callback` checks the state, swaps the code for a player token, asks `/userinfo`, and
+throws the token away. A session is a random token in `zesquad_user` (HttpOnly,
+`SameSite=Lax`, `Secure` when the public URL is HTTPS); `sessions` keeps its SHA-256, so the
+database alone can't log anyone in. Sessions last 30 days and are extended when used in their
+second half (`login::load`, a middleware that also puts the user in the request). **Log out**
+ends both this session and the shared-password one.
+
 A squad's id, a random UUID v4 written in Crockford base32 (`squad_id.rs` in core), is its
 secret; squads made before that have the dashed UUID form, which still works. Anything that
 changes a squad checks the character belongs to that squad. Optionally, `ZESQUAD_PASSWORD`

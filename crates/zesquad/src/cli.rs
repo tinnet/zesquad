@@ -5,6 +5,7 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::time::Duration;
 
+use anyhow::Context as _;
 use clap::{Args, Parser, Subcommand};
 
 use zesquad_core::Region;
@@ -67,11 +68,41 @@ pub struct ServeArgs {
     /// Log JSON lines instead of text.
     #[arg(long, env = "ZESQUAD_LOG_JSON")]
     pub log_json: bool,
+    /// Where people reach zesquad, e.g. `https://zesquad.example`. With the Battle.net
+    /// credentials it turns on logging in with Battle.net; `<url>/auth/callback` must be a
+    /// redirect URL of the Battle.net API client.
+    #[arg(long, env = "ZESQUAD_PUBLIC_URL")]
+    pub public_url: Option<String>,
     #[command(flatten)]
     pub bnet: BnetArgs,
 }
 
 impl ServeArgs {
+    /// Logging in, when both the public URL and the Battle.net credentials are set.
+    ///
+    /// # Errors
+    ///
+    /// When a URL doesn't parse.
+    pub fn login(&self) -> anyhow::Result<Option<crate::login::Config>> {
+        let Some(public_url) = self.public_url.as_deref().filter(|s| !s.is_empty()) else {
+            return Ok(None);
+        };
+        let Some(bnet) = self.bnet.config()? else {
+            return Ok(None);
+        };
+        let public_url = reqwest::Url::parse(public_url).context("ZESQUAD_PUBLIC_URL")?;
+        let oauth_url =
+            reqwest::Url::parse(&format!("{}/", self.bnet.oauth_url.trim_end_matches('/')))
+                .context("Battle.net OAuth URL")?;
+        Ok(Some(crate::login::Config {
+            client_id: bnet.client_id,
+            client_secret: bnet.client_secret,
+            oauth_url,
+            token_url: bnet.token_url,
+            public_url,
+        }))
+    }
+
     #[must_use]
     pub fn refresh(&self) -> Duration {
         Duration::from_secs(self.refresh_minutes.saturating_mul(60))
@@ -100,6 +131,14 @@ pub struct BnetArgs {
         default_value = crate::armory::TOKEN_URL
     )]
     pub token_url: String,
+    /// OAuth host for logging in (`/authorize`, `/userinfo`); only tests change it.
+    #[arg(
+        long,
+        env = "ZESQUAD_BNET_OAUTH_URL",
+        hide = true,
+        default_value = crate::login::OAUTH_URL
+    )]
+    pub oauth_url: String,
 }
 
 impl BnetArgs {

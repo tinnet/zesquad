@@ -93,6 +93,111 @@ pub async fn squad(db: &SqlitePool, id: &str) -> anyhow::Result<Option<Squad>> {
     )
 }
 
+/// Someone logged in.
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct User {
+    pub id: i64,
+    pub battletag: String,
+}
+
+/// Stores who Battle.net says someone is (a new user, or a new BattleTag) and returns them.
+///
+/// # Errors
+///
+/// On database errors.
+pub async fn upsert_user(
+    db: &SqlitePool,
+    identity: &zesquad_core::account::Identity,
+) -> anyhow::Result<User> {
+    let now = now();
+    Ok(sqlx::query_as(
+        "INSERT INTO users (bnet_id, battletag, created_at, seen_at) VALUES (?, ?, ?, ?)
+         ON CONFLICT (bnet_id) DO UPDATE SET battletag = excluded.battletag, seen_at = excluded.seen_at
+         RETURNING id, battletag",
+    )
+    .bind(&identity.id)
+    .bind(&identity.battletag)
+    .bind(now)
+    .bind(now)
+    .fetch_one(db)
+    .await?)
+}
+
+/// Starts a session, and clears out expired ones while at it.
+///
+/// # Errors
+///
+/// On database errors.
+pub async fn create_session(
+    db: &SqlitePool,
+    user_id: i64,
+    token_hash: &str,
+    expires_at: i64,
+) -> anyhow::Result<()> {
+    let now = now();
+    sqlx::query("DELETE FROM sessions WHERE expires_at <= ?")
+        .bind(now)
+        .execute(db)
+        .await?;
+    sqlx::query(
+        "INSERT INTO sessions (token_hash, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)",
+    )
+    .bind(token_hash)
+    .bind(user_id)
+    .bind(now)
+    .bind(expires_at)
+    .execute(db)
+    .await?;
+    Ok(())
+}
+
+/// The user of a session that hasn't expired, and when it expires.
+///
+/// # Errors
+///
+/// On database errors.
+pub async fn session_user(
+    db: &SqlitePool,
+    token_hash: &str,
+) -> anyhow::Result<Option<(User, i64)>> {
+    let row: Option<(i64, String, i64)> = sqlx::query_as(
+        "SELECT u.id, u.battletag, s.expires_at FROM sessions s JOIN users u ON u.id = s.user_id
+         WHERE s.token_hash = ? AND s.expires_at > ?",
+    )
+    .bind(token_hash)
+    .bind(now())
+    .fetch_optional(db)
+    .await?;
+    Ok(row.map(|(id, battletag, expires)| (User { id, battletag }, expires)))
+}
+
+/// # Errors
+///
+/// On database errors.
+pub async fn extend_session(
+    db: &SqlitePool,
+    token_hash: &str,
+    expires_at: i64,
+) -> anyhow::Result<()> {
+    sqlx::query("UPDATE sessions SET expires_at = ? WHERE token_hash = ?")
+        .bind(expires_at)
+        .bind(token_hash)
+        .execute(db)
+        .await?;
+    Ok(())
+}
+
+/// # Errors
+///
+/// On database errors.
+pub async fn delete_session(db: &SqlitePool, token_hash: &str) -> anyhow::Result<()> {
+    sqlx::query("DELETE FROM sessions WHERE token_hash = ?")
+        .bind(token_hash)
+        .execute(db)
+        .await?;
+    Ok(())
+}
+
 /// A squad as listed on the front page.
 #[derive(Debug, sqlx::FromRow)]
 pub struct SquadSummary {

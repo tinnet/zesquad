@@ -8,6 +8,7 @@ pub mod auctions;
 mod auth;
 pub mod cli;
 pub mod db;
+pub mod login;
 mod sync;
 pub mod version;
 mod web;
@@ -37,6 +38,8 @@ pub struct Settings {
     pub password: Option<String>,
     /// Follow auction house prices (needs `armory`).
     pub auctions: bool,
+    /// Logging in with Battle.net; `None` leaves accounts off.
+    pub login: Option<login::Config>,
 }
 
 /// A started server.
@@ -96,7 +99,14 @@ pub async fn start(
         Some(password) => Some(Arc::new(auth::Auth::new(&db, password).await?)),
         None => None,
     };
+    let login = if let Some(config) = settings.login {
+        Some(Arc::new(login::Login::new(config)?))
+    } else {
+        tracing::info!("no ZESQUAD_PUBLIC_URL or Battle.net credentials: logging in is off");
+        None
+    };
     let state = web::AppState {
+        login,
         db,
         wake,
         default_region: settings.default_region,

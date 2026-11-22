@@ -40,7 +40,18 @@ struct Fake {
 /// When the fake's auction dumps last changed.
 const DUMPS_MODIFIED: &str = "Fri, 20 Nov 2026 20:23:48 GMT";
 
-async fn fake_token(headers: HeaderMap) -> Response {
+/// A player's token from the fake login, and the code it's swapped for.
+const USER_TOKEN: &str = "test-user-token";
+const GOOD_CODE: &str = "good-code";
+/// Where the test app says it lives; Battle.net must be told the same redirect.
+const PUBLIC_URL: &str = "https://zesquad.test";
+
+/// The fake's token endpoint: the app's own token, or (with `grant_type=authorization_code`)
+/// a player's, for the one good code and the app's registered redirect.
+async fn fake_token(
+    headers: HeaderMap,
+    axum::Form(form): axum::Form<std::collections::HashMap<String, String>>,
+) -> Response {
     // base64("test-id:test-secret")
     let expected = "Basic dGVzdC1pZDp0ZXN0LXNlY3JldA==";
     if headers
@@ -50,8 +61,36 @@ async fn fake_token(headers: HeaderMap) -> Response {
     {
         return StatusCode::UNAUTHORIZED.into_response();
     }
+    if form.get("grant_type").map(String::as_str) == Some("authorization_code") {
+        let redirect = format!("{PUBLIC_URL}/auth/callback");
+        if form.get("code").map(String::as_str) != Some(GOOD_CODE)
+            || form.get("redirect_uri") != Some(&redirect)
+        {
+            return (StatusCode::BAD_REQUEST, r#"{"error":"invalid_grant"}"#).into_response();
+        }
+        return axum::Json(serde_json::json!({
+            "access_token": USER_TOKEN, "token_type": "bearer", "expires_in": 86399,
+            "scope": "openid"
+        }))
+        .into_response();
+    }
     axum::Json(serde_json::json!({
         "access_token": TOKEN, "token_type": "bearer", "expires_in": 86399
+    }))
+    .into_response()
+}
+
+/// Who the player token belongs to: a made-up account.
+async fn fake_userinfo(headers: HeaderMap) -> Response {
+    if headers
+        .get(header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        != Some(&format!("Bearer {USER_TOKEN}"))
+    {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    axum::Json(serde_json::json!({
+        "sub": "424242", "id": 424_242, "battletag": "Testhero#1234"
     }))
     .into_response()
 }
@@ -186,6 +225,7 @@ async fn start_fake() -> (String, Fake) {
     let fake = Fake::default();
     let app = Router::new()
         .route("/token", post(fake_token))
+        .route("/userinfo", get(fake_userinfo))
         .route("/profile/wow/character/{*rest}", get(fake_character_path))
         .route(
             "/data/wow/ruleset/{ruleset}/auctions/{*rest}",
@@ -228,6 +268,15 @@ async fn app_with(with_armory: bool, password: Option<&str>) -> App {
 }
 
 async fn app_with_auctions(with_armory: bool, password: Option<&str>, auctions: bool) -> App {
+    app_full(with_armory, password, auctions, false).await
+}
+
+/// With logging in through the fake Battle.net.
+async fn app_with_login(password: Option<&str>) -> App {
+    app_full(true, password, false, true).await
+}
+
+async fn app_full(with_armory: bool, password: Option<&str>, auctions: bool, login: bool) -> App {
     let dir = tempfile::tempdir().unwrap();
     let (fake_url, fake) = start_fake().await;
     let armory = with_armory.then(|| {
@@ -247,6 +296,13 @@ async fn app_with_auctions(with_armory: bool, password: Option<&str>, auctions: 
         armory,
         password: password.map(str::to_owned),
         auctions,
+        login: login.then(|| zesquad::login::Config {
+            client_id: CLIENT_ID.into(),
+            client_secret: CLIENT_SECRET.into(),
+            oauth_url: reqwest::Url::parse(&format!("{fake_url}/")).unwrap(),
+            token_url: reqwest::Url::parse(&format!("{fake_url}/token")).unwrap(),
+            public_url: reqwest::Url::parse(PUBLIC_URL).unwrap(),
+        }),
     };
     let running = zesquad::start(settings, std::future::pending())
         .await
@@ -1497,6 +1553,272 @@ async fn without_a_password_there_is_no_login() {
 }
 
 // ---- auction prices ----
+
+// ---- logging in with Battle.net ----
+
+/// The cookie named `name` that a response sets, as `name=value`.
+fn set_cookie(r: &reqwest::Response, name: &str) -> Option<String> {
+    r.headers()
+        .get_all(header::SET_COOKIE)
+        .iter()
+        .filter_map(|v| v.to_str().ok())
+        .find(|v| v.starts_with(&format!("{name}=")))
+        .map(|v| v.split(';').next().unwrap().to_owned())
+}
+
+/// A started login: the login cookie and the `state` sent to Battle.net.
+async fn start_login(app: &App, next: &str) -> (String, String) {
+    let r = app
+        .get_with(&format!("/auth/login?next={}", urlencode(next)), "")
+        .await;
+    assert_eq!(r.status(), StatusCode::SEE_OTHER);
+    let to = reqwest::Url::parse(r.headers()[header::LOCATION].to_str().unwrap()).unwrap();
+    let query: std::collections::HashMap<_, _> = to.query_pairs().into_owned().collect();
+    assert!(to.path().ends_with("/authorize"), "{to}");
+    assert_eq!(query["response_type"], "code");
+    assert_eq!(query["client_id"], CLIENT_ID);
+    // Nothing but who you are.
+    assert_eq!(query["scope"], "openid");
+    assert_eq!(query["redirect_uri"], format!("{PUBLIC_URL}/auth/callback"));
+    let set = r
+        .headers()
+        .get_all(header::SET_COOKIE)
+        .iter()
+        .map(|v| v.to_str().unwrap().to_owned())
+        .find(|v| v.starts_with("zesquad_login="))
+        .unwrap();
+    assert!(
+        set.contains("HttpOnly") && set.contains("SameSite=Lax") && set.contains("; Secure"),
+        "{set}"
+    );
+    (
+        set_cookie(&r, "zesquad_login").unwrap(),
+        query["state"].clone(),
+    )
+}
+
+fn urlencode(s: &str) -> String {
+    reqwest::Url::parse_with_params("http://x/", &[("v", s)])
+        .unwrap()
+        .query()
+        .unwrap()
+        .trim_start_matches("v=")
+        .to_owned()
+}
+
+/// Logs in through the fake Battle.net and returns the session cookie.
+async fn log_in_bnet(app: &App, next: &str) -> String {
+    let (cookie, state) = start_login(app, next).await;
+    let r = app
+        .get_with(
+            &format!("/auth/callback?code={GOOD_CODE}&state={state}"),
+            &cookie,
+        )
+        .await;
+    assert_eq!(r.status(), StatusCode::SEE_OTHER);
+    assert_eq!(r.headers()[header::LOCATION], next);
+    // The login cookie is cleared.
+    assert_eq!(set_cookie(&r, "zesquad_login").unwrap(), "zesquad_login=");
+    set_cookie(&r, "zesquad_user").unwrap()
+}
+
+#[tokio::test]
+async fn logging_in_with_battle_net() {
+    let app = app_with_login(None).await;
+    let (_, page) = app.get("/auctions?x=1").await;
+    assert!(
+        page.contains("href=\"/auth/login?next=%2Fauctions%3Fx%3D1\""),
+        "{page}"
+    );
+    let (_, front) = app.get("/").await;
+    assert!(front.contains("Log in with Battle.net") && !front.contains("Log out"));
+
+    let session = log_in_bnet(&app, "/auctions?x=1").await;
+    let page = app.get_with("/", &session).await.text().await.unwrap();
+    assert!(
+        page.contains("Testhero#1234") && page.contains("Log out"),
+        "{page}"
+    );
+    assert!(!page.contains("Log in with Battle.net"), "{page}");
+
+    // The database keeps the account and a hash of the session, never the token itself.
+    let db = zesquad::db::open(&app.dir.path().join("zesquad.db"), Region::Eu)
+        .await
+        .unwrap();
+    let token = session.strip_prefix("zesquad_user=").unwrap();
+    let (users, stored): (i64, String) =
+        sqlx::query_as("SELECT (SELECT COUNT(*) FROM users), (SELECT token_hash FROM sessions)")
+            .fetch_one(&db)
+            .await
+            .unwrap();
+    assert_eq!(users, 1);
+    assert_ne!(stored, token);
+    assert_eq!(stored, zesquad::login::hash(token));
+
+    // Logging in again is the same account.
+    log_in_bnet(&app, "/").await;
+    let users: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users")
+        .fetch_one(&db)
+        .await
+        .unwrap();
+    assert_eq!(users, 1);
+
+    // Logging out ends the session for good.
+    let r = app
+        .http
+        .post(format!("{}/logout", app.base))
+        .header(header::COOKIE, &session)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::SEE_OTHER);
+    assert_eq!(r.headers()[header::LOCATION], "/");
+    assert_eq!(set_cookie(&r, "zesquad_user").unwrap(), "zesquad_user=");
+    let page = app.get_with("/", &session).await.text().await.unwrap();
+    assert!(!page.contains("Testhero#1234"), "{page}");
+}
+
+#[tokio::test]
+async fn sessions_last_a_month_and_are_extended_when_used() {
+    let app = app_with_login(None).await;
+    let session = log_in_bnet(&app, "/").await;
+    let db = zesquad::db::open(&app.dir.path().join("zesquad.db"), Region::Eu)
+        .await
+        .unwrap();
+    let expires = || async {
+        sqlx::query_scalar::<_, i64>("SELECT expires_at FROM sessions")
+            .fetch_one(&db)
+            .await
+            .unwrap()
+            - zesquad::db::now()
+    };
+    let month = 30 * 86_400;
+    assert!((month - 60..=month).contains(&expires().await));
+    // Fresh sessions aren't touched on every request.
+    let r = app.get_with("/", &session).await;
+    assert!(set_cookie(&r, "zesquad_user").is_none());
+
+    // In its second half, using it starts another month.
+    sqlx::query("UPDATE sessions SET expires_at = ?")
+        .bind(zesquad::db::now() + 86_400)
+        .execute(&db)
+        .await
+        .unwrap();
+    let r = app.get_with("/", &session).await;
+    assert_eq!(set_cookie(&r, "zesquad_user").unwrap(), session);
+    assert!(expires().await > month - 60);
+
+    // An expired one is nobody.
+    sqlx::query("UPDATE sessions SET expires_at = ?")
+        .bind(zesquad::db::now() - 1)
+        .execute(&db)
+        .await
+        .unwrap();
+    let page = app.get_with("/", &session).await.text().await.unwrap();
+    assert!(!page.contains("Testhero#1234"), "{page}");
+}
+
+#[tokio::test]
+async fn a_login_must_come_back_to_where_it_started() {
+    let app = app_with_login(None).await;
+    let (cookie, state) = start_login(&app, "/").await;
+    let callback = |q: String, cookie: String| {
+        let app = &app;
+        async move { app.get_with(&format!("/auth/callback?{q}"), &cookie).await }
+    };
+    // Another state, no state, no login cookie: refused, nobody logged in.
+    for (q, c) in [
+        (format!("code={GOOD_CODE}&state=other"), cookie.clone()),
+        (format!("code={GOOD_CODE}"), cookie.clone()),
+        (format!("code={GOOD_CODE}&state={state}"), String::new()),
+    ] {
+        let r = callback(q.clone(), c).await;
+        assert_eq!(r.status(), StatusCode::BAD_REQUEST, "{q}");
+        assert!(set_cookie(&r, "zesquad_user").is_none(), "{q}");
+        assert!(r.text().await.unwrap().contains("Log in again"));
+    }
+    // Declining on Battle.net's page.
+    let r = callback(format!("error=access_denied&state={state}"), cookie.clone()).await;
+    assert_eq!(r.status(), StatusCode::FORBIDDEN);
+    assert!(r.text().await.unwrap().contains("nothing was shared"));
+    // A code Battle.net doesn't accept.
+    let r = callback(format!("code=bad&state={state}"), cookie.clone()).await;
+    assert_eq!(r.status(), StatusCode::BAD_GATEWAY);
+    assert!(set_cookie(&r, "zesquad_user").is_none());
+    // A made-up session cookie is nobody.
+    let page = app
+        .get_with("/", "zesquad_user=0123456789abcdef")
+        .await
+        .text()
+        .await
+        .unwrap();
+    assert!(page.contains("Log in with Battle.net"), "{page}");
+    // Somewhere else to return to is the front page.
+    let session_cookie = {
+        let (cookie, state) = start_login(&app, "//evil.example").await;
+        let r = app
+            .get_with(
+                &format!("/auth/callback?code={GOOD_CODE}&state={state}"),
+                &cookie,
+            )
+            .await;
+        assert_eq!(r.headers()[header::LOCATION], "/");
+        set_cookie(&r, "zesquad_user")
+    };
+    assert!(session_cookie.is_some());
+}
+
+#[tokio::test]
+async fn without_a_public_url_there_is_no_battle_net_login() {
+    let app = app(true).await;
+    let (_, page) = app.get("/").await;
+    assert!(!page.contains("Log in with Battle.net"), "{page}");
+    assert_eq!(app.get("/auth/login").await.0, StatusCode::NOT_FOUND);
+    assert_eq!(
+        app.get("/auth/callback?code=x&state=y").await.0,
+        StatusCode::NOT_FOUND
+    );
+}
+
+#[tokio::test]
+async fn logging_out_ends_both_the_password_and_the_battle_net_session() {
+    let app = app_with_login(Some(PASSWORD)).await;
+    let password = session(&log_in(&app, PASSWORD, "/").await);
+    let bnet = {
+        let r = app.get_with("/auth/login?next=/", &password).await;
+        let to = reqwest::Url::parse(r.headers()[header::LOCATION].to_str().unwrap()).unwrap();
+        let state = to
+            .query_pairs()
+            .find(|(k, _)| k == "state")
+            .unwrap()
+            .1
+            .into_owned();
+        let login = set_cookie(&r, "zesquad_login").unwrap();
+        let r = app
+            .get_with(
+                &format!("/auth/callback?code={GOOD_CODE}&state={state}"),
+                &format!("{password}; {login}"),
+            )
+            .await;
+        set_cookie(&r, "zesquad_user").unwrap()
+    };
+    let both = format!("{password}; {bnet}");
+    let page = app.get_with("/", &both).await.text().await.unwrap();
+    assert!(page.contains("Testhero#1234"), "{page}");
+    let r = app
+        .http
+        .post(format!("{}/logout", app.base))
+        .header(header::COOKIE, &both)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.headers()[header::LOCATION], "/login");
+    assert_eq!(set_cookie(&r, "zesquad_user").unwrap(), "zesquad_user=");
+    assert_eq!(
+        set_cookie(&r, "zesquad_session").unwrap(),
+        "zesquad_session="
+    );
+}
 
 #[tokio::test]
 async fn auction_prices_are_followed_in_eu_and_us() {

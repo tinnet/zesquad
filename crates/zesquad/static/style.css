@@ -58,7 +58,10 @@ header.site {
 .site-nav { font-size: .9rem; }
 .site-nav a { text-decoration: none; }
 .site-nav a:hover { text-decoration: underline; }
-.logout { margin-left: auto; }
+.account { margin-left: auto; display: flex; gap: .6rem; align-items: baseline; font-size: .9rem; }
+.account .battletag { font-weight: 600; }
+.account .login { text-decoration: none; font-weight: 600; }
+.account .login:hover { text-decoration: underline; }
 
 h1 { font-size: 1.6rem; margin: 1rem 0 .5rem; }
 a { color: var(--accent); }

@@ -38,6 +38,8 @@ pub struct AppState {
     pub armory_cache: Arc<db::ArmoryCache>,
     /// Set when a password protects the app.
     pub auth: Option<Arc<crate::auth::Auth>>,
+    /// Set when people can log in with Battle.net.
+    pub login: Option<Arc<crate::login::Login>>,
 }
 
 /// The open routes (health check, version, static files, logging in and out) and, behind the
@@ -56,6 +58,8 @@ pub fn router(state: AppState) -> Router {
     let protected = Router::new()
         .route("/", get(index))
         .route("/auctions", get(auctions_page))
+        .route("/auth/login", get(start_login))
+        .route("/auth/callback", get(finish_login))
         .route("/squads", post(create_squad))
         .route("/recent/{squad}/forget", post(forget_squad))
         .route("/s/{squad}", get(squad_page))
@@ -71,6 +75,10 @@ pub fn router(state: AppState) -> Router {
         .route("/s/{squad}/characters/{id}/delete", post(remove_character))
         .route("/s/{squad}/characters/{id}/refresh", post(refresh))
         .fallback(|| async { AppError::NotFound })
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            crate::login::load,
+        ))
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             crate::auth::require,
@@ -115,33 +123,72 @@ impl<S: Send + Sync> FromRequestParts<S> for Htmx {
     }
 }
 
-/// `scheme://host` the request was sent to, as the browser sees it (through a proxy too);
-/// `None` when the host doesn't look like one.
-pub struct Origin(Option<String>);
+/// What every page's header and links need from the request: who's logged in, how to log in
+/// or out, and the `scheme://host` the request was sent to, as the browser sees it (through a
+/// proxy too; `None` when the host doesn't look like one).
+#[derive(Clone, Default)]
+pub struct Nav {
+    /// A shared password is set (log out of it).
+    pub password: bool,
+    /// Logging in with Battle.net is on.
+    pub login: bool,
+    pub user: Option<db::User>,
+    /// This page, to come back to after logging in.
+    pub here: String,
+    origin: Option<String>,
+}
 
-impl Origin {
-    fn of(headers: &HeaderMap) -> Self {
+impl Nav {
+    fn of(state: &AppState, parts: &Parts) -> Self {
+        let headers = &parts.headers;
         let host = ["x-forwarded-host", header::HOST.as_str()]
             .iter()
             .find_map(|name| headers.get(*name)?.to_str().ok());
         let https = !crate::auth::secure(headers).is_empty();
-        Self(host.and_then(|host| zesquad_core::link::origin(https, host)))
+        let user = parts
+            .extensions
+            .get::<crate::login::CurrentUser>()
+            .and_then(|u| u.0.clone());
+        let here = if parts.method == axum::http::Method::GET {
+            parts.uri.path_and_query().map_or("/", |p| p.as_str())
+        } else {
+            parts.uri.path()
+        };
+        Self {
+            password: state.auth.is_some(),
+            login: state.login.is_some(),
+            user,
+            here: zesquad_core::redirect::safe_next(Some(here)).to_owned(),
+            origin: host.and_then(|host| zesquad_core::link::origin(https, host)),
+        }
     }
 
     /// The full link to `path`; just the path without an origin.
     fn link(&self, path: &str) -> String {
-        format!("{}{path}", self.0.as_deref().unwrap_or_default())
+        format!("{}{path}", self.origin.as_deref().unwrap_or_default())
+    }
+
+    /// Show a log-out button: logged in, or past the shared password.
+    #[must_use]
+    pub fn can_log_out(&self) -> bool {
+        self.user.is_some() || self.password
+    }
+
+    /// Log in, then come back here.
+    #[must_use]
+    pub fn login_link(&self) -> String {
+        format!("/auth/login?next={}", urlencode(&self.here))
     }
 }
 
-impl<S: Send + Sync> FromRequestParts<S> for Origin {
+impl FromRequestParts<AppState> for Nav {
     type Rejection = std::convert::Infallible;
 
     fn from_request_parts(
         parts: &mut Parts,
-        _: &S,
+        state: &AppState,
     ) -> impl Future<Output = std::result::Result<Self, Self::Rejection>> + Send {
-        std::future::ready(Ok(Self::of(&parts.headers)))
+        std::future::ready(Ok(Self::of(state, parts)))
     }
 }
 
@@ -167,8 +214,7 @@ impl<E: Into<anyhow::Error>> From<E> for AppError {
 #[derive(Template, WebTemplate)]
 #[template(path = "error.html")]
 struct ErrorPage {
-    /// Show the log-out button (a password is set).
-    logout: bool,
+    nav: Nav,
     title: &'static str,
     message: &'static str,
 }
@@ -191,7 +237,7 @@ impl IntoResponse for AppError {
             }
         };
         let page = ErrorPage {
-            logout: false,
+            nav: Nav::default(),
             title,
             message,
         };
@@ -466,8 +512,7 @@ pub fn urlencode(s: &str) -> String {
 #[derive(Template, WebTemplate)]
 #[template(path = "index.html")]
 struct IndexPage {
-    /// Show the log-out button (a password is set).
-    logout: bool,
+    nav: Nav,
     /// Squads this browser opened lately, newest first.
     recent: Vec<db::SquadSummary>,
     /// Example characters showing what a squad looks like.
@@ -481,8 +526,7 @@ struct IndexPage {
 #[derive(Template, WebTemplate)]
 #[template(path = "squad.html")]
 struct SquadPage {
-    /// Show the log-out button (a password is set).
-    logout: bool,
+    nav: Nav,
     squad: db::Squad,
     /// The page's full link, to copy; just the path when the request's host looks wrong.
     link: String,
@@ -512,7 +556,7 @@ struct RosterPartial {
 #[derive(Template, WebTemplate)]
 #[template(path = "login.html")]
 struct LoginPage {
-    logout: bool,
+    nav: Nav,
     next: String,
     wrong: bool,
 }
@@ -528,7 +572,7 @@ async fn login_page(State(state): State<AppState>, Query(q): Query<LoginQuery>) 
         return Redirect::to(&next).into_response();
     }
     LoginPage {
-        logout: false,
+        nav: Nav::default(),
         next,
         wrong: false,
     }
@@ -556,19 +600,124 @@ async fn login(
     }
     crate::auth::wrong_password_delay().await;
     let page = LoginPage {
-        logout: false,
+        nav: Nav::default(),
         next,
         wrong: true,
     };
     (StatusCode::UNAUTHORIZED, page).into_response()
 }
 
-async fn logout() -> Response {
-    (
-        [(header::SET_COOKIE, crate::auth::logout_cookie())],
-        Redirect::to("/login"),
+/// Logs out of everything: the Battle.net session and the shared password. Back to the
+/// password page when there is one, else the front page.
+async fn logout(State(state): State<AppState>, headers: HeaderMap) -> Result<Response> {
+    crate::login::end_session(&state, &headers).await?;
+    let to = if state.auth.is_some() { "/login" } else { "/" };
+    Ok((
+        AppendHeaders([
+            (header::SET_COOKIE, crate::auth::logout_cookie()),
+            (header::SET_COOKIE, crate::login::logout_cookie()),
+        ]),
+        Redirect::to(to),
     )
-        .into_response()
+        .into_response())
+}
+
+// ---- logging in with Battle.net ----
+
+#[derive(Deserialize)]
+struct StartLogin {
+    next: Option<String>,
+}
+
+/// Sends you to Battle.net's login, remembering where to come back to.
+async fn start_login(
+    State(state): State<AppState>,
+    Query(q): Query<StartLogin>,
+) -> Result<Response> {
+    let login = state.login.as_ref().ok_or(AppError::NotFound)?;
+    let next = zesquad_core::redirect::safe_next(q.next.as_deref());
+    let login_state = crate::login::random_token();
+    let cookie = format!(
+        "{}={}; Path=/auth; HttpOnly; SameSite=Lax; Max-Age=600{}",
+        crate::login::LOGIN_COOKIE,
+        zesquad_core::account::login_cookie(&login_state, next),
+        login.secure()
+    );
+    let to = login.authorize_url(&login_state)?;
+    Ok(([(header::SET_COOKIE, cookie)], Redirect::to(to.as_str())).into_response())
+}
+
+#[derive(Deserialize)]
+struct Callback {
+    code: Option<String>,
+    state: Option<String>,
+    error: Option<String>,
+}
+
+/// Where Battle.net sends you back: checks the state, asks who you are, starts a session.
+async fn finish_login(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(q): Query<Callback>,
+) -> Result<Response> {
+    let login = state.login.as_ref().ok_or(AppError::NotFound)?;
+    let clear = format!(
+        "{}=; Path=/auth; HttpOnly; SameSite=Lax; Max-Age=0",
+        crate::login::LOGIN_COOKIE
+    );
+    let remembered = crate::auth::cookie(&headers, crate::login::LOGIN_COOKIE)
+        .and_then(zesquad_core::account::read_login_cookie);
+    let refusal = |status, title, message| {
+        let page = ErrorPage {
+            nav: Nav::default(),
+            title,
+            message,
+        };
+        Ok(([(header::SET_COOKIE, clear.clone())], (status, page)).into_response())
+    };
+    let Some((expected, next)) = remembered else {
+        return refusal(
+            StatusCode::BAD_REQUEST,
+            "Login expired",
+            "That login took too long or didn't start here. Log in again from any page.",
+        );
+    };
+    if q.error.is_some() {
+        return refusal(
+            StatusCode::FORBIDDEN,
+            "Not logged in",
+            "Battle.net didn't log you in, so nothing was shared with zesquad.",
+        );
+    }
+    let state_matches = q
+        .state
+        .as_deref()
+        .is_some_and(|s| crate::auth::constant_time_eq(s.as_bytes(), expected.as_bytes()));
+    let (true, Some(code)) = (state_matches, q.code.as_deref()) else {
+        return refusal(
+            StatusCode::BAD_REQUEST,
+            "Login expired",
+            "That login took too long or didn't start here. Log in again from any page.",
+        );
+    };
+    let identity = match login.identify(code).await {
+        Ok(identity) => identity,
+        Err(e) => {
+            tracing::warn!("logging in: {e:#}");
+            return refusal(
+                StatusCode::BAD_GATEWAY,
+                "Couldn't log in",
+                "Battle.net didn't answer as expected. Try again in a moment.",
+            );
+        }
+    };
+    let user = db::upsert_user(&state.db, &identity).await?;
+    let session = crate::login::start_session(&state, login, &user).await?;
+    Ok((
+        AppendHeaders([(header::SET_COOKIE, session), (header::SET_COOKIE, clear)]),
+        Redirect::to(&next),
+    )
+        .into_response())
 }
 
 // ---- recently opened squads ----
@@ -717,10 +866,10 @@ fn example_roster() -> Roster {
     }
 }
 
-async fn index(State(state): State<AppState>, headers: HeaderMap) -> Result<Response> {
+async fn index(State(state): State<AppState>, headers: HeaderMap, nav: Nav) -> Result<Response> {
     let (recent, cookie) = recent_squads(&state, &headers).await?;
     let page = IndexPage {
-        logout: state.auth.is_some(),
+        nav,
         recent,
         example: example_roster(),
         error: None,
@@ -751,6 +900,7 @@ struct NewSquadForm {
 async fn create_squad(
     State(state): State<AppState>,
     headers: HeaderMap,
+    nav: Nav,
     Form(form): Form<NewSquadForm>,
 ) -> Result<Response> {
     let region = form
@@ -768,7 +918,7 @@ async fn create_squad(
         Err(error) => {
             let (recent, _) = recent_squads(&state, &headers).await?;
             let page = IndexPage {
-                logout: state.auth.is_some(),
+                nav,
                 recent,
                 example: example_roster(),
                 error: Some(error),
@@ -846,6 +996,7 @@ async fn build_roster(
 async fn squad_page(
     State(state): State<AppState>,
     headers: HeaderMap,
+    nav: Nav,
     squad: db::Squad,
     Query(q): Query<FilterQuery>,
 ) -> Result<Response> {
@@ -860,10 +1011,9 @@ async fn squad_page(
     .await?;
     let mut recent = recent(&headers);
     recent.visit(&squad.id);
-    let origin = Origin::of(&headers);
     let page = SquadPage {
-        logout: state.auth.is_some(),
-        link: origin.link(&squad_path(&squad.id)),
+        link: nav.link(&squad_path(&squad.id)),
+        nav,
         squad,
         roster,
     };
@@ -923,7 +1073,7 @@ impl Outcome {
 async fn respond(
     state: &AppState,
     Htmx(htmx): Htmx,
-    origin: &Origin,
+    nav: &Nav,
     squad: db::Squad,
     view: &ViewForm,
     outcome: Outcome,
@@ -945,8 +1095,8 @@ async fn respond(
         StatusCode::OK
     };
     let page = SquadPage {
-        logout: state.auth.is_some(),
-        link: origin.link(&squad_path(&squad.id)),
+        link: nav.link(&squad_path(&squad.id)),
+        nav: nav.clone(),
         squad,
         roster,
     };
@@ -975,7 +1125,7 @@ async fn add_character(
     State(state): State<AppState>,
     squad: db::Squad,
     htmx: Htmx,
-    origin: Origin,
+    nav: Nav,
     Form(form): Form<AddForm>,
 ) -> Result<Response> {
     let parsed = form
@@ -1003,7 +1153,7 @@ async fn add_character(
             ..Outcome::default()
         },
     };
-    respond(&state, htmx, &origin, squad, &form.view, outcome).await
+    respond(&state, htmx, &nav, squad, &form.view, outcome).await
 }
 
 #[derive(Deserialize)]
@@ -1036,7 +1186,7 @@ async fn add_tags(
     squad: db::Squad,
     Path(path): Path<CharacterPath>,
     htmx: Htmx,
-    origin: Origin,
+    nav: Nav,
     Form(form): Form<TagsForm>,
 ) -> Result<Response> {
     let outcome = match parse_tags(&form.tags) {
@@ -1046,7 +1196,7 @@ async fn add_tags(
         }
         Err(e) => Outcome::error(e.to_string()),
     };
-    respond(&state, htmx, &origin, squad, &form.view, outcome).await
+    respond(&state, htmx, &nav, squad, &form.view, outcome).await
 }
 
 #[derive(Deserialize)]
@@ -1060,11 +1210,11 @@ async fn remove_tag(
     squad: db::Squad,
     Path(path): Path<CharacterTagPath>,
     htmx: Htmx,
-    origin: Origin,
+    nav: Nav,
     Form(form): Form<FilterForm>,
 ) -> Result<Response> {
     db::remove_tag(&state.db, &squad.id, path.id, &path.tag).await?;
-    respond(&state, htmx, &origin, squad, &form.view, Outcome::default()).await
+    respond(&state, htmx, &nav, squad, &form.view, Outcome::default()).await
 }
 
 #[derive(Deserialize)]
@@ -1083,7 +1233,7 @@ async fn set_colour(
     squad: db::Squad,
     Path(path): Path<TagPath>,
     htmx: Htmx,
-    origin: Origin,
+    nav: Nav,
     Form(form): Form<ColourForm>,
 ) -> Result<Response> {
     let colour = if form.reset.is_some() {
@@ -1104,7 +1254,7 @@ async fn set_colour(
     respond(
         &state,
         htmx,
-        &origin,
+        &nav,
         squad,
         &form.view,
         Outcome {
@@ -1120,11 +1270,11 @@ async fn remove_character(
     squad: db::Squad,
     Path(path): Path<CharacterPath>,
     htmx: Htmx,
-    origin: Origin,
+    nav: Nav,
     Form(form): Form<FilterForm>,
 ) -> Result<Response> {
     db::remove_character(&state.db, &squad.id, path.id).await?;
-    respond(&state, htmx, &origin, squad, &form.view, Outcome::default()).await
+    respond(&state, htmx, &nav, squad, &form.view, Outcome::default()).await
 }
 
 async fn refresh(
@@ -1132,12 +1282,12 @@ async fn refresh(
     squad: db::Squad,
     Path(path): Path<CharacterPath>,
     htmx: Htmx,
-    origin: Origin,
+    nav: Nav,
     Form(form): Form<FilterForm>,
 ) -> Result<Response> {
     db::request_refresh(&state.db, &squad.id, path.id).await?;
     state.wake.notify_one();
-    respond(&state, htmx, &origin, squad, &form.view, Outcome::default()).await
+    respond(&state, htmx, &nav, squad, &form.view, Outcome::default()).await
 }
 
 // ---- auction prices ----
@@ -1145,7 +1295,7 @@ async fn refresh(
 #[derive(Template, WebTemplate)]
 #[template(path = "auctions.html")]
 struct AuctionsPage {
-    logout: bool,
+    nav: Nav,
     enabled: bool,
     houses: Vec<HouseView>,
     regions: Vec<RegionPrices>,
@@ -1189,7 +1339,7 @@ const SPARK_WIDTH: f64 = 96.0;
 const SPARK_HEIGHT: f64 = 24.0;
 const SPARK_PAD: f64 = 3.0;
 
-async fn auctions_page(State(state): State<AppState>) -> Result<AuctionsPage> {
+async fn auctions_page(State(state): State<AppState>, nav: Nav) -> Result<AuctionsPage> {
     let now = db::now();
     let since = now - PRICE_DAYS * auctions::DAY;
     let leather: Vec<u32> = auctions::LEATHER.iter().map(|&(id, _)| id).collect();
@@ -1252,7 +1402,7 @@ async fn auctions_page(State(state): State<AppState>) -> Result<AuctionsPage> {
         }
     }
     Ok(AuctionsPage {
-        logout: state.auth.is_some(),
+        nav,
         enabled: state.auctions_enabled,
         houses,
         regions,

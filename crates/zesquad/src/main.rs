@@ -49,6 +49,7 @@ async fn serve(args: ServeArgs) -> anyhow::Result<()> {
         armory: args.bnet.config()?,
         password: args.password.clone(),
         auctions: args.auctions,
+        login: args.login()?,
     };
     let running = zesquad::start(settings, zesquad::shutdown_signal()).await?;
     tracing::info!(

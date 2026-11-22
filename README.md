@@ -31,6 +31,10 @@ Armory lookups need a Battle.net API client: create one at
 <https://community.developer.battle.net/access/clients> (it's free; your account needs an
 authenticator). Without credentials zesquad still works, showing just names and tags.
 
+To let people log in with Battle.net, set `ZESQUAD_PUBLIC_URL` and add
+`<public URL>/auth/callback` as a redirect URL of the same API client. Logging in asks Battle.net
+for nothing but the account id and BattleTag.
+
 ## Configuration
 
 Environment variables (or the matching `--flags` of `zesquad serve`; a `.env` file in the
@@ -42,6 +46,7 @@ working directory is read too):
 | `ZESQUAD_BNET_CLIENT_SECRET` |                     | Battle.net API client secret                    |
 | `ZESQUAD_BNET_REGION`        | `eu`                | region new squads start in: `eu`, `us`, `tw`    |
 | `ZESQUAD_PASSWORD`           |                     | shared password for the whole site; empty: none |
+| `ZESQUAD_PUBLIC_URL`         |                     | where people reach zesquad, e.g. `https://zesquad.example`; turns on logging in with Battle.net |
 | `ZESQUAD_LISTEN`             | `127.0.0.1:8080`    | address to listen on (`0.0.0.0:8080` in Docker) |
 | `ZESQUAD_DATABASE`           | `data/zesquad.db`  | SQLite file, created if missing                 |
 | `ZESQUAD_REFRESH_MINUTES`    | `60`                | how often a character's details are refreshed   |
