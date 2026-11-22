@@ -59,7 +59,12 @@ header.site {
 .site-nav a { text-decoration: none; }
 .site-nav a:hover { text-decoration: underline; }
 .account { margin-left: auto; display: flex; gap: .6rem; align-items: baseline; font-size: .9rem; }
-.account .battletag { font-weight: 600; }
+.account .battletag { font-weight: 600; color: var(--text); text-decoration: none; }
+.account .battletag:hover { text-decoration: underline; }
+footer.site { max-width: 56rem; margin: 0 auto; padding: 0 1rem 2rem; display: flex; gap: 1rem; font-size: .85rem; }
+footer.site a { color: var(--muted); }
+.intro h2, .prose h2 { font-size: 1.2rem; margin: 2rem 0 .5rem; }
+.prose li { margin: .25rem 0; }
 .account .login { text-decoration: none; font-weight: 600; }
 .account .login:hover { text-decoration: underline; }
 

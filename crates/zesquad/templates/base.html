@@ -25,7 +25,7 @@
     <nav class="site-nav"><a href="/auctions">Auction house</a></nav>
     <div class="account">
       {%- if let Some(user) = nav.user %}
-      <span class="battletag" title="Logged in with Battle.net">{{ user.battletag }}</span>
+      <a href="/account" class="battletag" title="Your account">{{ user.battletag }}</a>
       {%- else if nav.login %}
       <a href="{{ nav.login_link() }}" class="login">Log in with Battle.net</a>
       {%- endif %}
@@ -37,5 +37,9 @@
   <main>
     {% block content %}{% endblock %}
   </main>
+  <footer class="site">
+    <a href="/privacy">Privacy</a>
+    <a href="https://github.com/tinnet/zesquad">Source</a>
+  </footer>
 </body>
 </html>

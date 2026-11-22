@@ -187,6 +187,46 @@ pub async fn extend_session(
     Ok(())
 }
 
+/// When `user_id` first logged in.
+///
+/// # Errors
+///
+/// On database errors.
+pub async fn user_created(db: &SqlitePool, user_id: i64) -> anyhow::Result<i64> {
+    Ok(
+        sqlx::query_scalar("SELECT created_at FROM users WHERE id = ?")
+            .bind(user_id)
+            .fetch_one(db)
+            .await?,
+    )
+}
+
+/// Ends every session of `user_id`.
+///
+/// # Errors
+///
+/// On database errors.
+pub async fn delete_sessions(db: &SqlitePool, user_id: i64) -> anyhow::Result<()> {
+    sqlx::query("DELETE FROM sessions WHERE user_id = ?")
+        .bind(user_id)
+        .execute(db)
+        .await?;
+    Ok(())
+}
+
+/// Deletes a user and, through the foreign keys, everything that hangs off them.
+///
+/// # Errors
+///
+/// On database errors.
+pub async fn delete_user(db: &SqlitePool, user_id: i64) -> anyhow::Result<()> {
+    sqlx::query("DELETE FROM users WHERE id = ?")
+        .bind(user_id)
+        .execute(db)
+        .await?;
+    Ok(())
+}
+
 /// # Errors
 ///
 /// On database errors.

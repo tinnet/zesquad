@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Your account · zesquad{% endblock %}
+{% block content %}
+<section class="intro">
+  <h1>Your account</h1>
+  {%- if let Some(user) = nav.user %}
+  <p>You're logged in with Battle.net as <strong>{{ user.battletag }}</strong>, since {{ joined }}.</p>
+  <p class="hint">zesquad keeps your Battle.net account id and BattleTag, and nothing else about you. See <a href="/privacy">privacy</a>.</p>
+
+  <h2>Sessions</h2>
+  <p>Logged in somewhere you shouldn't be? This logs you out on every device, this one too.</p>
+  <form method="post" action="/account/sessions/delete">
+    <button type="submit" class="quiet">Log out everywhere</button>
+  </form>
+
+  <h2>Delete your account</h2>
+  <p>Removes your account id and BattleTag from zesquad. Squads and the characters in them stay.</p>
+  <form method="post" action="/account/delete" onsubmit="return confirm('Delete your zesquad account?')">
+    <button type="submit" class="quiet danger">Delete my account</button>
+  </form>
+  {%- endif %}
+</section>
+{% endblock %}

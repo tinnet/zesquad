@@ -149,7 +149,10 @@ throws the token away. A session is a random token in `zesquad_user` (HttpOnly,
 `SameSite=Lax`, `Secure` when the public URL is HTTPS); `sessions` keeps its SHA-256, so the
 database alone can't log anyone in. Sessions last 30 days and are extended when used in their
 second half (`login::load`, a middleware that also puts the user in the request). **Log out**
-ends both this session and the shared-password one.
+ends both this session and the shared-password one. `/account` shows your BattleTag and lets you log out
+everywhere (every session of yours deleted) or delete your account (the `users` row, and
+through foreign keys everything hanging off it). `/privacy`, linked from every page, lists
+everything zesquad keeps.
 
 A squad's id, a random UUID v4 written in Crockford base32 (`squad_id.rs` in core), is its
 secret; squads made before that have the dashed UUID form, which still works. Anything that

@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Privacy · zesquad{% endblock %}
+{% block content %}
+<section class="intro prose">
+  <h1>Privacy</h1>
+  <p>zesquad keeps as little as it can. This is all of it.</p>
+
+  <h2>If you log in</h2>
+  <ul>
+    <li>Your <strong>Battle.net account id</strong> and <strong>BattleTag</strong>, and when you first and last logged in. Battle.net gives zesquad nothing else: no email, no name, no characters.</li>
+    <li>A <strong>session</strong>: a random token in a cookie (<code>zesquad_user</code>), kept on the server only as a hash, for 30 days after you last used it.</li>
+    <li>While you're away logging in at Battle.net, a cookie (<code>zesquad_login</code>) remembers which page to bring you back to, for ten minutes at most.</li>
+  </ul>
+  <p>You can log out everywhere or delete your account on <a href="/account">your account page</a>.</p>
+
+  <h2>Squads</h2>
+  <ul>
+    <li>Squads hold what people type in: a name, character names and tags. Character details come from the public Battle.net Armory.</li>
+    <li>A cookie (<code>zesquad_recent</code>) remembers which squads this browser opened, so the front page can list them. It never leaves your browser except to come back here.</li>
+  </ul>
+
+  <h2>Nothing else</h2>
+  <p>No ads, no trackers, no analytics. The server's logs record requests (address, page, time) to keep it running. zesquad is open source: <a href="https://github.com/tinnet/zesquad">github.com/tinnet/zesquad</a>.</p>
+</section>
+{% endblock %}

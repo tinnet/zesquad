@@ -60,6 +60,10 @@ pub fn router(state: AppState) -> Router {
         .route("/auctions", get(auctions_page))
         .route("/auth/login", get(start_login))
         .route("/auth/callback", get(finish_login))
+        .route("/account", get(account_page))
+        .route("/account/sessions/delete", post(log_out_everywhere))
+        .route("/account/delete", post(delete_account))
+        .route("/privacy", get(privacy_page))
         .route("/squads", post(create_squad))
         .route("/recent/{squad}/forget", post(forget_squad))
         .route("/s/{squad}", get(squad_page))
@@ -618,6 +622,69 @@ async fn logout(State(state): State<AppState>, headers: HeaderMap) -> Result<Res
             (header::SET_COOKIE, crate::login::logout_cookie()),
         ]),
         Redirect::to(to),
+    )
+        .into_response())
+}
+
+// ---- your account ----
+
+#[derive(Template, WebTemplate)]
+#[template(path = "account.html")]
+struct AccountPage {
+    nav: Nav,
+    /// When you first logged in, as "3 days ago".
+    joined: String,
+}
+
+#[derive(Template, WebTemplate)]
+#[template(path = "privacy.html")]
+struct PrivacyPage {
+    nav: Nav,
+}
+
+async fn privacy_page(nav: Nav) -> PrivacyPage {
+    PrivacyPage { nav }
+}
+
+/// Your account, or the login when you aren't logged in.
+async fn account_page(State(state): State<AppState>, nav: Nav) -> Result<Response> {
+    let Some(user) = &nav.user else {
+        return Ok(login_first(&state, &nav));
+    };
+    let joined = ago(db::now() - db::user_created(&state.db, user.id).await?);
+    Ok(AccountPage { nav, joined }.into_response())
+}
+
+/// Sends someone who isn't logged in to log in, and back here after; a 404 when logging in is
+/// off, since then nobody has an account.
+fn login_first(state: &AppState, nav: &Nav) -> Response {
+    if state.login.is_none() {
+        return AppError::NotFound.into_response();
+    }
+    Redirect::to(&nav.login_link()).into_response()
+}
+
+async fn log_out_everywhere(State(state): State<AppState>, nav: Nav) -> Result<Response> {
+    let Some(user) = &nav.user else {
+        return Ok(login_first(&state, &nav));
+    };
+    db::delete_sessions(&state.db, user.id).await?;
+    Ok((
+        [(header::SET_COOKIE, crate::login::logout_cookie())],
+        Redirect::to("/"),
+    )
+        .into_response())
+}
+
+async fn delete_account(State(state): State<AppState>, nav: Nav) -> Result<Response> {
+    let Some(user) = &nav.user else {
+        return Ok(login_first(&state, &nav));
+    };
+    db::delete_user(&state.db, user.id).await?;
+    tracing::info!(user = user.id, "account deleted");
+    Ok((
+        [(header::SET_COOKIE, crate::login::logout_cookie())],
+        Redirect::to("/"),
     )
         .into_response())
 }

@@ -1718,6 +1718,87 @@ async fn sessions_last_a_month_and_are_extended_when_used() {
     assert!(!page.contains("Testhero#1234"), "{page}");
 }
 
+impl App {
+    /// POSTs `path` with `cookie` and no form.
+    async fn post_with(&self, path: &str, cookie: &str) -> reqwest::Response {
+        self.http
+            .post(format!("{}{path}", self.base))
+            .header(header::COOKIE, cookie)
+            .send()
+            .await
+            .unwrap()
+    }
+}
+
+#[tokio::test]
+async fn your_account_shows_what_is_kept_and_can_go() {
+    let app = app_with_login(None).await;
+    // Not logged in: log in first, then come back.
+    let r = app.get_with("/account", "").await;
+    assert_eq!(r.status(), StatusCode::SEE_OTHER);
+    assert_eq!(r.headers()[header::LOCATION], "/auth/login?next=%2Faccount");
+
+    let phone = log_in_bnet(&app, "/").await;
+    let laptop = log_in_bnet(&app, "/").await;
+    let page = app.get_with("/account", &phone).await.text().await.unwrap();
+    assert!(
+        page.contains("<strong>Testhero#1234</strong>, since just now"),
+        "{page}"
+    );
+    assert!(page.contains("href=\"/account\""), "{page}");
+
+    // Log out everywhere ends both sessions, keeps the account.
+    let r = app.post_with("/account/sessions/delete", &phone).await;
+    assert_eq!(r.status(), StatusCode::SEE_OTHER);
+    for session in [&phone, &laptop] {
+        let page = app.get_with("/", session).await.text().await.unwrap();
+        assert!(!page.contains("Testhero#1234"));
+    }
+    let db = zesquad::db::open(&app.dir.path().join("zesquad.db"), Region::Eu)
+        .await
+        .unwrap();
+    let count = |sql: &'static str| {
+        let db = db.clone();
+        async move {
+            sqlx::query_scalar::<_, i64>(sql)
+                .fetch_one(&db)
+                .await
+                .unwrap()
+        }
+    };
+    assert_eq!(count("SELECT COUNT(*) FROM users").await, 1);
+    assert_eq!(count("SELECT COUNT(*) FROM sessions").await, 0);
+
+    // Deleting the account leaves nothing about you.
+    let session = log_in_bnet(&app, "/").await;
+    let r = app.post_with("/account/delete", &session).await;
+    assert_eq!(r.status(), StatusCode::SEE_OTHER);
+    assert_eq!(set_cookie(&r, "zesquad_user").unwrap(), "zesquad_user=");
+    assert_eq!(count("SELECT COUNT(*) FROM users").await, 0);
+    assert_eq!(count("SELECT COUNT(*) FROM sessions").await, 0);
+    // Without a session, the account actions only send you to log in.
+    let r = app.post_with("/account/delete", "").await;
+    assert_eq!(r.status(), StatusCode::SEE_OTHER);
+    assert!(
+        r.headers()[header::LOCATION]
+            .to_str()
+            .unwrap()
+            .starts_with("/auth/login")
+    );
+}
+
+#[tokio::test]
+async fn every_page_links_the_privacy_page() {
+    let app = app(false).await;
+    let (_, front) = app.get("/").await;
+    assert!(front.contains("href=\"/privacy\""), "{front}");
+    let (status, privacy) = app.get("/privacy").await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(privacy.contains("account id") && privacy.contains("zesquad_recent"));
+    // Without logging in there's no account to see.
+    assert_eq!(app.get("/account").await.0, StatusCode::NOT_FOUND);
+}
+
 #[tokio::test]
 async fn a_login_must_come_back_to_where_it_started() {
     let app = app_with_login(None).await;
