@@ -230,4 +230,13 @@ details h3 { font-size: .95rem; margin: .75rem 0 .25rem; }
 @media (max-width: 30rem) {
   .actions { justify-content: flex-start; }
   .squad-name { font-size: 1.25rem; }
+  /* Phones: tighter cards, a smaller portrait so the text gets the width, and buttons that
+     are easier to hit with a thumb. */
+  .member { padding: .75rem .8rem; }
+  .avatar { width: 44px; height: 44px; }
+  .who { gap: .65rem; }
+  .chip { padding: .25rem .65rem; }
+  .chip .x { padding: 0 .3rem; margin-right: -.3rem; font-size: 1.05rem; line-height: 1; }
+  .actions button.quiet { padding: .4rem .8rem; }
+  .overview .summary { flex-basis: 100%; }
 }
