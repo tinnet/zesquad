@@ -2,6 +2,12 @@
 
 What changed in each zesquad release. Versions are dates (CalVer).
 
+## 2026.11.22.2
+
+### Features
+
+- Keep every raw auction dump, optionally in an S3 bucket ([2f0c50e](https://github.com/tinnet/zesquad/commit/2f0c50e10153ec6c501a4ba9175e0ae0c7cf78e4))
+
 ## 2026.11.22.1
 
 ### Features
