@@ -7,9 +7,11 @@ use sqlx::SqlitePool;
 use tokio::sync::Notify;
 use zesquad_core::Region;
 use zesquad_core::armory::{Endpoint, Profile};
+use zesquad_core::discord;
 
 use crate::armory::{Client, Lookup};
 use crate::db::{self, Fetched};
+use crate::discord::Discord;
 
 /// Without a wake-up, look for due characters this often.
 const TICK: Duration = Duration::from_secs(60);
@@ -23,6 +25,8 @@ pub struct Syncer {
     pub interval: Duration,
     /// Notified when a character is added or a refresh asked for, so it's fetched right away.
     pub wake: Arc<Notify>,
+    /// Tells squads' Discord channels about level-ups.
+    pub discord: Arc<Discord>,
 }
 
 impl Syncer {
@@ -45,12 +49,34 @@ impl Syncer {
         let interval = i64::try_from(self.interval.as_secs()).unwrap_or(i64::MAX);
         let due = db::due(&self.db, db::now(), interval).await?;
         for (region, key) in &due {
+            let before = db::armory_level(&self.db, region.as_str(), key).await?;
             let fetched = self.fetch(*region, key).await;
             if let Fetched::Failed(e) = &fetched {
                 tracing::warn!(character = %key, %region, "armory fetch failed: {e}");
             }
+            let after = match &fetched {
+                Fetched::Found(docs) => docs
+                    .iter()
+                    .find(|(e, _)| *e == Endpoint::Summary)
+                    .and_then(|(_, doc)| doc["level"].as_u64()),
+                _ => None,
+            };
             db::store(&self.db, region.as_str(), key, fetched).await?;
+            if let Some(level) = discord::level_up(before, after) {
+                self.announce_level(*region, key, level).await?;
+            }
             tokio::time::sleep(PAUSE).await;
+        }
+        Ok(())
+    }
+
+    /// Tells every squad with this character and a Discord channel that it went up a level.
+    async fn announce_level(&self, region: Region, key: &str, level: u64) -> anyhow::Result<()> {
+        for squad in db::discord_squads_with(&self.db, region, key).await? {
+            let link = self.discord.squad_link(&squad.squad_id);
+            let message =
+                discord::levelled(&squad.character, level, &squad.squad_name, link.as_deref());
+            self.discord.send(squad.webhook, message);
         }
         Ok(())
     }

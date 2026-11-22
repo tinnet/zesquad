@@ -159,6 +159,17 @@ squad page puts its id first; **Forget** takes one off. Ids of squads that are g
 and the cookie written back. The cookie only holds ids the browser already had, so it reveals
 nothing new.
 
+A squad can post its news to a Discord channel through a webhook (`discord.rs`, and
+`zesquad_core::discord`): a character added, and a character going up a level, which the
+Armory sync spots by comparing the stored summary's level with the new one. Only Discord's own
+webhook URLs are taken, so a squad can't make the server send requests elsewhere; the
+webhook's path is kept in `squads.discord_webhook`, and pages only ever show the end of its id,
+since the token is a secret. Setting one up posts a hello and waits for it, so a wrong or
+deleted webhook is refused on the spot; later posts go in the background and a failure is only
+logged. Messages turn mentions off (`allowed_mentions`) and escape Markdown, so names can't
+ping anyone or add links, and they link the squad when `ZESQUAD_PUBLIC_URL` is set. Group DMs
+can't have webhooks, so it's a server channel or one of its threads (`?thread_id=`).
+
 With `ZESQUAD_PUBLIC_URL` and Battle.net credentials, people can log in with Battle.net
 (`login.rs`, authorization code flow, `scope=openid`): zesquad keeps the account id and
 BattleTag in `users`, and nothing else. `/auth/login` puts a random `state` and the page to

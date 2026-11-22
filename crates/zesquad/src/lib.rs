@@ -9,6 +9,7 @@ pub mod auctions;
 mod auth;
 pub mod cli;
 pub mod db;
+pub mod discord;
 pub mod login;
 mod s3;
 mod sync;
@@ -44,6 +45,8 @@ pub struct Settings {
     pub login: Option<login::Config>,
     /// Keep the raw auction dumps (needs `auctions`).
     pub archive: Option<archive::Config>,
+    /// Posting squads' news to Discord.
+    pub discord: discord::Config,
 }
 
 /// A started server.
@@ -67,6 +70,7 @@ pub async fn start(
 ) -> anyhow::Result<Running> {
     let db = db::open(&settings.database, settings.default_region).await?;
     let wake = Arc::new(Notify::new());
+    let discord = Arc::new(discord::Discord::new(settings.discord)?);
 
     let mut syncs = Vec::new();
     let mut auctions_enabled = false;
@@ -79,6 +83,7 @@ pub async fn start(
                 client: client.clone(),
                 interval: settings.refresh,
                 wake: wake.clone(),
+                discord: discord.clone(),
             }
             .run(),
         ));
@@ -128,6 +133,7 @@ pub async fn start(
         auctions_enabled,
         armory_cache: Arc::default(),
         auth,
+        discord,
     };
     let app = web::router(state).layer((
         TraceLayer::new_for_http(),

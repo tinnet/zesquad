@@ -16,7 +16,7 @@ async fn main() -> ExitCode {
     let _ = dotenvy::dotenv();
     let cli = Cli::parse();
     let result = match cli.command {
-        Command::Serve(args) => serve(args).await,
+        Command::Serve(args) => serve(*args).await,
         Command::Healthcheck { listen } => return healthcheck(listen).await,
         Command::Api {
             path,
@@ -51,6 +51,7 @@ async fn serve(args: ServeArgs) -> anyhow::Result<()> {
         auctions: args.auctions,
         login: args.login()?,
         archive: args.archive.config()?,
+        discord: args.discord()?,
     };
     let running = zesquad::start(settings, zesquad::shutdown_signal()).await?;
     tracing::info!(

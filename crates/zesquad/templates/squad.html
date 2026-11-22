@@ -23,6 +23,32 @@
     <button type="button" class="quiet" data-copy="squad-link" hidden>Copy link</button>
   </div>
   <p class="hint">Characters from {{ squad.region.name() }}. Share this link with your squad: anyone who has it can see and edit the squad.</p>
+  <details class="discord"{% if discord_error.is_some() %} open{% endif %}>
+    {%- let base = roster.base() %}
+    {%- if let Some(hint) = webhook_hint() %}
+    <summary>Posting to Discord</summary>
+    <div class="row">
+      <p class="grow">New characters and level-ups go to a Discord channel (webhook {{ hint }}).</p>
+      <form method="post" action="{{ base }}/discord/delete">
+        <button type="submit" class="quiet danger">Stop posting</button>
+      </form>
+    </div>
+    {%- else %}
+    <summary>Post to Discord</summary>
+    <p class="hint">
+      Post new characters and level-ups to a channel in your Discord server: in the channel's
+      settings, open Integrations, then Webhooks, make a new webhook and copy its URL.
+    </p>
+    <form method="post" action="{{ base }}/discord" class="row">
+      <label class="grow">
+        <span class="visually-hidden">Discord webhook URL</span>
+        <input name="webhook" type="url" placeholder="https://discord.com/api/webhooks/…" required autocomplete="off">
+      </label>
+      <button type="submit">Start posting</button>
+    </form>
+    {%- endif %}
+    {% if let Some(error) = discord_error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
+  </details>
 </section>
 <script src="{{ crate::assets::base() }}/share.js" defer></script>
 {% include "roster.html" %}

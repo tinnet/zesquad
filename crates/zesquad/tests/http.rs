@@ -4,7 +4,7 @@
 use std::fmt::Write as _;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::time::Duration;
 
 use axum::Router;
@@ -40,6 +40,44 @@ struct Fake {
     archived: Arc<std::sync::Mutex<std::collections::BTreeMap<String, Vec<u8>>>>,
     /// Uploads answer 503.
     archive_down: Arc<AtomicBool>,
+    /// The level the known character's summary says; 0 keeps the fixture's.
+    level: Arc<AtomicU64>,
+    /// Messages posted to the fake Discord: the webhook path (with query) and the JSON body.
+    discord: Arc<std::sync::Mutex<Vec<(String, serde_json::Value)>>>,
+}
+
+/// A webhook id the fake Discord says is gone (404), like a deleted webhook.
+const DELETED_WEBHOOK: &str = "404404404404404404";
+
+/// Discord's webhook endpoint: takes JSON messages, except on the deleted webhook.
+async fn fake_discord(
+    State(fake): State<Fake>,
+    Path((id, token)): Path<(String, String)>,
+    axum::extract::RawQuery(query): axum::extract::RawQuery,
+    axum::Json(body): axum::Json<serde_json::Value>,
+) -> Response {
+    if id == DELETED_WEBHOOK {
+        return (
+            StatusCode::NOT_FOUND,
+            r#"{"message":"Unknown Webhook","code":10015}"#,
+        )
+            .into_response();
+    }
+    let path = format!("/api/webhooks/{id}/{token}?{}", query.unwrap_or_default());
+    fake.discord.lock().unwrap().push((path, body));
+    axum::Json(serde_json::json!({ "id": "1" })).into_response()
+}
+
+impl Fake {
+    /// The text of every message posted to Discord so far.
+    fn discord_messages(&self) -> Vec<String> {
+        self.discord
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|(_, body)| body["content"].as_str().unwrap_or_default().to_owned())
+            .collect()
+    }
 }
 
 const ARCHIVE_KEY_ID: &str = "test-archive-key";
@@ -205,11 +243,14 @@ fn fake_character(
         env!("CARGO_MANIFEST_DIR"),
         endpoint.as_str()
     );
-    (
-        [(header::CONTENT_TYPE, "application/json")],
-        std::fs::read_to_string(path).unwrap(),
-    )
-        .into_response()
+    let mut body = std::fs::read_to_string(path).unwrap();
+    let level = fake.level.load(Ordering::SeqCst);
+    if endpoint == Endpoint::Summary && level > 0 {
+        let mut summary: serde_json::Value = serde_json::from_str(&body).unwrap();
+        summary["level"] = level.into();
+        body = summary.to_string();
+    }
+    ([(header::CONTENT_TYPE, "application/json")], body).into_response()
 }
 
 /// House 110 has the fixture auctions in every region and other houses are empty, except US
@@ -295,6 +336,7 @@ async fn start_fake() -> (String, Fake) {
             get(fake_auctions),
         )
         .route("/bucket/{*path}", put(fake_archive))
+        .route("/api/webhooks/{id}/{token}", post(fake_discord))
         .with_state(fake.clone());
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -368,6 +410,10 @@ async fn app_full(with_armory: bool, password: Option<&str>, auctions: bool, log
             public_url: reqwest::Url::parse(PUBLIC_URL).unwrap(),
         }),
         archive: auctions.then(|| archive_config(&fake_url, &dir.path().join("archive"))),
+        discord: zesquad::discord::Config {
+            api_url: reqwest::Url::parse(&fake_url).unwrap(),
+            public_url: Some(reqwest::Url::parse(PUBLIC_URL).unwrap()),
+        },
     };
     let running = zesquad::start(settings, std::future::pending())
         .await
@@ -945,6 +991,127 @@ async fn refresh_fetches_again() {
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
     panic!("no new lookups after refresh");
+}
+
+const WEBHOOK_ID: &str = "123456789012345678";
+const WEBHOOK_TOKEN: &str = "fake-Token_abc";
+
+impl App {
+    /// Waits for the fake Discord to have `n` messages and returns their text.
+    async fn discord_messages(&self, n: usize) -> Vec<String> {
+        for _ in 0..100 {
+            let messages = self.fake.discord_messages();
+            if messages.len() >= n {
+                return messages;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        panic!(
+            "Discord got {:?}, not {n} messages",
+            self.fake.discord_messages()
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_squad_posts_joins_and_level_ups_to_discord() {
+    let app = app(true).await;
+    let squad = app.squad("Thursday raiders").await;
+    let id = squad.strip_prefix("/s/").unwrap();
+    let (_, page) = app.get(&squad).await;
+    assert!(page.contains("Post to Discord"), "{page}");
+
+    // Setting it up says hello, so whoever pasted the URL sees it work.
+    let url = format!("https://discord.com/api/webhooks/{WEBHOOK_ID}/{WEBHOOK_TOKEN}");
+    let r = app
+        .post(&format!("{squad}/discord"), &[("webhook", url.as_str())])
+        .await;
+    assert_eq!(r.status(), StatusCode::SEE_OTHER);
+    let hello = app.discord_messages(1).await;
+    assert!(
+        hello[0].contains(&format!("[Thursday raiders](<{PUBLIC_URL}/s/{id}>)")),
+        "{hello:?}"
+    );
+    {
+        let posts = app.fake.discord.lock().unwrap();
+        let (path, body) = &posts[0];
+        assert_eq!(
+            path,
+            &format!("/api/webhooks/{WEBHOOK_ID}/{WEBHOOK_TOKEN}?wait=true")
+        );
+        assert_eq!(body["allowed_mentions"]["parse"], serde_json::json!([]));
+    }
+    // The page says it's on but never shows the token.
+    let (_, page) = app.get(&squad).await;
+    assert!(
+        page.contains("Posting to Discord") && page.contains("…5678"),
+        "{page}"
+    );
+    assert!(!page.contains(WEBHOOK_TOKEN), "{page}");
+
+    // A character joining, then going up a level on a later refresh.
+    app.add(&squad, "Aldric-Thornwood", "").await;
+    let page = app.wait_for(&squad, "Level 26").await;
+    let messages = app.discord_messages(2).await;
+    assert!(
+        messages[1].starts_with("**Aldric Thornwood** joined [Thursday raiders]"),
+        "{messages:?}"
+    );
+    app.fake.level.store(27, Ordering::SeqCst);
+    let member = member_id(&page, 0);
+    app.post(&format!("{squad}/characters/{member}/refresh"), &[])
+        .await;
+    let messages = app.discord_messages(3).await;
+    assert!(
+        messages[2].starts_with("**Aldric Thornwood** reached level 27 · [Thursday raiders]"),
+        "{messages:?}"
+    );
+    // The same level again says nothing: wait for the refresh's lookups to be done.
+    let lookups = app.fake.lookups.load(Ordering::SeqCst);
+    app.post(&format!("{squad}/characters/{member}/refresh"), &[])
+        .await;
+    for _ in 0..100 {
+        if app.fake.lookups.load(Ordering::SeqCst) >= lookups + 5 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(app.fake.discord_messages().len(), 3);
+
+    // Stopping.
+    let r = app.post(&format!("{squad}/discord/delete"), &[]).await;
+    assert_eq!(r.status(), StatusCode::SEE_OTHER);
+    assert!(app.get(&squad).await.1.contains("Post to Discord"));
+    app.add(&squad, "Brena-Ashvale", "").await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(app.fake.discord_messages().len(), 3);
+}
+
+#[tokio::test]
+async fn only_working_discord_webhooks_are_kept() {
+    let app = app(false).await;
+    let squad = app.squad("Raiders").await;
+    for (url, says) in [
+        (
+            "https://evil.example/api/webhooks/1/x",
+            "isn&#39;t a Discord webhook URL",
+        ),
+        ("not a url", "isn&#39;t a Discord webhook URL"),
+        (
+            &*format!("https://discord.com/api/webhooks/{DELETED_WEBHOOK}/{WEBHOOK_TOKEN}"),
+            "Discord didn&#39;t take a message",
+        ),
+    ] {
+        let r = app
+            .post(&format!("{squad}/discord"), &[("webhook", url)])
+            .await;
+        assert_eq!(r.status(), StatusCode::UNPROCESSABLE_ENTITY, "{url}");
+        let page = r.text().await.unwrap();
+        assert!(page.contains(says), "{url}: {page}");
+        assert!(page.contains("Post to Discord"), "{page}");
+    }
+    assert_eq!(app.fake.discord_messages(), Vec::<String>::new());
 }
 
 #[tokio::test]

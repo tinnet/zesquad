@@ -5,6 +5,7 @@ pub mod account;
 pub mod archive;
 pub mod armory;
 pub mod auctions;
+pub mod discord;
 pub mod link;
 pub mod name;
 pub mod recent;

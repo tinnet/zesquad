@@ -118,6 +118,9 @@ button.danger:hover { color: var(--danger); border-color: var(--danger); }
 .share { margin-top: .25rem; }
 .share input { font-size: .9rem; color: var(--muted); }
 .share + .hint { margin-top: .35rem; }
+.discord { margin-top: .5rem; }
+.discord p { margin: .5rem 0; }
+.discord form { margin: .5rem 0; }
 
 .add { margin: 1rem 0 .5rem; }
 

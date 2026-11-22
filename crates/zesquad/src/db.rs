@@ -11,6 +11,7 @@ use serde_json::Value;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqlitePoolOptions};
 use zesquad_core::armory::{Documents, Endpoint, Profile};
 use zesquad_core::auctions;
+use zesquad_core::discord::Webhook;
 use zesquad_core::refresh::{Status, is_due};
 use zesquad_core::tags::Colour;
 use zesquad_core::{CharacterName, Region, SquadName, Tag};
@@ -60,6 +61,96 @@ pub struct Squad {
     pub name: String,
     #[sqlx(try_from = "String")]
     pub region: Region,
+    /// The Discord webhook's path, as stored; see [`Squad::webhook`].
+    discord_webhook: Option<String>,
+}
+
+impl Squad {
+    /// Where the squad's news goes on Discord, if anywhere.
+    #[must_use]
+    pub fn webhook(&self) -> Option<Webhook> {
+        self.discord_webhook
+            .as_deref()
+            .and_then(|path| Webhook::from_path(path).ok())
+    }
+}
+
+/// Sets (or with `None` stops) where the squad's news goes on Discord.
+///
+/// # Errors
+///
+/// On database errors.
+pub async fn set_webhook(
+    db: &SqlitePool,
+    squad_id: &str,
+    webhook: Option<&Webhook>,
+) -> anyhow::Result<()> {
+    sqlx::query("UPDATE squads SET discord_webhook = ? WHERE id = ?")
+        .bind(webhook.map(Webhook::path))
+        .bind(squad_id)
+        .execute(db)
+        .await?;
+    Ok(())
+}
+
+/// A squad with a Discord channel that has a given character.
+pub struct DiscordSquad {
+    pub squad_id: String,
+    pub squad_name: String,
+    /// The character as the squad shows it, "Name Surname".
+    pub character: String,
+    pub webhook: Webhook,
+}
+
+/// The squads with a Discord channel that have this character.
+///
+/// # Errors
+///
+/// On database errors.
+pub async fn discord_squads_with(
+    db: &SqlitePool,
+    region: Region,
+    key: &str,
+) -> anyhow::Result<Vec<DiscordSquad>> {
+    let rows: Vec<(String, String, String, String, String)> = sqlx::query_as(
+        "SELECT s.id, s.name, c.name, c.surname, s.discord_webhook
+         FROM characters c JOIN squads s ON s.id = c.squad_id
+         WHERE c.region = ? AND c.char_key = ? AND s.discord_webhook IS NOT NULL
+         ORDER BY s.id",
+    )
+    .bind(region.as_str())
+    .bind(key)
+    .fetch_all(db)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .filter_map(|(squad_id, squad_name, name, surname, path)| {
+            Some(DiscordSquad {
+                webhook: Webhook::from_path(&path).ok()?,
+                squad_id,
+                squad_name,
+                character: format!("{name} {surname}"),
+            })
+        })
+        .collect())
+}
+
+/// A character's level from its last good Armory summary, if any.
+///
+/// # Errors
+///
+/// On database errors.
+pub async fn armory_level(db: &SqlitePool, region: &str, key: &str) -> anyhow::Result<Option<u64>> {
+    let level: Option<Option<i64>> = sqlx::query_scalar(
+        "SELECT json_extract(body, '$.level') FROM armory_documents
+         WHERE region = ? AND char_key = ? AND endpoint = ?",
+    )
+    .bind(region)
+    .bind(key)
+    .bind(Endpoint::Summary.as_str())
+    .fetch_optional(db)
+    .await?;
+    Ok(level.flatten().and_then(|l| u64::try_from(l).ok()))
 }
 
 /// # Errors
@@ -86,7 +177,7 @@ pub async fn create_squad(
 /// On database errors.
 pub async fn squad(db: &SqlitePool, id: &str) -> anyhow::Result<Option<Squad>> {
     Ok(
-        sqlx::query_as("SELECT id, name, region FROM squads WHERE id = ?")
+        sqlx::query_as("SELECT id, name, region, discord_webhook FROM squads WHERE id = ?")
             .bind(id)
             .fetch_optional(db)
             .await?,

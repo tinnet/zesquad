@@ -16,6 +16,7 @@ use sqlx::SqlitePool;
 use tokio::sync::Notify;
 use zesquad_core::armory::Profile;
 use zesquad_core::auctions::{self, Money};
+use zesquad_core::discord::Webhook;
 use zesquad_core::recent::Recent;
 use zesquad_core::refresh::Status;
 use zesquad_core::roster::{self as order, Sort};
@@ -40,6 +41,8 @@ pub struct AppState {
     pub auth: Option<Arc<crate::auth::Auth>>,
     /// Set when people can log in with Battle.net.
     pub login: Option<Arc<crate::login::Login>>,
+    /// Posts squads' news to their Discord channels.
+    pub discord: Arc<crate::discord::Discord>,
 }
 
 /// The open routes (health check, version, static files, logging in and out) and, behind the
@@ -69,6 +72,8 @@ pub fn router(state: AppState) -> Router {
         .route("/s/{squad}", get(squad_page))
         .route("/s/{squad}/roster", get(roster_partial))
         .route("/s/{squad}/name", post(rename))
+        .route("/s/{squad}/discord", post(set_webhook))
+        .route("/s/{squad}/discord/delete", post(remove_webhook))
         .route("/s/{squad}/characters", post(add_character))
         .route("/s/{squad}/characters/{id}/tags", post(add_tags))
         .route(
@@ -535,9 +540,16 @@ struct SquadPage {
     /// The page's full link, to copy; just the path when the request's host looks wrong.
     link: String,
     roster: Roster,
+    /// Why the Discord webhook someone pasted wasn't kept.
+    discord_error: Option<String>,
 }
 
 impl SquadPage {
+    /// The end of the squad's Discord webhook id, to recognise it by; never the token.
+    fn webhook_hint(&self) -> Option<String> {
+        self.squad.webhook().map(|hook| hook.hint())
+    }
+
     /// One line about the squad for link previews: "6 characters in Europe on zesquad, …".
     fn summary(&self) -> String {
         let n = self.roster.total;
@@ -1083,6 +1095,7 @@ async fn squad_page(
         nav,
         squad,
         roster,
+        discord_error: None,
     };
     Ok(([recent_cookie(&headers, &recent)], page).into_response())
 }
@@ -1166,8 +1179,65 @@ async fn respond(
         nav: nav.clone(),
         squad,
         roster,
+        discord_error: None,
     };
     Ok((status, page).into_response())
+}
+
+// ---- Discord ----
+
+#[derive(Deserialize)]
+struct WebhookForm {
+    #[serde(default)]
+    webhook: String,
+}
+
+/// Sets the squad's Discord webhook, after posting a hello there so whoever pastes it sees it
+/// works. A bad URL or one Discord refuses comes back as an error and isn't kept.
+async fn set_webhook(
+    State(state): State<AppState>,
+    nav: Nav,
+    squad: db::Squad,
+    Form(form): Form<WebhookForm>,
+) -> Result<Response> {
+    let error = match Webhook::parse(&form.webhook) {
+        Err(e) => Some(e.to_string()),
+        Ok(hook) => {
+            let link = state.discord.squad_link(&squad.id);
+            let hello = zesquad_core::discord::hello(&squad.name, link.as_deref());
+            match state.discord.post(&hook, &hello).await {
+                Ok(()) => {
+                    db::set_webhook(&state.db, &squad.id, Some(&hook)).await?;
+                    None
+                }
+                Err(e) => {
+                    tracing::info!("discord webhook refused: {e:#}");
+                    Some(
+                        "Discord didn't take a message on that webhook: check it still exists, \
+                         or copy its URL again"
+                            .to_owned(),
+                    )
+                }
+            }
+        }
+    };
+    let Some(error) = error else {
+        return Ok(Redirect::to(&squad_path(&squad.id)).into_response());
+    };
+    let roster = build_roster(&state, &squad.id, None, Sort::default(), Outcome::default()).await?;
+    let page = SquadPage {
+        link: nav.link(&squad_path(&squad.id)),
+        nav,
+        squad,
+        roster,
+        discord_error: Some(error),
+    };
+    Ok((StatusCode::UNPROCESSABLE_ENTITY, page).into_response())
+}
+
+async fn remove_webhook(State(state): State<AppState>, squad: db::Squad) -> Result<Redirect> {
+    db::set_webhook(&state.db, &squad.id, None).await?;
+    Ok(Redirect::to(&squad_path(&squad.id)))
 }
 
 /// The filter and sort a roster form was posted from, to come back to.
@@ -1204,6 +1274,12 @@ async fn add_character(
         Ok((character, tags)) => {
             if db::add_character(&state.db, &squad.id, squad.region, &character, &tags).await? {
                 state.wake.notify_one();
+                if let Some(hook) = squad.webhook() {
+                    let link = state.discord.squad_link(&squad.id);
+                    let who = format!("{} {}", character.name(), character.surname());
+                    let message = zesquad_core::discord::joined(&who, &squad.name, link.as_deref());
+                    state.discord.send(hook, message);
+                }
                 None
             } else {
                 Some(format!("{character} is already in this squad"))

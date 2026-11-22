@@ -28,7 +28,8 @@ pub struct Cli {
 #[derive(Debug, Subcommand)]
 pub enum Command {
     /// Serve the web app. Creates and writes the database.
-    Serve(ServeArgs),
+    /// Boxed: its many options would make every other command as large.
+    Serve(Box<ServeArgs>),
     /// Ask a running zesquad's /healthz; exits 0 when healthy. Read-only (for container health checks).
     Healthcheck {
         /// Address zesquad listens on.
@@ -75,11 +76,39 @@ pub struct ServeArgs {
     /// redirect URL of the Battle.net API client.
     #[arg(long, env = "ZESQUAD_PUBLIC_URL")]
     pub public_url: Option<String>,
+    /// Discord's API host, which squads' webhooks post to; only tests change it.
+    #[arg(
+        long,
+        env = "ZESQUAD_DISCORD_API_URL",
+        hide = true,
+        default_value = crate::discord::API_URL
+    )]
+    pub discord_api_url: String,
     #[command(flatten)]
     pub bnet: BnetArgs,
 }
 
 impl ServeArgs {
+    /// Posting to Discord; messages link to squads when the public URL is set.
+    ///
+    /// # Errors
+    ///
+    /// When a URL doesn't parse.
+    pub fn discord(&self) -> anyhow::Result<crate::discord::Config> {
+        let public_url = self
+            .public_url
+            .as_deref()
+            .filter(|s| !s.is_empty())
+            .map(reqwest::Url::parse)
+            .transpose()
+            .context("ZESQUAD_PUBLIC_URL")?;
+        Ok(crate::discord::Config {
+            api_url: reqwest::Url::parse(&self.discord_api_url)
+                .context("ZESQUAD_DISCORD_API_URL")?,
+            public_url,
+        })
+    }
+
     /// Logging in, when both the public URL and the Battle.net credentials are set.
     ///
     /// # Errors
