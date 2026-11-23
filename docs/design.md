@@ -203,6 +203,12 @@ with `HX-Refresh` instead, since htmx doesn't swap a 403, and the reload shows t
 may see it. Members change the roster; renaming and the Discord channel are the owner's. Anyone
 else gets the roster read-only (`editable: false`), polling included.
 
+Members see the squad's invite link, `/join/<invite token>`, next to its view link (left out for
+a private squad, where it would be a 404 to anyone else), and can pass it on. Opening it logged
+out sends you to log in and back; logged in, it asks "Join *squad*?" with one button. Only the
+POST joins, so a chat app previewing the link can't join anyone. The owner can **Reset** the
+token; the old link stops working, and members who joined with it stay.
+
 A squad's id, a random UUID v4 written in Crockford base32 (`squad_id.rs` in core), is the
 secret of an `open` squad, and the view link of the others; squads made before that have the dashed UUID form, which still works. Anything that
 changes a squad checks the character belongs to that squad. Optionally, `ZESQUAD_PASSWORD`

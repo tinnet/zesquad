@@ -20,6 +20,32 @@
   {%- else %}
   <h1 class="squad-name">{{ squad.name }}</h1>
   {%- endif %}
+  {%- if let Some(invite) = invite %}
+  {%- if shows_view_link() %}
+  <p class="share-label">Anyone with this link can look</p>
+  <div class="share row">
+    <label class="grow">
+      <span class="visually-hidden">Squad link</span>
+      <input id="squad-link" value="{{ link }}" readonly>
+    </label>
+    <button type="button" class="quiet" data-copy="squad-link" hidden>Copy</button>
+  </div>
+  {%- endif %}
+  <p class="share-label">Anyone with this link can join and edit</p>
+  <div class="share row">
+    <label class="grow">
+      <span class="visually-hidden">Invite link</span>
+      <input id="invite-link" value="{{ invite }}" readonly>
+    </label>
+    <button type="button" class="quiet" data-copy="invite-link" hidden>Copy</button>
+    {%- if access.allows(Action::Own) %}
+    <form method="post" action="{{ roster.base() }}/invite/reset" onsubmit="return confirm('Make a new invite link? The old one stops working.')">
+      <button type="submit" class="quiet" title="Make a new invite link; the old one stops working">Reset</button>
+    </form>
+    {%- endif %}
+  </div>
+  <p class="hint">Characters from {{ squad.region.name() }}. Send the invite link only to friends: they log in with Battle.net and join.</p>
+  {%- else %}
   <div class="share row">
     <label class="grow">
       <span class="visually-hidden">Squad link</span>
@@ -28,10 +54,10 @@
     <button type="button" class="quiet" data-copy="squad-link" hidden>Copy link</button>
   </div>
   <p class="hint">Characters from {{ squad.region.name() }}.
-    {%- if access.allows(Action::Edit) && access.role.is_none() %} Share this link with your squad: anyone who has it can see and edit the squad.
-    {%- else if access.allows(Action::Edit) %} Anyone with this link can look; members change the squad.
+    {%- if access.allows(Action::Edit) %} Share this link with your squad: anyone who has it can see and edit the squad.
     {%- else %} Anyone with this link can look.
     {%- endif %}</p>
+  {%- endif %}
   {%- if access.allows(Action::Configure) %}
   <details class="discord"{% if discord_error.is_some() %} open{% endif %}>
     {%- let base = roster.base() %}

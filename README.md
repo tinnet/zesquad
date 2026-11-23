@@ -5,9 +5,11 @@ with, each tagged however you like (`raid`, `alts`, `tank`, ...). zesquad looks 
 up on the Battle.net Armory and shows their level, race, class, guild, item level, talents,
 professions, gear, hunter pets and when they last played.
 
-- No accounts: a squad lives at its own unguessable link (`/s/<random id>`). Anyone with the link can
-  see and edit it, so share it with your friends only. Set `ZESQUAD_PASSWORD` to put one shared
-  password in front of the whole site as well.
+- A squad lives at its own unguessable link (`/s/<random id>`). With logging in on (see below),
+  whoever starts a squad owns it: anyone with the link can look, and friends who join with its
+  invite link edit it. With logging in off there are no accounts, and anyone with the link can
+  see and edit the squad, so share it with your friends only. Set `ZESQUAD_PASSWORD` to put one
+  shared password in front of the whole site as well.
 - Characters are entered as `Name-Surname`, the way Forever names them. EU only for now.
 - Details refresh in the background every hour, or on demand with **Refresh**. Battle.net only
   updates a character when it logs out.

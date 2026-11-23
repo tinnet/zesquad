@@ -75,6 +75,8 @@ pub fn router(state: AppState) -> Router {
         .route("/s/{squad}/name", post(rename))
         .route("/s/{squad}/discord", post(set_webhook))
         .route("/s/{squad}/discord/delete", post(remove_webhook))
+        .route("/s/{squad}/invite/reset", post(reset_invite))
+        .route("/join/{token}", get(join_page).post(join))
         .route("/s/{squad}/characters", post(add_character))
         .route("/s/{squad}/characters/{id}/tags", post(add_tags))
         .route(
@@ -184,6 +186,11 @@ squad_extractor!(
     CanConfigure,
     Action::Configure
 );
+squad_extractor!(
+    /// A squad you own.
+    CanOwn,
+    Action::Own
+);
 
 /// Whether htmx sent the request (it swaps part of the page rather than loading a new one).
 pub struct Htmx(pub bool);
@@ -273,6 +280,12 @@ impl FromRequestParts<AppState> for Nav {
     ) -> impl Future<Output = std::result::Result<Self, Self::Rejection>> + Send {
         std::future::ready(Ok(Self::of(state, parts)))
     }
+}
+
+/// Where an invite link points.
+#[must_use]
+pub fn join_path(token: &str) -> String {
+    format!("/join/{token}")
 }
 
 /// A squad's page; every form on it posts below this.
@@ -628,6 +641,8 @@ struct SquadPage {
     access: SquadAccess,
     /// The page's full link, to copy; just the path when the request's host looks wrong.
     link: String,
+    /// The invite link, for members to pass on.
+    invite: Option<String>,
     roster: Roster,
     /// Why the Discord webhook someone pasted wasn't kept.
     discord_error: Option<String>,
@@ -635,13 +650,26 @@ struct SquadPage {
 
 impl SquadPage {
     fn new(nav: Nav, access: SquadAccess, roster: Roster) -> Self {
+        let invite = access
+            .squad
+            .invite_token
+            .as_deref()
+            .filter(|_| access.allows(Action::SeeMembers))
+            .map(|token| nav.link(&join_path(token)));
         Self {
             link: nav.link(&squad_path(&access.squad.id)),
+            invite,
             nav,
             access,
             roster,
             discord_error: None,
         }
+    }
+
+    /// The squad's own link is worth sharing: anyone but members would get a 404 for a
+    /// private one.
+    fn shows_view_link(&self) -> bool {
+        self.access.squad.visibility != Visibility::Private
     }
 
     /// The end of the squad's Discord webhook id, to recognise it by; never the token.
@@ -1277,6 +1305,62 @@ async fn respond(
         StatusCode::OK
     };
     Ok((status, SquadPage::new(nav.clone(), access, roster)).into_response())
+}
+
+// ---- invites ----
+
+#[derive(Template, WebTemplate)]
+#[template(path = "join.html")]
+struct JoinPage {
+    nav: Nav,
+    squad: db::Squad,
+    token: String,
+}
+
+/// The squad behind an invite link, when logging in is on and the token is current.
+async fn invited(state: &AppState, token: &str) -> Result<db::Squad> {
+    if state.login.is_none() {
+        return Err(AppError::NotFound);
+    }
+    db::squad_by_invite(&state.db, token)
+        .await?
+        .ok_or(AppError::NotFound)
+}
+
+/// An invite link: log in first, then a page asking to join. Opening it never joins, so a chat
+/// app previewing the link can't join anyone.
+async fn join_page(
+    State(state): State<AppState>,
+    nav: Nav,
+    Path(token): Path<String>,
+) -> Result<Response> {
+    let squad = invited(&state, &token).await?;
+    let Some(user) = &nav.user else {
+        return Ok(login_first(&state, &nav));
+    };
+    if db::role(&state.db, &squad.id, user.id).await?.is_some() {
+        return Ok(Redirect::to(&squad_path(&squad.id)).into_response());
+    }
+    Ok(JoinPage { nav, squad, token }.into_response())
+}
+
+async fn join(
+    State(state): State<AppState>,
+    nav: Nav,
+    Path(token): Path<String>,
+) -> Result<Response> {
+    let squad = invited(&state, &token).await?;
+    let Some(user) = &nav.user else {
+        return Ok(login_first(&state, &nav));
+    };
+    db::join(&state.db, &squad.id, user.id).await?;
+    tracing::info!(user = user.id, squad = squad.id, "joined a squad");
+    Ok(Redirect::to(&squad_path(&squad.id)).into_response())
+}
+
+async fn reset_invite(State(state): State<AppState>, CanOwn(access): CanOwn) -> Result<Redirect> {
+    db::reset_invite(&state.db, &access.squad.id).await?;
+    Ok(Redirect::to(&squad_path(&access.squad.id)))
 }
 
 // ---- Discord ----

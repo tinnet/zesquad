@@ -225,6 +225,53 @@ pub async fn squad(db: &SqlitePool, id: &str) -> anyhow::Result<Option<Squad>> {
     .await?)
 }
 
+/// The squad an invite token is for.
+///
+/// # Errors
+///
+/// On database errors.
+pub async fn squad_by_invite(db: &SqlitePool, token: &str) -> anyhow::Result<Option<Squad>> {
+    Ok(sqlx::query_as(
+        "SELECT id, name, region, discord_webhook, visibility, invite_token
+         FROM squads WHERE invite_token = ?",
+    )
+    .bind(token)
+    .fetch_optional(db)
+    .await?)
+}
+
+/// Makes `user_id` a member of a squad; nothing changes if they're in it already.
+///
+/// # Errors
+///
+/// On database errors.
+pub async fn join(db: &SqlitePool, squad_id: &str, user_id: i64) -> anyhow::Result<()> {
+    sqlx::query(
+        "INSERT INTO squad_members (squad_id, user_id, role, joined_at) VALUES (?, ?, 'member', ?)
+         ON CONFLICT DO NOTHING",
+    )
+    .bind(squad_id)
+    .bind(user_id)
+    .bind(now())
+    .execute(db)
+    .await?;
+    Ok(())
+}
+
+/// Gives a squad a new invite token; the old one stops working.
+///
+/// # Errors
+///
+/// On database errors.
+pub async fn reset_invite(db: &SqlitePool, squad_id: &str) -> anyhow::Result<()> {
+    sqlx::query("UPDATE squads SET invite_token = ? WHERE id = ?")
+        .bind(invite_token())
+        .bind(squad_id)
+        .execute(db)
+        .await?;
+    Ok(())
+}
+
 /// `user_id`'s role in a squad; `None` when they aren't in it.
 ///
 /// # Errors

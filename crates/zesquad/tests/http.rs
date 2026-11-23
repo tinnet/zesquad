@@ -2765,3 +2765,133 @@ async fn with_accounts_off_every_squad_is_open() {
     assert_eq!(status, StatusCode::OK);
     assert!(page.contains("Rename"), "{page}");
 }
+
+/// The invite link on a squad page, as a path: `/join/<token>`.
+fn invite_path(page: &str) -> String {
+    let link = page
+        .split("id=\"invite-link\" value=\"")
+        .nth(1)
+        .and_then(|s| s.split('"').next())
+        .unwrap();
+    format!("/join/{}", link.rsplit_once("/join/").unwrap().1)
+}
+
+#[tokio::test]
+async fn friends_join_with_the_invite_link() {
+    let app = app_with_login(None).await;
+    let owner = log_in_as(&app, GOOD_CODE, "/").await;
+    let squad = app.squad_as(&owner, "Thursday raiders").await;
+    let (_, page) = app.page_as(&owner, &squad).await;
+    assert!(page.contains("Anyone with this link can look"), "{page}");
+    assert!(
+        page.contains("Anyone with this link can join and edit"),
+        "{page}"
+    );
+    let invite = invite_path(&page);
+    assert_eq!(invite.len(), "/join/".len() + 64, "{invite}");
+    // Outsiders don't see it.
+    let (_, outside) = app.page_as("", &squad).await;
+    assert!(!outside.contains("/join/"), "{outside}");
+
+    // Logged out: log in first, then back to the invite.
+    let r = app.get_with(&invite, "").await;
+    assert_eq!(r.status(), StatusCode::SEE_OTHER);
+    assert_eq!(
+        r.headers()[header::LOCATION],
+        format!("/auth/login?next={}", urlencode(&invite))
+    );
+    let friend = log_in_as(&app, FRIEND_CODE, &invite).await;
+    // Opening it only asks; it never joins by itself.
+    let (status, page) = app.page_as(&friend, &invite).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        page.contains("Join <em>Thursday raiders</em>?") && page.contains("Friendly#5678"),
+        "{page}"
+    );
+    let r = app
+        .post_as(
+            &friend,
+            &format!("{squad}/characters"),
+            &[("character", "Bryn-Ashvale")],
+        )
+        .await;
+    assert_eq!(r.status(), StatusCode::FORBIDDEN);
+    let r = app.post_as(&friend, &invite, &[]).await;
+    assert_eq!(r.status(), StatusCode::SEE_OTHER);
+    assert_eq!(r.headers()[header::LOCATION], squad.as_str());
+    let r = app
+        .post_as(
+            &friend,
+            &format!("{squad}/characters"),
+            &[("character", "Bryn-Ashvale")],
+        )
+        .await;
+    assert_eq!(r.status(), StatusCode::SEE_OTHER);
+    // Members pass the link on too, but can't reset it.
+    let (_, page) = app.page_as(&friend, &squad).await;
+    assert_eq!(invite_path(&page), invite);
+    assert!(!page.contains("/invite/reset"), "{page}");
+    // Already in: the invite goes straight to the squad, and joining again changes nothing.
+    let r = app.get_with(&invite, &friend).await;
+    assert_eq!(r.status(), StatusCode::SEE_OTHER);
+    assert_eq!(r.headers()[header::LOCATION], squad.as_str());
+    app.post_as(&owner, &invite, &[]).await;
+    let db = app.db().await;
+    let roles: Vec<String> =
+        sqlx::query_scalar("SELECT role FROM squad_members ORDER BY joined_at, role DESC")
+            .fetch_all(&db)
+            .await
+            .unwrap();
+    assert_eq!(roles, ["owner", "member"]);
+
+    // A made-up token is nothing.
+    assert_eq!(
+        app.page_as(&friend, "/join/nope").await.0,
+        StatusCode::NOT_FOUND
+    );
+}
+
+#[tokio::test]
+async fn the_owner_can_reset_the_invite_link() {
+    let app = app_with_login(None).await;
+    let owner = log_in_as(&app, GOOD_CODE, "/").await;
+    let friend = log_in_as(&app, FRIEND_CODE, "/").await;
+    let squad = app.squad_as(&owner, "Thursday raiders").await;
+    let old = invite_path(&app.page_as(&owner, &squad).await.1);
+    app.post_as(&friend, &old, &[]).await;
+    let r = app
+        .post_as(&friend, &format!("{squad}/invite/reset"), &[])
+        .await;
+    assert_eq!(r.status(), StatusCode::FORBIDDEN);
+    let r = app
+        .post_as(&owner, &format!("{squad}/invite/reset"), &[])
+        .await;
+    assert_eq!(r.status(), StatusCode::SEE_OTHER);
+    let new = invite_path(&app.page_as(&owner, &squad).await.1);
+    assert_ne!(new, old);
+    let stranger = log_in_as(&app, STRANGER_CODE, "/").await;
+    assert_eq!(app.page_as(&stranger, &old).await.0, StatusCode::NOT_FOUND);
+    assert_eq!(
+        app.post_as(&stranger, &old, &[]).await.status(),
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(app.page_as(&stranger, &new).await.0, StatusCode::OK);
+    // Whoever joined stays.
+    let r = app
+        .post_as(
+            &friend,
+            &format!("{squad}/characters"),
+            &[("character", "Bryn-Ashvale")],
+        )
+        .await;
+    assert_eq!(r.status(), StatusCode::SEE_OTHER);
+}
+
+#[tokio::test]
+async fn without_accounts_there_are_no_invites() {
+    let app = app(false).await;
+    let squad = app.squad("Thursday raiders").await;
+    let (_, page) = app.get(&squad).await;
+    assert!(!page.contains("/join/"), "{page}");
+    assert_eq!(app.get("/join/anything").await.0, StatusCode::NOT_FOUND);
+}
