@@ -126,9 +126,10 @@ h1.squad-name { margin: 1rem 0 .5rem; }
 h1.squad-name:hover { border-color: transparent; background: transparent; padding-left: 0; }
 .share input { font-size: .9rem; color: var(--muted); }
 .share + .hint { margin-top: .35rem; }
-.discord, .visibility { margin-top: .5rem; }
-.discord p { margin: .5rem 0; }
-.discord form, .visibility form { margin: .5rem 0; }
+.discord, .visibility, .members-list, .delete-squad { margin-top: .5rem; }
+.discord p, .delete-squad p { margin: .5rem 0; }
+.discord form, .visibility form, .delete-squad form { margin: .5rem 0; }
+.members-list li { padding: .25rem 0; }
 
 .add { margin: 1rem 0 .5rem; }
 

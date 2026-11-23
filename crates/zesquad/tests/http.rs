@@ -3064,3 +3064,157 @@ async fn the_front_page_lists_your_squads_first() {
     );
     assert!(!section.contains("Friendly secrets"), "{section}");
 }
+
+/// The id of the user with this BattleTag.
+async fn user_id(db: &sqlx::SqlitePool, battletag: &str) -> i64 {
+    sqlx::query_scalar("SELECT id FROM users WHERE battletag = ?")
+        .bind(battletag)
+        .fetch_one(db)
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn members_see_each_other_and_the_owner_manages_them() {
+    let app = app_with_login(None).await;
+    let owner = log_in_as(&app, GOOD_CODE, "/").await;
+    let friend = log_in_as(&app, FRIEND_CODE, "/").await;
+    let stranger = log_in_as(&app, STRANGER_CODE, "/").await;
+    let squad = app.squad_as(&owner, "Thursday raiders").await;
+    let invite = invite_path(&app.page_as(&owner, &squad).await.1);
+    app.post_as(&friend, &invite, &[]).await;
+    app.post_as(&stranger, &invite, &[]).await;
+    let db = app.db().await;
+    let friend_id = user_id(&db, "Friendly#5678").await;
+    let owner_id = user_id(&db, "Testhero#1234").await;
+
+    let (_, page) = app.page_as(&friend, &squad).await;
+    assert!(page.contains("Members (3)"), "{page}");
+    assert!(
+        page.contains("<strong>Testhero#1234</strong> · owner"),
+        "{page}"
+    );
+    assert!(
+        page.contains("<strong>Friendly#5678</strong> · you"),
+        "{page}"
+    );
+    assert!(
+        page.contains("/leave") && !page.contains("/members/"),
+        "{page}"
+    );
+    assert!(!page.contains("Delete squad"), "{page}");
+    // Anyone else never sees BattleTags.
+    let (_, page) = app.page_as("", &squad).await;
+    assert!(
+        !page.contains("Testhero#1234") && !page.contains("Members ("),
+        "{page}"
+    );
+
+    // A member can't remove anyone; the owner can't be removed.
+    let remove = |id: i64| format!("{squad}/members/{id}/delete");
+    let r = app.post_as(&friend, &remove(owner_id), &[]).await;
+    assert_eq!(r.status(), StatusCode::FORBIDDEN);
+    app.post_as(&owner, &remove(owner_id), &[]).await;
+    // The owner removes the friend, who can then only look.
+    let r = app.post_as(&owner, &remove(friend_id), &[]).await;
+    assert_eq!(r.status(), StatusCode::SEE_OTHER);
+    let (_, page) = app.page_as(&friend, &squad).await;
+    assert!(page.contains("Ask a member for the invite link"), "{page}");
+    let (_, page) = app.page_as(&owner, &squad).await;
+    assert!(
+        page.contains("Members (2)") && !page.contains("Friendly#5678"),
+        "{page}"
+    );
+
+    // The stranger leaves; the owner can't.
+    let r = app.post_as(&stranger, &format!("{squad}/leave"), &[]).await;
+    assert_eq!(r.status(), StatusCode::SEE_OTHER);
+    let r = app.post_as(&owner, &format!("{squad}/leave"), &[]).await;
+    assert_eq!(r.status(), StatusCode::FORBIDDEN);
+    let roles: Vec<String> = sqlx::query_scalar("SELECT role FROM squad_members")
+        .fetch_all(&db)
+        .await
+        .unwrap();
+    assert_eq!(roles, ["owner"]);
+}
+
+#[tokio::test]
+async fn the_owner_can_delete_a_squad() {
+    let app = app_with_login(None).await;
+    let owner = log_in_as(&app, GOOD_CODE, "/").await;
+    let friend = log_in_as(&app, FRIEND_CODE, "/").await;
+    let squad = app.squad_as(&owner, "Thursday raiders").await;
+    let invite = invite_path(&app.page_as(&owner, &squad).await.1);
+    app.post_as(&friend, &invite, &[]).await;
+    app.post_as(
+        &friend,
+        &format!("{squad}/characters"),
+        &[("character", "Bryn-Ashvale"), ("tags", "raid")],
+    )
+    .await;
+    let r = app.post_as(&friend, &format!("{squad}/delete"), &[]).await;
+    assert_eq!(r.status(), StatusCode::FORBIDDEN);
+    let (_, page) = app.page_as(&owner, &squad).await;
+    assert!(page.contains("Delete squad"), "{page}");
+    let r = app.post_as(&owner, &format!("{squad}/delete"), &[]).await;
+    assert_eq!(r.status(), StatusCode::SEE_OTHER);
+    assert_eq!(r.headers()[header::LOCATION], "/");
+    assert_eq!(app.page_as(&owner, &squad).await.0, StatusCode::NOT_FOUND);
+    let db = app.db().await;
+    let left: i64 = sqlx::query_scalar(
+        "SELECT (SELECT COUNT(*) FROM characters) + (SELECT COUNT(*) FROM character_tags)
+              + (SELECT COUNT(*) FROM squad_members) + (SELECT COUNT(*) FROM squads)",
+    )
+    .fetch_one(&db)
+    .await
+    .unwrap();
+    assert_eq!(left, 0);
+}
+
+#[tokio::test]
+async fn deleting_your_account_hands_your_squads_on() {
+    let app = app_with_login(None).await;
+    let owner = log_in_as(&app, GOOD_CODE, "/").await;
+    let friend = log_in_as(&app, FRIEND_CODE, "/").await;
+    let stranger = log_in_as(&app, STRANGER_CODE, "/").await;
+    let shared = app.squad_as(&owner, "Thursday raiders").await;
+    let alone = app.squad_as(&owner, "Solo alts").await;
+    let invite = invite_path(&app.page_as(&owner, &shared).await.1);
+    // The friend joined first, so the squad goes to them, not the stranger.
+    app.post_as(&friend, &invite, &[]).await;
+    app.post_as(&stranger, &invite, &[]).await;
+    let db = app.db().await;
+    sqlx::query("UPDATE squad_members SET joined_at = joined_at - 10 WHERE user_id = ?")
+        .bind(user_id(&db, "Friendly#5678").await)
+        .execute(&db)
+        .await
+        .unwrap();
+    // The friend's own squad isn't touched.
+    let theirs = app.squad_as(&friend, "Friendly alts").await;
+
+    let (_, page) = app.page_as(&owner, "/account").await;
+    assert!(
+        page.contains("Thursday raiders</a>: goes to <strong>Friendly#5678</strong>"),
+        "{page}"
+    );
+    assert!(
+        page.contains("Solo alts</a>: <strong>deleted</strong>"),
+        "{page}"
+    );
+    assert!(!page.contains("Friendly alts"), "{page}");
+
+    let r = app.post_as(&owner, "/account/delete", &[]).await;
+    assert_eq!(r.status(), StatusCode::SEE_OTHER);
+    assert_eq!(app.page_as(&friend, &alone).await.0, StatusCode::NOT_FOUND);
+    let (_, page) = app.page_as(&friend, &shared).await;
+    assert!(
+        page.contains("<strong>Friendly#5678</strong> · owner · you"),
+        "{page}"
+    );
+    assert!(
+        page.contains("Members (2)") && !page.contains("Testhero"),
+        "{page}"
+    );
+    let (_, page) = app.page_as(&friend, &theirs).await;
+    assert!(page.contains("Members (1)"), "{page}");
+}

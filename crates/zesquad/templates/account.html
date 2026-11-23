@@ -14,7 +14,15 @@
   </form>
 
   <h2>Delete your account</h2>
-  <p>Removes your account id and BattleTag from zesquad. Squads and the characters in them stay.</p>
+  <p>Removes your account id and BattleTag from zesquad, and takes you out of every squad you're in.</p>
+  {%- if !owned.is_empty() %}
+  <p>Squads you own:</p>
+  <ul>
+    {%- for s in owned %}
+    <li><a href="/s/{{ s.squad_id }}">{{ s.name }}</a>: {% if let Some(heir) = s.heir_battletag %}goes to <strong>{{ heir }}</strong>, who's been in it longest{% else %}<strong>deleted</strong>, with its characters, since nobody else is in it{% endif %}</li>
+    {%- endfor %}
+  </ul>
+  {%- endif %}
   <form method="post" action="/account/delete" onsubmit="return confirm('Delete your zesquad account?')">
     <button type="submit" class="quiet danger">Delete my account</button>
   </form>

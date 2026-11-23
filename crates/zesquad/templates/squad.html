@@ -113,6 +113,39 @@
     {% if let Some(error) = discord_error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
   </details>
   {%- endif %}
+  {%- if !members.is_empty() %}
+  {%- let base = roster.base() %}
+  <details class="members-list">
+    <summary>Members ({{ members.len() }})</summary>
+    <ul class="plain">
+      {%- for m in members %}
+      <li class="row">
+        <span class="grow"><strong>{{ m.battletag }}</strong>{% if m.owner %} · owner{% endif %}{% if m.you %} · you{% endif %}</span>
+        <span class="hint">joined {{ m.joined }}</span>
+        {%- if !m.owner && access.allows(Action::Own) %}
+        <form method="post" action="{{ base }}/members/{{ m.user_id }}/delete" onsubmit="return confirm('Take this member out of the squad?')">
+          <button type="submit" class="quiet danger">Remove</button>
+        </form>
+        {%- else if !m.owner && m.you %}
+        <form method="post" action="{{ base }}/leave" onsubmit="return confirm('Leave this squad?')">
+          <button type="submit" class="quiet danger">Leave</button>
+        </form>
+        {%- endif %}
+      </li>
+      {%- endfor %}
+    </ul>
+    <p class="hint">Members see each other's BattleTags; nobody else does.</p>
+  </details>
+  {%- endif %}
+  {%- if access.allows(Action::Own) %}
+  <details class="delete-squad">
+    <summary>Delete squad</summary>
+    <p class="hint">Its characters, tags, colours and members go with it, for everyone. This can't be undone.</p>
+    <form method="post" action="{{ roster.base() }}/delete" onsubmit="return confirm('Delete this squad for everyone?')">
+      <button type="submit" class="quiet danger">Delete squad</button>
+    </form>
+  </details>
+  {%- endif %}
 </section>
 <script src="{{ crate::assets::base() }}/share.js" defer></script>
 {% include "roster.html" %}

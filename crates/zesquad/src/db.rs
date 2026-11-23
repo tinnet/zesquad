@@ -465,14 +465,127 @@ pub async fn delete_sessions(db: &SqlitePool, user_id: i64) -> anyhow::Result<()
     Ok(())
 }
 
-/// Deletes a user and, through the foreign keys, everything that hangs off them.
+/// A squad someone owns, and who gets it when they delete their account.
+#[derive(Debug, sqlx::FromRow)]
+pub struct Inheritance {
+    pub squad_id: String,
+    pub name: String,
+    /// The member who's been in longest; `None`: nobody else, so the squad goes too.
+    pub heir: Option<i64>,
+    pub heir_battletag: Option<String>,
+}
+
+/// What happens to the squads `user_id` owns when they delete their account.
+///
+/// # Errors
+///
+/// On database errors.
+pub async fn inheritances<'e>(
+    db: impl sqlx::SqliteExecutor<'e>,
+    user_id: i64,
+) -> anyhow::Result<Vec<Inheritance>> {
+    Ok(sqlx::query_as(
+        "SELECT s.id AS squad_id, s.name,
+                h.user_id AS heir, (SELECT battletag FROM users WHERE id = h.user_id) AS heir_battletag
+         FROM squad_members o JOIN squads s ON s.id = o.squad_id
+         LEFT JOIN squad_members h ON h.rowid = (
+             SELECT rowid FROM squad_members
+             WHERE squad_id = o.squad_id AND user_id != o.user_id
+             ORDER BY joined_at, rowid LIMIT 1)
+         WHERE o.user_id = ? AND o.role = 'owner'
+         ORDER BY s.name",
+    )
+    .bind(user_id)
+    .fetch_all(db)
+    .await?)
+}
+
+/// Deletes a user and, through the foreign keys, everything that hangs off them. Squads they
+/// own go to the member who's been in longest; squads with nobody else in them are deleted.
 ///
 /// # Errors
 ///
 /// On database errors.
 pub async fn delete_user(db: &SqlitePool, user_id: i64) -> anyhow::Result<()> {
+    let mut tx = begin_write(db).await?;
+    let owned = inheritances(&mut *tx, user_id).await?;
+    // Out of every squad first, so each can have its new owner.
+    sqlx::query("DELETE FROM squad_members WHERE user_id = ?")
+        .bind(user_id)
+        .execute(&mut *tx)
+        .await?;
+    for squad in owned {
+        if let Some(heir) = squad.heir {
+            sqlx::query(
+                "UPDATE squad_members SET role = 'owner' WHERE squad_id = ? AND user_id = ?",
+            )
+            .bind(&squad.squad_id)
+            .bind(heir)
+            .execute(&mut *tx)
+            .await?;
+        } else {
+            sqlx::query("DELETE FROM squads WHERE id = ?")
+                .bind(&squad.squad_id)
+                .execute(&mut *tx)
+                .await?;
+        }
+    }
     sqlx::query("DELETE FROM users WHERE id = ?")
         .bind(user_id)
+        .execute(&mut *tx)
+        .await?;
+    tx.commit().await?;
+    Ok(())
+}
+
+/// Someone in a squad, as the members list shows them.
+#[derive(Debug, sqlx::FromRow)]
+pub struct SquadMember {
+    pub user_id: i64,
+    pub battletag: String,
+    #[sqlx(try_from = "String")]
+    pub role: Role,
+    pub joined_at: i64,
+}
+
+/// A squad's members: the owner, then the rest in the order they joined.
+///
+/// # Errors
+///
+/// On database errors.
+pub async fn squad_members(db: &SqlitePool, squad_id: &str) -> anyhow::Result<Vec<SquadMember>> {
+    Ok(sqlx::query_as(
+        "SELECT m.user_id, u.battletag, m.role, m.joined_at
+         FROM squad_members m JOIN users u ON u.id = m.user_id
+         WHERE m.squad_id = ? ORDER BY m.role = 'owner' DESC, m.joined_at, m.rowid",
+    )
+    .bind(squad_id)
+    .fetch_all(db)
+    .await?)
+}
+
+/// Takes a member (never the owner) out of a squad.
+///
+/// # Errors
+///
+/// On database errors.
+pub async fn remove_member(db: &SqlitePool, squad_id: &str, user_id: i64) -> anyhow::Result<()> {
+    sqlx::query("DELETE FROM squad_members WHERE squad_id = ? AND user_id = ? AND role = 'member'")
+        .bind(squad_id)
+        .bind(user_id)
+        .execute(db)
+        .await?;
+    Ok(())
+}
+
+/// Deletes a squad and, through the foreign keys, its characters, tags, colours and members.
+///
+/// # Errors
+///
+/// On database errors.
+pub async fn delete_squad(db: &SqlitePool, squad_id: &str) -> anyhow::Result<()> {
+    sqlx::query("DELETE FROM squads WHERE id = ?")
+        .bind(squad_id)
         .execute(db)
         .await?;
     Ok(())

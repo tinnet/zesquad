@@ -187,7 +187,7 @@ database alone can't log anyone in. Sessions last 30 days and are extended when 
 second half (`login::load`, a middleware that also puts the user in the request). **Log out**
 ends both this session and the shared-password one. `/account` shows your BattleTag and lets you log out
 everywhere (every session of yours deleted) or delete your account (the `users` row, and
-through foreign keys everything hanging off it). `/privacy`, linked from every page, lists
+through foreign keys everything hanging off it; squads you own are handed on, see below). `/privacy`, linked from every page, lists
 everything zesquad keeps.
 
 With accounts on, a squad has members (`squad_members`): one `owner`, who started it, and
@@ -218,6 +218,13 @@ The owner picks who can see the squad on its page: **Only members** (`private`),
 with the link** (`unlisted`) or **Everyone** (`public`); `open` isn't offered. A private squad's
 page never puts its name in the title or Open Graph tags, so even a preview made with a
 member's cookies says only "zesquad"; without them it's a 404 anyway.
+
+Members see a **Members** list: BattleTags, roles, when each joined; nobody else sees
+BattleTags. The owner can remove members and **Delete squad** (its characters, tags, colours
+and members go through the foreign keys); a member can **Leave**; the owner can't leave, only
+delete. Deleting your account hands each squad you own to the member who's been in it
+longest, and deletes squads with nobody else in them (`db::delete_user`, one transaction);
+`/account` lists which before you confirm.
 
 A squad's id, a random UUID v4 written in Crockford base32 (`squad_id.rs` in core), is the
 secret of an `open` squad, and the view link of the others; squads made before that have the dashed UUID form, which still works. Anything that

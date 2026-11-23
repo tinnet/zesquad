@@ -77,6 +77,9 @@ pub fn router(state: AppState) -> Router {
         .route("/s/{squad}/discord/delete", post(remove_webhook))
         .route("/s/{squad}/invite/reset", post(reset_invite))
         .route("/s/{squad}/visibility", post(set_visibility))
+        .route("/s/{squad}/members/{user}/delete", post(remove_member))
+        .route("/s/{squad}/leave", post(leave))
+        .route("/s/{squad}/delete", post(delete_squad))
         .route("/join/{token}", get(join_page).post(join))
         .route("/s/{squad}/characters", post(add_character))
         .route("/s/{squad}/characters/{id}/tags", post(add_tags))
@@ -193,6 +196,11 @@ squad_extractor!(
     /// A squad you can rename and point at a Discord channel.
     CanConfigure,
     Action::Configure
+);
+squad_extractor!(
+    /// A squad you're in, owner or member.
+    CanSeeMembers,
+    Action::SeeMembers
 );
 squad_extractor!(
     /// A squad you own.
@@ -653,27 +661,47 @@ struct SquadPage {
     link: String,
     /// The invite link, for members to pass on.
     invite: Option<String>,
+    /// Who's in the squad, for its members; empty for anyone else.
+    members: Vec<MemberRow>,
     roster: Roster,
     /// Why the Discord webhook someone pasted wasn't kept.
     discord_error: Option<String>,
 }
 
 impl SquadPage {
-    fn new(nav: Nav, access: SquadAccess, roster: Roster) -> Self {
+    async fn new(state: &AppState, nav: Nav, access: SquadAccess, roster: Roster) -> Result<Self> {
+        let members = if access.allows(Action::SeeMembers) {
+            let you = nav.user.as_ref().map(|u| u.id);
+            let now = db::now();
+            db::squad_members(&state.db, &access.squad.id)
+                .await?
+                .into_iter()
+                .map(|m| MemberRow {
+                    you: Some(m.user_id) == you,
+                    owner: m.role == Role::Owner,
+                    joined: ago(now - m.joined_at),
+                    user_id: m.user_id,
+                    battletag: m.battletag,
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
         let invite = access
             .squad
             .invite_token
             .as_deref()
             .filter(|_| access.allows(Action::SeeMembers))
             .map(|token| nav.link(&join_path(token)));
-        Self {
+        Ok(Self {
             link: nav.link(&squad_path(&access.squad.id)),
             invite,
+            members,
             nav,
             access,
             roster,
             discord_error: None,
-        }
+        })
     }
 
     /// Link previews may name the squad: not when it's private, in case one is ever made with
@@ -702,6 +730,17 @@ impl SquadPage {
             self.access.squad.region.name()
         )
     }
+}
+
+/// Someone in the squad, as its members see them.
+struct MemberRow {
+    user_id: i64,
+    battletag: String,
+    owner: bool,
+    /// It's the person looking.
+    you: bool,
+    /// "3 days ago".
+    joined: String,
 }
 
 #[derive(Template, WebTemplate)]
@@ -789,6 +828,8 @@ struct AccountPage {
     nav: Nav,
     /// When you first logged in, as "3 days ago".
     joined: String,
+    /// The squads you own, and who'd get each if you deleted your account.
+    owned: Vec<db::Inheritance>,
 }
 
 #[derive(Template, WebTemplate)]
@@ -807,7 +848,8 @@ async fn account_page(State(state): State<AppState>, nav: Nav) -> Result<Respons
         return Ok(login_first(&state, &nav));
     };
     let joined = ago(db::now() - db::user_created(&state.db, user.id).await?);
-    Ok(AccountPage { nav, joined }.into_response())
+    let owned = db::inheritances(&state.db, user.id).await?;
+    Ok(AccountPage { nav, joined, owned }.into_response())
 }
 
 /// Sends someone who isn't logged in to log in, and back here after; a 404 when logging in is
@@ -1268,7 +1310,7 @@ async fn squad_page(
     .await?;
     let mut recent = recent(&headers);
     recent.visit(&access.squad.id);
-    let page = SquadPage::new(nav, access, roster);
+    let page = SquadPage::new(&state, nav, access, roster).await?;
     Ok(([recent_cookie(&headers, &recent)], page).into_response())
 }
 
@@ -1349,7 +1391,8 @@ async fn respond(
     } else {
         StatusCode::OK
     };
-    Ok((status, SquadPage::new(nav.clone(), access, roster)).into_response())
+    let page = SquadPage::new(state, nav.clone(), access, roster).await?;
+    Ok((status, page).into_response())
 }
 
 // ---- invites ----
@@ -1423,6 +1466,40 @@ async fn set_visibility(
     Ok(Redirect::to(&squad_path(&access.squad.id)))
 }
 
+#[derive(Deserialize)]
+struct MemberPath {
+    user: i64,
+}
+
+/// The owner takes a member out of the squad; the owner stays.
+async fn remove_member(
+    State(state): State<AppState>,
+    CanOwn(access): CanOwn,
+    Path(path): Path<MemberPath>,
+) -> Result<Redirect> {
+    db::remove_member(&state.db, &access.squad.id, path.user).await?;
+    Ok(Redirect::to(&squad_path(&access.squad.id)))
+}
+
+/// A member leaves; the owner can't, only delete the squad.
+async fn leave(
+    State(state): State<AppState>,
+    nav: Nav,
+    CanSeeMembers(access): CanSeeMembers,
+) -> Result<Response> {
+    let (Some(Role::Member), Some(user)) = (access.role, &nav.user) else {
+        return Err(AppError::Forbidden { htmx: false });
+    };
+    db::remove_member(&state.db, &access.squad.id, user.id).await?;
+    Ok(Redirect::to("/").into_response())
+}
+
+async fn delete_squad(State(state): State<AppState>, CanOwn(access): CanOwn) -> Result<Redirect> {
+    db::delete_squad(&state.db, &access.squad.id).await?;
+    tracing::info!(squad = access.squad.id, "squad deleted");
+    Ok(Redirect::to("/"))
+}
+
 async fn reset_invite(State(state): State<AppState>, CanOwn(access): CanOwn) -> Result<Redirect> {
     db::reset_invite(&state.db, &access.squad.id).await?;
     Ok(Redirect::to(&squad_path(&access.squad.id)))
@@ -1472,7 +1549,7 @@ async fn set_webhook(
     let roster = build_roster(&state, &access, None, Sort::default(), Outcome::default()).await?;
     let page = SquadPage {
         discord_error: Some(error),
-        ..SquadPage::new(nav, access, roster)
+        ..SquadPage::new(&state, nav, access, roster).await?
     };
     Ok((StatusCode::UNPROCESSABLE_ENTITY, page).into_response())
 }
