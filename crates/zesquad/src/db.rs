@@ -48,6 +48,15 @@ pub async fn open(path: &Path, default_region: Region) -> anyhow::Result<SqliteP
     Ok(pool)
 }
 
+/// Starts a transaction that writes. `BEGIN IMMEDIATE` takes the write lock up front, waiting
+/// out the busy timeout if another connection holds it. A plain `BEGIN` takes it at the first
+/// write instead, and when another connection wrote since this one's first read, SQLite fails
+/// that at once (`SQLITE_BUSY`), busy timeout or not: a 500 for someone tagging a character
+/// while the Armory sync stores it.
+async fn begin_write(db: &SqlitePool) -> sqlx::Result<sqlx::Transaction<'static, sqlx::Sqlite>> {
+    db.begin_with("BEGIN IMMEDIATE").await
+}
+
 /// Seconds since the Unix epoch.
 #[must_use]
 pub fn now() -> i64 {
@@ -172,7 +181,7 @@ pub async fn create_squad(
 ) -> anyhow::Result<String> {
     let id = zesquad_core::squad_id::encode(uuid::Uuid::new_v4().as_u128());
     let now = now();
-    let mut tx = db.begin().await?;
+    let mut tx = begin_write(db).await?;
     let (visibility, token) = match owner {
         Some(_) => (Visibility::Unlisted, Some(invite_token())),
         None => (Visibility::Open, None),
@@ -265,7 +274,7 @@ pub async fn join(db: &SqlitePool, squad_id: &str, user_id: i64) -> anyhow::Resu
 ///
 /// On database errors.
 pub async fn claim(db: &SqlitePool, squad_id: &str, user_id: i64) -> anyhow::Result<bool> {
-    let mut tx = db.begin().await?;
+    let mut tx = begin_write(db).await?;
     let claimed = sqlx::query(
         "UPDATE squads SET visibility = 'unlisted', invite_token = ?
          WHERE id = ? AND visibility = 'open'",
@@ -513,7 +522,7 @@ pub async fn add_character(
     character: &CharacterName,
     tags: &[Tag],
 ) -> anyhow::Result<bool> {
-    let mut tx = db.begin().await?;
+    let mut tx = begin_write(db).await?;
     let inserted = sqlx::query(
         "INSERT INTO characters (squad_id, region, name, surname, char_key, added_at)
          VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING",
@@ -582,7 +591,7 @@ pub async fn add_tags(
     id: i64,
     tags: &[Tag],
 ) -> anyhow::Result<()> {
-    let mut tx = db.begin().await?;
+    let mut tx = begin_write(db).await?;
     let in_squad: Option<i64> =
         sqlx::query_scalar("SELECT id FROM characters WHERE squad_id = ? AND id = ?")
             .bind(squad_id)
@@ -881,7 +890,7 @@ pub async fn store(
     key: &str,
     fetched: Fetched,
 ) -> anyhow::Result<()> {
-    let mut tx = db.begin().await?;
+    let mut tx = begin_write(db).await?;
     let (status, error) = match &fetched {
         Fetched::Found(_) => (Status::Found, None),
         Fetched::NotFound => (Status::NotFound, None),
@@ -963,7 +972,7 @@ pub async fn store_auctions(
     snapshot: &auctions::Snapshot,
 ) -> anyhow::Result<bool> {
     let fingerprint = format!("{:016x}", snapshot.fingerprint);
-    let mut tx = db.begin().await?;
+    let mut tx = begin_write(db).await?;
     let last: Option<(Option<String>,)> =
         sqlx::query_as("SELECT fingerprint FROM auction_houses WHERE region = ? AND house = ?")
             .bind(region.as_str())
@@ -1247,7 +1256,7 @@ pub async fn condense_auctions(
         for day in auctions::day(first)..today {
             let start = day * auctions::DAY;
             let rows = snapshots(db, region, house, start, start + auctions::DAY).await?;
-            let mut tx = db.begin().await?;
+            let mut tx = begin_write(db).await?;
             for item_rows in rows.chunk_by(|a, b| a.item == b.item) {
                 let Some(d) = auctions::daily(item_rows[0].item, item_rows) else {
                     continue;
