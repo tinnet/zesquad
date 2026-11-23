@@ -10,6 +10,7 @@ mod auth;
 pub mod cli;
 pub mod db;
 pub mod discord;
+pub mod limits;
 pub mod login;
 mod s3;
 mod sync;
@@ -47,6 +48,10 @@ pub struct Settings {
     pub archive: Option<archive::Config>,
     /// Posting squads' news to Discord.
     pub discord: discord::Config,
+    /// How often one client may log in, start squads and change things.
+    pub limits: limits::Limits,
+    /// Where the client's address comes from, for a reverse proxy in front.
+    pub trust_proxy: limits::TrustProxy,
 }
 
 /// A started server.
@@ -134,6 +139,7 @@ pub async fn start(
         armory_cache: Arc::default(),
         auth,
         discord,
+        limiter: Arc::new(limits::Limiter::new(settings.limits, settings.trust_proxy)),
     };
     let app = web::router(state).layer((
         TraceLayer::new_for_http(),
@@ -146,9 +152,12 @@ pub async fn start(
         .with_context(|| format!("listening on {}", settings.listen))?;
     let addr = listener.local_addr()?;
     let server = tokio::spawn(async move {
-        let served = axum::serve(listener, app)
-            .with_graceful_shutdown(shutdown)
-            .await;
+        let served = axum::serve(
+            listener,
+            app.into_make_service_with_connect_info::<SocketAddr>(),
+        )
+        .with_graceful_shutdown(shutdown)
+        .await;
         for sync in syncs {
             sync.abort();
         }

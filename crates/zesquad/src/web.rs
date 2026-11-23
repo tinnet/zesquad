@@ -44,6 +44,8 @@ pub struct AppState {
     pub login: Option<Arc<crate::login::Login>>,
     /// Posts squads' news to their Discord channels.
     pub discord: Arc<crate::discord::Discord>,
+    /// Slows down repeated logins and changes.
+    pub limiter: Arc<crate::limits::Limiter>,
 }
 
 /// The open routes (health check, version, static files, logging in and out) and, behind the
@@ -99,7 +101,12 @@ pub fn router(state: AppState) -> Router {
             state.clone(),
             crate::auth::require,
         ));
-    open.merge(protected).with_state(state)
+    open.merge(protected)
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            crate::limits::limit,
+        ))
+        .with_state(state)
 }
 
 /// A squad from the `{squad}` part of the path, and what the person asking may do with it.
@@ -319,6 +326,10 @@ pub enum AppError {
     Forbidden {
         htmx: bool,
     },
+    /// Over a rate limit; try again in this many seconds.
+    TooManyRequests {
+        retry_after: u64,
+    },
     Internal(anyhow::Error),
 }
 
@@ -333,7 +344,7 @@ impl<E: Into<anyhow::Error>> From<E> for AppError {
 struct ErrorPage {
     nav: Nav,
     title: &'static str,
-    message: &'static str,
+    message: String,
 }
 
 impl IntoResponse for AppError {
@@ -349,6 +360,22 @@ impl IntoResponse for AppError {
                 "Only members can change this squad",
                 "Ask a member of the squad for its invite link, then log in and join.",
             ),
+            Self::TooManyRequests { retry_after } => {
+                let page = ErrorPage {
+                    nav: Nav::default(),
+                    title: "Slow down",
+                    message: format!(
+                        "That was a lot in a short time. Wait {}, then try again.",
+                        zesquad_core::limit::wait_text(retry_after)
+                    ),
+                };
+                return (
+                    StatusCode::TOO_MANY_REQUESTS,
+                    [(header::RETRY_AFTER, retry_after.to_string())],
+                    page,
+                )
+                    .into_response();
+            }
             Self::NotFound => (
                 StatusCode::NOT_FOUND,
                 "Not found",
@@ -366,7 +393,7 @@ impl IntoResponse for AppError {
         let page = ErrorPage {
             nav: Nav::default(),
             title,
-            message,
+            message: message.to_owned(),
         };
         (status, page).into_response()
     }
@@ -931,11 +958,11 @@ async fn finish_login(
     );
     let remembered = crate::auth::cookie(&headers, crate::login::LOGIN_COOKIE)
         .and_then(zesquad_core::account::read_login_cookie);
-    let refusal = |status, title, message| {
+    let refusal = |status, title, message: &str| {
         let page = ErrorPage {
             nav: Nav::default(),
             title,
-            message,
+            message: message.to_owned(),
         };
         Ok(([(header::SET_COOKIE, clear.clone())], (status, page)).into_response())
     };

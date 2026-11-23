@@ -396,6 +396,17 @@ async fn app_with_login(password: Option<&str>) -> App {
 }
 
 async fn app_full(with_armory: bool, password: Option<&str>, auctions: bool, login: bool) -> App {
+    app_tweaked(with_armory, password, auctions, login, |_| {}).await
+}
+
+/// `app_full`, with the settings changed by `tweak` before starting.
+async fn app_tweaked(
+    with_armory: bool,
+    password: Option<&str>,
+    auctions: bool,
+    login: bool,
+    tweak: impl FnOnce(&mut Settings),
+) -> App {
     let dir = tempfile::tempdir().unwrap();
     let (fake_url, fake) = start_fake().await;
     let armory = with_armory.then(|| {
@@ -407,7 +418,7 @@ async fn app_full(with_armory: bool, password: Option<&str>, auctions: bool, log
         )
         .unwrap()
     });
-    let settings = Settings {
+    let mut settings = Settings {
         listen: SocketAddr::from(([127, 0, 0, 1], 0)),
         database: dir.path().join("zesquad.db"),
         refresh: Duration::from_secs(3600),
@@ -427,7 +438,10 @@ async fn app_full(with_armory: bool, password: Option<&str>, auctions: bool, log
             api_url: reqwest::Url::parse(&fake_url).unwrap(),
             public_url: Some(reqwest::Url::parse(PUBLIC_URL).unwrap()),
         },
+        limits: zesquad::limits::Limits::default(),
+        trust_proxy: zesquad::limits::TrustProxy::None,
     };
+    tweak(&mut settings);
     let running = zesquad::start(settings, std::future::pending())
         .await
         .unwrap();
@@ -3264,4 +3278,134 @@ async fn without_accounts_there_is_no_public_list() {
     let (_, front) = app.get("/").await;
     assert!(!front.contains("href=\"/squads\""), "{front}");
     assert_eq!(app.get("/squads").await.0, StatusCode::NOT_FOUND);
+}
+
+/// Logins, new squads and changes allowed per client in tests of the limits.
+fn tight_limits(settings: &mut Settings) {
+    let rule = |max| zesquad_core::limit::Rule { max, window: 3600 };
+    settings.limits = zesquad::limits::Limits {
+        login: zesquad_core::limit::Rule { max: 2, window: 60 },
+        new_squad: rule(1),
+        change: rule(3),
+    };
+}
+
+#[tokio::test]
+async fn repeated_logins_and_changes_are_slowed_down() {
+    let app = app_tweaked(true, None, false, true, tight_limits).await;
+    let me = log_in_bnet(&app, "/").await;
+    // Logging in: the second start is the last.
+    start_login(&app, "/").await;
+    let r = app.get_with("/auth/login", "").await;
+    assert_eq!(r.status(), StatusCode::TOO_MANY_REQUESTS);
+    assert!(
+        r.headers()[header::RETRY_AFTER]
+            .to_str()
+            .unwrap()
+            .parse::<u64>()
+            .unwrap()
+            > 0
+    );
+    assert!(r.text().await.unwrap().contains("Wait a minute,"));
+
+    // One new squad, then no more.
+    let squad = app.squad_as(&me, "Thursday raiders").await;
+    let r = app.post_as(&me, "/squads", &[("name", "Another")]).await;
+    assert_eq!(r.status(), StatusCode::TOO_MANY_REQUESTS);
+    // The wait is as long as the limit says.
+    assert!(r.text().await.unwrap().contains("Wait an hour,"));
+
+    // Changes: three, then refused, htmx included; looking is never limited.
+    for tag in ["a", "b", "c"] {
+        let r = app
+            .post_as(
+                &me,
+                &format!("{squad}/characters"),
+                &[("character", &format!("Aldric-Thorn{tag}"))],
+            )
+            .await;
+        assert_eq!(r.status(), StatusCode::SEE_OTHER);
+    }
+    let r = app
+        .htmx_as(
+            &me,
+            &format!("{squad}/characters"),
+            &[("character", "Bryn-Ashvale")],
+        )
+        .await;
+    assert_eq!(r.status(), StatusCode::TOO_MANY_REQUESTS);
+    for _ in 0..10 {
+        assert_eq!(app.page_as(&me, &squad).await.0, StatusCode::OK);
+    }
+    // Logging out always works.
+    let r = app.post_as(&me, "/logout", &[]).await;
+    assert_eq!(r.status(), StatusCode::SEE_OTHER);
+    // The page tells htmx users why nothing happened.
+    let (_, page) = app.get("/").await;
+    assert!(page.contains("/slow-down.js"), "{page}");
+}
+
+#[tokio::test]
+async fn behind_a_trusted_proxy_each_client_has_its_own_limits() {
+    use zesquad::limits::TrustProxy;
+    /// Starts a squad with these headers; the status.
+    async fn post(app: &App, headers: &[(&str, &str)]) -> StatusCode {
+        let mut request = app
+            .http
+            .post(format!("{}/squads", app.base))
+            .form(&[("name", "Raiders")]);
+        for (name, value) in headers {
+            request = request.header(*name, *value);
+        }
+        request.send().await.unwrap().status()
+    }
+    let app_trusting = |trust| {
+        app_tweaked(false, None, false, false, move |s| {
+            tight_limits(s);
+            s.trust_proxy = trust;
+        })
+    };
+    let (ok, slow) = (StatusCode::SEE_OTHER, StatusCode::TOO_MANY_REQUESTS);
+
+    let app = app_trusting(TrustProxy::Cloudflare).await;
+    assert_eq!(post(&app, &[("cf-connecting-ip", "192.0.2.1")]).await, ok);
+    assert_eq!(post(&app, &[("cf-connecting-ip", "192.0.2.1")]).await, slow);
+    assert_eq!(post(&app, &[("cf-connecting-ip", "192.0.2.2")]).await, ok);
+    // An X-Forwarded-For a client made up means nothing here.
+    assert_eq!(
+        post(
+            &app,
+            &[
+                ("cf-connecting-ip", "192.0.2.2"),
+                ("x-forwarded-for", "192.0.2.9")
+            ]
+        )
+        .await,
+        slow
+    );
+
+    // Behind Caddy or nginx, a made-up CF-Connecting-IP means nothing; nor does what the
+    // client put in front of the proxy's X-Forwarded-For entry.
+    let app = app_trusting(TrustProxy::ForwardedFor).await;
+    assert_eq!(
+        post(&app, &[("x-forwarded-for", "203.0.113.1, 192.0.2.1")]).await,
+        ok
+    );
+    assert_eq!(
+        post(
+            &app,
+            &[
+                ("x-forwarded-for", "203.0.113.2, 192.0.2.1"),
+                ("cf-connecting-ip", "192.0.2.3")
+            ]
+        )
+        .await,
+        slow
+    );
+    assert_eq!(post(&app, &[("x-forwarded-for", "192.0.2.2")]).await, ok);
+
+    // Not trusted: every header is ignored, and everyone here is 127.0.0.1.
+    let app = app_trusting(TrustProxy::None).await;
+    assert_eq!(post(&app, &[("cf-connecting-ip", "192.0.2.1")]).await, ok);
+    assert_eq!(post(&app, &[("cf-connecting-ip", "192.0.2.2")]).await, slow);
 }

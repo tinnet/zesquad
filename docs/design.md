@@ -229,6 +229,20 @@ longest, and deletes squads with nobody else in them (`db::delete_user`, one tra
 `/squads` (**Squads** in the header, with accounts on) lists the public squads by name, with
 their character count and region.
 
+Each client may start 10 logins a minute (Battle.net or the shared password), 10 squads an hour
+and 60 other changes (any other form post) a minute; pages, polling and logging out aren't
+limited (`limits.rs`, counting in `zesquad_core::limit`). Over a limit is a 429 with
+`Retry-After` and a page saying how long to wait; htmx doesn't swap that, so `slow-down.js`
+says so in an alert. A client is an IPv4 address or an IPv6 /64. Behind a reverse proxy every
+request comes from the proxy, so `ZESQUAD_TRUST_PROXY` names where the proxy puts the client's
+address: `cloudflare` reads `CF-Connecting-IP`, which only Cloudflare sets; `forwarded-for`
+reads the last `X-Forwarded-For` entry across all its header lines, the one the proxy added
+(HAProxy adds a line of its own rather than appending). Trusting a header no proxy sets would
+let clients pick their address, so it's off by default; with it off, the first request that
+carries proxy headers logs a warning, since then everyone shares the proxy's limits. The counts
+live in memory and a restart forgets them; finished windows are dropped once 10,000 clients are
+counted, at most once a second.
+
 A squad's id, a random UUID v4 written in Crockford base32 (`squad_id.rs` in core), is the
 secret of an `open` squad, and the view link of the others; squads made before that have the dashed UUID form, which still works. Anything that
 changes a squad checks the character belongs to that squad. Optionally, `ZESQUAD_PASSWORD`
@@ -236,6 +250,5 @@ puts one shared password in front of everything (`auth.rs`, an axum middleware).
 `sha256(key, 0, password)`, where the key is random and kept in the `settings` table: sessions
 survive restarts, the cookie isn't the password, and changing the password logs everyone out.
 `/login`, `/logout`, `/healthz`, `/version` and static files stay open. htmx requests without a
-session get `HX-Redirect` to the login page. A wrong password costs 750 ms, to slow guessing; put
-a reverse proxy with rate limiting in front for more. The cookie is `Secure` when the proxy says
+session get `HX-Redirect` to the login page. A wrong password costs 750 ms, to slow guessing. The cookie is `Secure` when the proxy says
 the request came over HTTPS (`X-Forwarded-Proto`).

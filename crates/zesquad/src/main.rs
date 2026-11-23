@@ -52,6 +52,8 @@ async fn serve(args: ServeArgs) -> anyhow::Result<()> {
         login: args.login()?,
         archive: args.archive.config()?,
         discord: args.discord()?,
+        limits: zesquad::limits::Limits::default(),
+        trust_proxy: args.trust_proxy,
     };
     let running = zesquad::start(settings, zesquad::shutdown_signal()).await?;
     tracing::info!(

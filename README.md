@@ -49,6 +49,7 @@ working directory is read too):
 | `ZESQUAD_BNET_REGION`        | `eu`                | region new squads start in: `eu`, `us`, `tw`    |
 | `ZESQUAD_PASSWORD`           |                     | shared password for the whole site; empty: none |
 | `ZESQUAD_PUBLIC_URL`         |                     | where people reach zesquad, e.g. `https://zesquad.example`; turns on logging in with Battle.net, and links squads in Discord posts |
+| `ZESQUAD_TRUST_PROXY`       | `none`              | behind a reverse proxy, where it puts each client's address, for the rate limits: `cloudflare` (`CF-Connecting-IP`) or `forwarded-for` (last `X-Forwarded-For` entry: Caddy, nginx, HAProxy). Without a proxy, or with the wrong one, clients could pick their address. Behind a proxy without it, all clients share one set of limits |
 | `ZESQUAD_LISTEN`             | `127.0.0.1:8080`    | address to listen on (`0.0.0.0:8080` in Docker) |
 | `ZESQUAD_DATABASE`           | `data/zesquad.db`  | SQLite file, created if missing                 |
 | `ZESQUAD_REFRESH_MINUTES`    | `60`                | how often a character's details are refreshed   |

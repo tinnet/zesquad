@@ -76,6 +76,10 @@ pub struct ServeArgs {
     /// redirect URL of the Battle.net API client.
     #[arg(long, env = "ZESQUAD_PUBLIC_URL")]
     pub public_url: Option<String>,
+    /// Behind a reverse proxy, where it puts each client's address, for the rate limits.
+    /// Without a proxy, or with the wrong one, clients could claim any address.
+    #[arg(long, env = "ZESQUAD_TRUST_PROXY", value_enum, default_value_t)]
+    pub trust_proxy: crate::limits::TrustProxy,
     /// Discord's API host, which squads' webhooks post to; only tests change it.
     #[arg(
         long,
