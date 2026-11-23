@@ -2,6 +2,23 @@
 
 What changed in each zesquad release. Versions are dates (CalVer).
 
+## 2026.11.22.4
+
+### Features
+
+- **db**: Squads have an owner and members ([2310975](https://github.com/tinnet/zesquad/commit/2310975abfefa012a7b92aad405235db748d64e2))
+- **web**: Only members change a squad ([e7761c7](https://github.com/tinnet/zesquad/commit/e7761c75e3e6c9278318298501f0d70c432e96de))
+- **web**: Invite friends with a link ([be1a4c8](https://github.com/tinnet/zesquad/commit/be1a4c832c47c9f76fcae6643ccba25557602120))
+- **web**: Squads from before accounts go to whoever opens them first ([30296a1](https://github.com/tinnet/zesquad/commit/30296a147ed42b8fbd24d66b1b68ba92c83223f6))
+- **web**: Choose who can see a squad ([7c19d90](https://github.com/tinnet/zesquad/commit/7c19d902da7778744ce61bb707673bb09ccb1c83))
+- **web**: Your squads on the front page ([e6bb1fe](https://github.com/tinnet/zesquad/commit/e6bb1fe530d707682f6d577bfef108a60f29a158))
+- **web**: Owners manage members and can delete a squad ([f06cc44](https://github.com/tinnet/zesquad/commit/f06cc44d6e9421e2f361a21eaac69fe2640b9646))
+- **web**: Browse public squads ([1d09156](https://github.com/tinnet/zesquad/commit/1d09156812f2827a8e6e9b58604855dcb69f8cd4))
+
+### Fixes
+
+- **db**: Tagging a character while it's being looked up no longer fails ([6012f87](https://github.com/tinnet/zesquad/commit/6012f87cc6a2f393a988e9e3b4ebef9c2aa8f4f8))
+
 ## 2026.11.22.3
 
 ### Features
