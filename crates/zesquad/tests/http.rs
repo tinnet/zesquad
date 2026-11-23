@@ -1,7 +1,6 @@
 //! Black-box tests: the real app on a random port with a temporary database, talking to a fake
 //! Battle.net in the same process, driven over HTTP the way a browser (or htmx) would.
 
-use std::fmt::Write as _;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
@@ -84,27 +83,21 @@ impl Fake {
 
 const ARCHIVE_KEY_ID: &str = "test-archive-key";
 
-/// A bucket that takes signed PUTs: the signature itself is checked against AWS's example in
-/// `s3.rs`; here, that one is sent and that it covers the body.
+/// A bucket that takes presigned PUTs: the signature itself is rusty-s3's; here, that the
+/// request carries one for our key and region, and no secret.
 async fn fake_archive(
     State(fake): State<Fake>,
-    headers: HeaderMap,
     Path(path): Path<String>,
+    Query(q): Query<std::collections::HashMap<String, String>>,
     body: axum::body::Bytes,
 ) -> Response {
-    use sha2::{Digest as _, Sha256};
-    let header = |name: &str| headers.get(name).and_then(|v| v.to_str().ok());
-    let signed = header("authorization").is_some_and(|a| {
-        a.starts_with(&format!("AWS4-HMAC-SHA256 Credential={ARCHIVE_KEY_ID}/"))
-            && a.contains("/auto/s3/aws4_request, SignedHeaders=host;x-amz-content-sha256;x-amz-date, Signature=")
-    });
-    let hash = Sha256::digest(&body)
-        .iter()
-        .fold(String::new(), |mut s, b| {
-            let _ = write!(s, "{b:02x}");
-            s
-        });
-    if !signed || header("x-amz-content-sha256") != Some(hash.as_str()) {
+    let param = |name: &str| q.get(name).map_or("", String::as_str);
+    let signed = param("X-Amz-Algorithm") == "AWS4-HMAC-SHA256"
+        && param("X-Amz-Credential").starts_with(&format!("{ARCHIVE_KEY_ID}/"))
+        && param("X-Amz-Credential").ends_with("/auto/s3/aws4_request")
+        && param("X-Amz-Signature").len() == 64
+        && !q.values().any(|v| v.contains("test-archive-secret"));
+    if !signed {
         return StatusCode::FORBIDDEN.into_response();
     }
     if fake.archive_down.load(Ordering::SeqCst) {

@@ -15,8 +15,6 @@ askama_web = { version = "0.16.0", features = ["axum-0.8"] }
 axum = "0.8.9"
 clap = { version = "4.6.8", features = ["derive", "env"] }
 dotenvy = "0.15.7"
-# For signing archive uploads (S3 Signature V4).
-hmac = "0.13.0"
 httpdate = "1.0.3"
 mime_guess = "2.0.5"
 # musl's malloc is slow under concurrent load.
@@ -24,6 +22,8 @@ mimalloc = "0.1.52"
 # rustls, not OpenSSL, so the musl build stays static.
 reqwest = { version = "0.13.5", default-features = false, features = ["rustls", "json", "form", "gzip"] }
 rust-embed = "8.14.0"
+# Presigns archive uploads (S3 Signature V4); sans-IO, so reqwest sends them.
+rusty-s3 = "0.12.0"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
 sha2 = "0.11.1"

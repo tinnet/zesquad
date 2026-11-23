@@ -134,8 +134,10 @@ read (so a dump we can't read is kept too), as zstd-compressed JSON at
 With a bucket (`ZESQUAD_ARCHIVE_S3_*`: R2, Hetzner or anything else S3-compatible), the folder
 is only a queue: after each round of houses the files there are uploaded, oldest first, and
 removed. A failed upload stops the round and the rest wait for the next one, so an outage
-loses nothing. `s3.rs` signs the PUTs itself (Signature Version 4, checked against AWS's
-example) rather than pulling in an SDK. Without a bucket, the folder is the archive.
+loses nothing. `s3.rs` presigns each PUT with rusty-s3 (Signature Version 4, sans-IO) and
+sends it with reqwest, rather than pulling in an SDK; the signed URLs live five minutes and are
+kept out of errors, since each is a credential for its upload. Without a bucket, the folder is
+the archive.
 
 Sizes: a house's two dumps are about 2.6 MB gzipped (see `docs/battlenet-api.md`); level 9 zstd
 is about 13% smaller than gzip. With eight houses changing hourly that's roughly 400 MB a day,
