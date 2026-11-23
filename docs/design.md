@@ -198,7 +198,9 @@ in opens one: they become its owner, and it turns `unlisted` with an invite toke
 (`db::claim`, guarded so only the first gets it). What a role may do
 with a squad of a given visibility is one function, `access::allows` in core. Starting a squad
 takes a login; it starts `unlisted`, with a random invite token (`squads.invite_token`). With
-accounts off, squads are made `open` and stay that way, and every squad is treated as `open`.
+accounts off, squads are made `open` and stay that way. Nobody has a role then, so squads made
+while accounts were on keep their visibility but can't be changed until accounts are back: a
+private one stays a 404, an unlisted one read-only. Turning logins off never exposes a squad.
 
 Every squad route takes one of the extractors in `web.rs` (`CanView`, `CanEdit`,
 `CanConfigure`, …), which loads the squad and your role and applies the rule; `db::Squad` itself

@@ -112,16 +112,14 @@ pub fn router(state: AppState) -> Router {
 /// A squad from the `{squad}` part of the path, and what the person asking may do with it.
 pub struct SquadAccess {
     pub squad: db::Squad,
-    /// Their role in it; `None` when logged out or not in it.
+    /// Their role in it; `None` when logged out, not in it, or with accounts off.
     pub role: Option<Role>,
-    /// The visibility the rule goes by: the squad's, or `Open` with accounts off.
-    visibility: Visibility,
 }
 
 impl SquadAccess {
     #[must_use]
     pub fn allows(&self, action: Action) -> bool {
-        access::allows(self.visibility, self.role, action)
+        access::allows(self.squad.visibility, self.role, action)
     }
 
     /// Loads the squad and applies the rule for `action`: a squad you can't see is a 404, the
@@ -148,19 +146,14 @@ impl SquadAccess {
             }
             squad = db::squad(&state.db, id).await?.ok_or(AppError::NotFound)?;
         }
-        let (visibility, role) = match (&state.login, user) {
-            (None, _) => (Visibility::Open, None),
-            (Some(_), None) => (squad.visibility, None),
-            (Some(_), Some(user)) => (
-                squad.visibility,
-                db::role(&state.db, &squad.id, user.id).await?,
-            ),
+        // With accounts off nobody is anyone's member: open squads stay open to all, and
+        // squads made while accounts were on keep their visibility, read-only, until they're
+        // back. Turning logins off mustn't expose a private squad.
+        let role = match (&state.login, user) {
+            (Some(_), Some(user)) => db::role(&state.db, &squad.id, user.id).await?,
+            _ => None,
         };
-        let access = Self {
-            squad,
-            role,
-            visibility,
-        };
+        let access = Self { squad, role };
         if !access.allows(Action::View) {
             return Err(AppError::NotFound);
         }
@@ -1176,12 +1169,7 @@ async fn front_lists(
     };
     let (mut recent, cookie) = recent_squads(state, headers).await?;
     recent.retain(|s| {
-        let visibility = if state.login.is_some() {
-            s.visibility
-        } else {
-            Visibility::Open
-        };
-        !mine.iter().any(|m| m.id == s.id) && access::allows(visibility, None, Action::View)
+        !mine.iter().any(|m| m.id == s.id) && access::allows(s.visibility, None, Action::View)
     });
     Ok((mine, recent, cookie))
 }

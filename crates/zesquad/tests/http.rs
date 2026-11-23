@@ -2764,20 +2764,54 @@ async fn open_squads_stay_editable_by_anyone_with_the_link() {
 }
 
 #[tokio::test]
-async fn with_accounts_off_every_squad_is_open() {
+async fn with_accounts_off_only_open_squads_change_and_private_ones_stay_hidden() {
     let app = app(false).await;
-    let squad = app.squad("Thursday raiders").await;
+    let open = app.squad("Thursday raiders").await;
+    let private = app.squad("Secret raiders").await;
+    let unlisted = app.squad("Quiet raiders").await;
     let db = app.db().await;
-    // Even one made private while accounts were on.
-    sqlx::query("UPDATE squads SET visibility = 'private'")
-        .execute(&db)
-        .await
-        .unwrap();
-    let r = app.add(&squad, "Aldric-Thornwood", "").await;
+    // As if made while accounts were on, which are now off.
+    for (squad, visibility) in [(&private, "private"), (&unlisted, "unlisted")] {
+        sqlx::query("UPDATE squads SET visibility = ? WHERE id = ?")
+            .bind(visibility)
+            .bind(squad.strip_prefix("/s/").unwrap())
+            .execute(&db)
+            .await
+            .unwrap();
+    }
+    let r = app.add(&open, "Aldric-Thornwood", "").await;
     assert_eq!(r.status(), StatusCode::SEE_OTHER);
-    let (status, page) = app.get(&squad).await;
-    assert_eq!(status, StatusCode::OK);
+    let (_, page) = app.get(&open).await;
     assert!(page.contains("Rename"), "{page}");
+
+    let (status, page) = app.get(&private).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert!(!page.contains("Secret raiders"), "{page}");
+    assert_eq!(
+        app.add(&private, "Aldric-Thornwood", "").await.status(),
+        StatusCode::NOT_FOUND
+    );
+
+    let (status, page) = app.get(&unlisted).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        !page.contains("Rename") && page.contains("Quiet raiders"),
+        "{page}"
+    );
+    assert_eq!(
+        app.add(&unlisted, "Aldric-Thornwood", "").await.status(),
+        StatusCode::FORBIDDEN
+    );
+
+    // Nor does the front page list the private one from the browser's history.
+    let ids = [&private, &unlisted]
+        .map(|p| p.strip_prefix("/s/").unwrap().to_owned())
+        .join(".");
+    let (_, front) = app.page_as(&format!("zesquad_recent={ids}"), "/").await;
+    assert!(
+        front.contains("Quiet raiders") && !front.contains("Secret raiders"),
+        "{front}"
+    );
 }
 
 /// The invite link on a squad page, as a path: `/join/<token>`.

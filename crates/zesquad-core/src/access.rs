@@ -1,7 +1,8 @@
 //! Who may do what with a squad: one rule, from the squad's visibility and your place in it.
 //!
 //! Every squad route asks [`allows`] before doing anything, so the rule lives here and nowhere
-//! else. With accounts off, every squad is treated as [`Visibility::Open`].
+//! else. With accounts off nobody has a role, so only [`Visibility::Open`] squads can be
+//! changed, and private ones stay hidden.
 
 use std::fmt;
 use std::str::FromStr;

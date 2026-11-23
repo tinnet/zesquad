@@ -8,7 +8,8 @@ professions, gear, hunter pets and when they last played.
 - A squad lives at its own unguessable link (`/s/<random id>`). With logging in on (see below),
   whoever starts a squad owns it: anyone with the link can look, and friends who join with its
   invite link edit it. With logging in off there are no accounts, and anyone with the link can
-  see and edit the squad, so share it with your friends only. Set `ZESQUAD_PASSWORD` to put one
+  see and edit the squad, so share it with your friends only. (Squads started while logging in
+  was on keep who can see them, and stay read-only until it's back.) Set `ZESQUAD_PASSWORD` to put one
   shared password in front of the whole site as well.
 - Characters are entered as `Name-Surname`, the way Forever names them. EU only for now.
 - Details refresh in the background every hour, or on demand with **Refresh**. Battle.net only
