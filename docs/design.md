@@ -190,7 +190,9 @@ everything zesquad keeps.
 With accounts on, a squad has members (`squad_members`): one `owner`, who started it, and
 `member`s. A squad's `visibility` says who else sees it: `private` (only members), `unlisted`
 (anyone with the link can look) or `public` (also listed). Squads from before accounts are
-`open`: anyone with the link sees and edits them, and nobody owns them. What a role may do
+`open`: anyone with the link sees and edits them, and nobody owns them, until someone logged
+in opens one: they become its owner, and it turns `unlisted` with an invite token
+(`db::claim`, guarded so only the first gets it). What a role may do
 with a squad of a given visibility is one function, `access::allows` in core. Starting a squad
 takes a login; it starts `unlisted`, with a random invite token (`squads.invite_token`). With
 accounts off, squads are made `open` and stay that way, and every squad is treated as `open`.

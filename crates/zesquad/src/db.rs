@@ -258,6 +258,38 @@ pub async fn join(db: &SqlitePool, squad_id: &str, user_id: i64) -> anyhow::Resu
     Ok(())
 }
 
+/// Makes `user_id` the owner of an `open` squad (one from before accounts): it turns unlisted
+/// and gets an invite token. `false` when it isn't open (any more): someone was first.
+///
+/// # Errors
+///
+/// On database errors.
+pub async fn claim(db: &SqlitePool, squad_id: &str, user_id: i64) -> anyhow::Result<bool> {
+    let mut tx = db.begin().await?;
+    let claimed = sqlx::query(
+        "UPDATE squads SET visibility = 'unlisted', invite_token = ?
+         WHERE id = ? AND visibility = 'open'",
+    )
+    .bind(invite_token())
+    .bind(squad_id)
+    .execute(&mut *tx)
+    .await?
+    .rows_affected()
+        == 1;
+    if claimed {
+        sqlx::query(
+            "INSERT INTO squad_members (squad_id, user_id, role, joined_at) VALUES (?, ?, 'owner', ?)",
+        )
+        .bind(squad_id)
+        .bind(user_id)
+        .bind(now())
+        .execute(&mut *tx)
+        .await?;
+    }
+    tx.commit().await?;
+    Ok(claimed)
+}
+
 /// Gives a squad a new invite token; the old one stops working.
 ///
 /// # Errors

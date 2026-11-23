@@ -2895,3 +2895,41 @@ async fn without_accounts_there_are_no_invites() {
     assert!(!page.contains("/join/"), "{page}");
     assert_eq!(app.get("/join/anything").await.0, StatusCode::NOT_FOUND);
 }
+
+#[tokio::test]
+async fn squads_from_before_accounts_go_to_whoever_opens_them_first() {
+    let app = app_with_login(None).await;
+    let db = app.db().await;
+    sqlx::query(
+        "INSERT INTO squads (id, name, region, created_at) VALUES ('oldsquad', 'Old raiders', 'eu', 0)",
+    )
+    .execute(&db)
+    .await
+    .unwrap();
+    // Logged out, it stays as it was.
+    let (_, page) = app.get("/s/oldsquad").await;
+    assert!(
+        page.contains("see and edit") && !page.contains("/join/"),
+        "{page}"
+    );
+    let me = log_in_as(&app, GOOD_CODE, "/").await;
+    let (_, page) = app.page_as(&me, "/s/oldsquad").await;
+    assert!(
+        page.contains("Anyone with this link can join and edit"),
+        "{page}"
+    );
+    assert!(page.contains("/invite/reset"), "{page}");
+    let (visibility, role): (String, String) = sqlx::query_as(
+        "SELECT s.visibility, m.role FROM squads s JOIN squad_members m ON m.squad_id = s.id",
+    )
+    .fetch_one(&db)
+    .await
+    .unwrap();
+    assert_eq!((visibility.as_str(), role.as_str()), ("unlisted", "owner"));
+    // The next one is too late: they can look, not edit.
+    let friend = log_in_as(&app, FRIEND_CODE, "/").await;
+    let (_, page) = app.page_as(&friend, "/s/oldsquad").await;
+    assert!(page.contains("Ask a member for the invite link"), "{page}");
+    let r = app.add("/s/oldsquad", "Aldric-Thornwood", "").await;
+    assert_eq!(r.status(), StatusCode::FORBIDDEN);
+}
