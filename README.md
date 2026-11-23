@@ -14,6 +14,8 @@ professions, gear, hunter pets and when they last played.
 - Characters are entered as `Name-Surname`, the way Forever names them. EU only for now.
 - Details refresh in the background every hour, or on demand with **Refresh**. Battle.net only
   updates a character when it logs out.
+- A character's guild links to the guild's page: its whole roster, searchable by name, by
+  class, and sorted by rank, name or level.
 
 ## Run it
 

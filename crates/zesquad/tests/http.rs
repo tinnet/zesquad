@@ -44,6 +44,8 @@ struct Fake {
     level: Arc<AtomicU64>,
     /// Messages posted to the fake Discord: the webhook path (with query) and the JSON body.
     discord: Arc<std::sync::Mutex<Vec<(String, serde_json::Value)>>>,
+    /// Guild and roster requests.
+    guild_lookups: Arc<AtomicUsize>,
 }
 
 /// A webhook id the fake Discord says is gone (404), like a deleted webhook.
@@ -344,6 +346,7 @@ async fn start_fake() -> (String, Fake) {
         .route("/token", post(fake_token))
         .route("/userinfo", get(fake_userinfo))
         .route("/profile/wow/character/{*rest}", get(fake_character_path))
+        .route("/data/wow/guild/{*rest}", get(fake_guild))
         .route(
             "/data/wow/ruleset/{ruleset}/auctions/{*rest}",
             get(fake_auctions),
@@ -367,6 +370,44 @@ async fn fake_character_path(
     let _open = fake.gate.read().await;
     let segments: Vec<&str> = rest.split('/').collect();
     fake_character(&fake, &headers, &q, &segments)
+}
+
+/// The made-up guild the fake Armory knows, in EU only (see zesquad-core/fixtures).
+const GUILD: &str = "order-of-the-lantern";
+
+/// `/data/wow/guild/{slug}[/roster]`: the fixture guild and its 61 members.
+async fn fake_guild(
+    State(fake): State<Fake>,
+    headers: HeaderMap,
+    Query(q): Query<std::collections::HashMap<String, String>>,
+    Path(rest): Path<String>,
+) -> Response {
+    fake.guild_lookups.fetch_add(1, Ordering::SeqCst);
+    if headers
+        .get(header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        != Some(&format!("Bearer {TOKEN}"))
+    {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    let in_eu = q.get("namespace").map(String::as_str) == Some("profile-forever-eu");
+    let fixture_name = match rest.split_once('/') {
+        None if rest == GUILD => "guild",
+        Some((GUILD, "roster")) => "guild-roster",
+        _ => "",
+    };
+    if fixture_name.is_empty() || !in_eu {
+        return (
+            StatusCode::NOT_FOUND,
+            r#"{"code":404,"type":"BLZWEBAPI00000404","detail":"Not Found"}"#,
+        )
+            .into_response();
+    }
+    (
+        [(header::CONTENT_TYPE, "application/json")],
+        fixture(fixture_name),
+    )
+        .into_response()
 }
 
 // ---- the app ----
@@ -909,7 +950,7 @@ async fn added_characters_get_their_armory_details() {
         "Aldric <span class=\"surname\">Thornwood</span>",
         "Level 26",
         "Rogue",
-        "&#60;Order of the Lantern&#62; · item level 14 · Combat 17 / Assassination 5",
+        "&lt;Order of the Lantern&gt;</a> · item level 14 · Combat 17 / Assassination 5",
         "Red Defias Mask",
         "Skinning 158/225",
         "https://render.example/forever-eu/character/1-avatar.jpg",
@@ -3380,6 +3421,7 @@ fn tight_limits(settings: &mut Settings) {
         login: zesquad_core::limit::Rule { max: 2, window: 60 },
         new_squad: rule(1),
         change: rule(3),
+        new_guild: rule(2),
     };
 }
 
@@ -3501,4 +3543,170 @@ async fn behind_a_trusted_proxy_each_client_has_its_own_limits() {
     let app = app_trusting(TrustProxy::None).await;
     assert_eq!(post(&app, &[("cf-connecting-ip", "192.0.2.1")]).await, ok);
     assert_eq!(post(&app, &[("cf-connecting-ip", "192.0.2.2")]).await, slow);
+}
+
+// ---- guilds ----
+
+/// Rows in the guild page's roster table.
+fn roster_rows(page: &str) -> usize {
+    page.split("<tbody>").nth(1).map_or(0, |t| {
+        t.split("</tbody>").next().unwrap().matches("<tr").count()
+    })
+}
+
+#[tokio::test]
+async fn a_guild_page_looks_the_guild_up_and_lists_its_members() {
+    let app = app(true).await;
+    let path = format!("/g/eu/{GUILD}");
+    let (status, first) = app.get(&path).await;
+    assert_eq!(status, StatusCode::OK);
+    if !first.contains("Brannoc") {
+        assert!(first.contains("Looking up the guild"), "{first}");
+        assert!(first.contains("hx-trigger=\"every 3s\""), "{first}");
+    }
+    let page = app.wait_for(&path, "Brannoc").await;
+    assert!(
+        page.contains("<h1 class=\"squad-name\">Order of the Lantern</h1>"),
+        "{page}"
+    );
+    assert!(page.contains("61 members · Alliance"), "{page}");
+    assert!(
+        page.contains("<title>Order of the Lantern · zesquad</title>"),
+        "{page}"
+    );
+    assert!(!page.contains("every 3s"), "stops polling: {page}");
+    // Guild master first, with the roster's class and race names.
+    assert_eq!(roster_rows(&page), 50);
+    let first_row = page.split("<tbody>").nth(1).unwrap();
+    let first_row = first_row.split("</tr>").next().unwrap();
+    assert!(first_row.contains("Aldric"), "{first_row}");
+    assert!(first_row.contains("Guild Master"), "{first_row}");
+    assert!(
+        first_row.contains("Rogue") && first_row.contains("Night Elf"),
+        "{first_row}"
+    );
+    assert!(page.contains("Page 1 of 2"), "{page}");
+    assert!(
+        page.contains(&format!("href=\"{path}?page=2\" rel=\"next\"")),
+        "{page}"
+    );
+    let (_, second) = app.get(&format!("{path}?page=2")).await;
+    assert_eq!(roster_rows(&second), 11);
+    assert!(second.contains("rel=\"prev\""), "{second}");
+
+    // Opening it again reads what's stored: the guild and roster were asked for once.
+    app.get(&path).await;
+    assert_eq!(app.fake.guild_lookups.load(Ordering::SeqCst), 2);
+}
+
+#[tokio::test]
+async fn a_guild_roster_can_be_searched_filtered_and_sorted() {
+    let app = app(true).await;
+    let path = format!("/g/eu/{GUILD}");
+    app.wait_for(&path, "Brannoc").await;
+
+    let (_, found) = app.get(&format!("{path}?q=BRANNOC")).await;
+    assert_eq!(roster_rows(&found), 5, "{found}");
+    assert!(found.contains("5 of 61 members"), "{found}");
+    assert!(!found.contains("Elowen"), "{found}");
+    assert!(
+        found.contains("value=\"brannoc\""),
+        "the search box keeps it: {found}"
+    );
+    assert!(!found.contains("Page 1 of"), "{found}");
+
+    let (_, surname) = app.get(&format!("{path}?q=brann%20ash")).await;
+    assert_eq!(roster_rows(&surname), 1, "{surname}");
+
+    let (_, rogues) = app.get(&format!("{path}?class=rogue")).await;
+    assert!(rogues.contains("class=\"chip coloured on\""), "{rogues}");
+    let rows = roster_rows(&rogues);
+    assert!(rows > 0 && rows < 61, "{rows}");
+    assert_eq!(
+        rogues.matches("<td class=\"class\">Rogue</td>").count(),
+        rows,
+        "{rogues}"
+    );
+    // Sorting keeps the class; the search box carries both.
+    assert!(
+        rogues.contains("href=\"/g/eu/order-of-the-lantern?class=rogue&#38;sort=level\""),
+        "{rogues}"
+    );
+    assert!(
+        rogues.contains("name=\"class\" value=\"rogue\""),
+        "{rogues}"
+    );
+
+    let (_, by_level) = app.get(&format!("{path}?sort=level")).await;
+    let top = by_level.split("<tbody>").nth(1).unwrap();
+    let top = top.split("</tr>").next().unwrap();
+    assert!(top.contains("<td class=\"num\">60</td>"), "{top}");
+
+    let (_, nobody) = app.get(&format!("{path}?q=zzz&page=4")).await;
+    assert!(nobody.contains("Nobody matches."), "{nobody}");
+    assert!(nobody.contains("0 of 61 members"), "{nobody}");
+}
+
+#[tokio::test]
+async fn unknown_guilds_are_404() {
+    let app = app(true).await;
+    let path = "/g/eu/no-such-guild";
+    let page = app.wait_for(path, "Not on the Armory").await;
+    assert!(page.contains("Not on the Armory"), "{page}");
+    assert_eq!(app.get(path).await.0, StatusCode::NOT_FOUND);
+    // The fake knows the guild in EU only.
+    app.wait_for(&format!("/g/us/{GUILD}"), "Not on the Armory")
+        .await;
+    for bad in ["/g/xx/spark", "/g/eu/a--b", "/g/eu/a.b", "/g/eu/-x"] {
+        assert_eq!(app.get(bad).await.0, StatusCode::NOT_FOUND, "{bad}");
+    }
+}
+
+#[tokio::test]
+async fn guild_pages_need_armory_lookups() {
+    let app = app(false).await;
+    assert_eq!(
+        app.get(&format!("/g/eu/{GUILD}")).await.0,
+        StatusCode::NOT_FOUND
+    );
+}
+
+#[tokio::test]
+async fn opening_many_new_guilds_is_slowed_down() {
+    let app = app_tweaked(true, None, false, false, tight_limits).await;
+    let known = format!("/g/eu/{GUILD}");
+    assert_eq!(app.get(&known).await.0, StatusCode::OK);
+    app.get("/g/eu/second-guild").await;
+    let (status, body) = app.get("/g/eu/third-guild").await;
+    assert_eq!(status, StatusCode::TOO_MANY_REQUESTS, "{body}");
+    // Guilds already followed don't count.
+    app.wait_for(&known, "Brannoc").await;
+    assert_eq!(app.get(&known).await.0, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn character_cards_link_to_their_guild() {
+    let app = app(true).await;
+    let squad = app.squad("Lanterns").await;
+    app.add(&squad, "Aldric-Thornwood", "").await;
+    let page = app.wait_for(&squad, "Order of the Lantern").await;
+    assert!(
+        page.contains(&format!(
+            "<a href=\"/g/eu/{GUILD}\" class=\"guild\">&lt;Order of the Lantern&gt;</a> · item level 14"
+        )),
+        "{page}"
+    );
+    // The front page's made-up characters aren't linked anywhere.
+    let (_, front) = app.get("/").await;
+    assert!(front.contains("&lt;Lanterns of Ashwood&gt;"), "{front}");
+    assert!(!front.contains("class=\"guild\""), "{front}");
+}
+
+#[tokio::test]
+async fn without_lookups_guilds_are_not_linked() {
+    let app = app(false).await;
+    let squad = app.squad("Lanterns").await;
+    app.add(&squad, "Aldric-Thornwood", "").await;
+    let (_, page) = app.get(&squad).await;
+    assert!(!page.contains("/g/eu/"), "{page}");
 }

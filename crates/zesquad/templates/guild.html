@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+{%- let base = base() %}
+{% block title %}{{ title() }} · zesquad{% endblock %}
+{% block meta %}
+  {%- let about = about() %}
+  <meta name="description" content="{{ about }}">
+  <meta property="og:title" content="{{ title() }}">
+  <meta property="og:description" content="{{ about }}">
+{%- endblock %}
+{% block content %}
+{#- While the first lookup is waiting, the whole page polls itself and swaps this part in. #}
+<div id="guild"{% if polling() %} hx-get="{{ base }}" hx-select="#guild" hx-target="this" hx-swap="outerHTML" hx-trigger="every 3s"{% endif %}>
+<section class="squad-head">
+  <h1 class="squad-name">{{ title() }}</h1>
+  {%- if answered %}
+  <p class="hint">{{ about() }}{% if let Some(c) = checked %} · checked {{ c }}{% endif %}</p>
+  {%- endif %}
+</section>
+
+{%- match status %}
+{%- when Status::NotFound %}
+<p class="empty">Not on the Armory: no guild is called that in {{ region.name() }}, or it was disbanded.</p>
+{%- when Status::Pending %}
+{%- if !answered %}<p class="empty">Looking up the guild on the Armory…</p>{% endif %}
+{%- when Status::Failed %}
+<p class="hint">Couldn't reach the Armory{% if answered %}, so this is what it said before{% endif %}; trying again soon.</p>
+{%- when Status::Found %}
+{%- endmatch %}
+
+{%- if total > 0 %}
+<form method="get" action="{{ base }}" class="add row guild-search" role="search"
+  hx-get="{{ base }}" hx-select="#guild-roster" hx-target="#guild-roster" hx-swap="outerHTML" hx-push-url="true"
+  hx-trigger="input changed delay:300ms from:find input[name=q], submit">
+  {%- if !class_value().is_empty() %}<input type="hidden" name="class" value="{{ class_value() }}">{% endif %}
+  {%- if query.sort != GuildSort::default() %}<input type="hidden" name="sort" value="{{ sort_value() }}">{% endif %}
+  <label class="grow">
+    <span class="visually-hidden">Search members</span>
+    <input type="search" name="q" value="{{ query.search }}" placeholder="Search members by name" autocomplete="off">
+  </label>
+  <button type="submit">Search</button>
+</form>
+
+<section id="guild-roster">
+  <nav class="filters" aria-label="Filter by class">
+    <a href="{{ class_link(None) }}" class="chip{% if is_class(None) %} on{% endif %}">all</a>
+    {%- for c in classes %}
+    <a href="{{ class_link(Some(c.key.as_str())) }}" class="chip{{ c.paint.class() }}{% if is_class(Some(c.key.as_str())) %} on{% endif %}" style="{{ c.paint.style() }}">{{ c.label }} {{ c.count }}</a>
+    {%- endfor %}
+  </nav>
+
+  <div class="overview row">
+    <p class="summary grow">{{ summary() }}</p>
+    <nav class="sorts" aria-label="Sort by">
+      Sort by
+      {%- for s in GuildSort::ALL %}
+      <a href="{{ sort_link(*s) }}"{% if is_sort(*s) %} aria-current="true"{% endif %}>{{ s.as_str() }}</a>
+      {%- endfor %}
+    </nav>
+  </div>
+
+  {%- if members.is_empty() %}
+  <p class="empty">Nobody matches.</p>
+  {%- else %}
+  <div class="table-wrap">
+    <table class="data guild-roster">
+      <thead><tr><th scope="col">Name</th><th scope="col" class="num">Level</th><th scope="col">Class</th><th scope="col">Race</th><th scope="col">Rank</th></tr></thead>
+      <tbody>
+        {%- for m in members %}
+        <tr class="class-{{ m.class_key }}">
+          <th scope="row">{{ m.name }} <span class="surname">{{ m.surname }}</span></th>
+          <td class="num">{% if let Some(l) = m.level %}{{ l }}{% endif %}</td>
+          <td class="class">{% if let Some(c) = m.class %}{{ c }}{% endif %}</td>
+          <td>{% if let Some(r) = m.race %}{{ r }}{% endif %}</td>
+          <td>{{ m.rank }}</td>
+        </tr>
+        {%- endfor %}
+      </tbody>
+    </table>
+  </div>
+  {%- endif %}
+
+  {%- if pages > 1 %}
+  <nav class="pager row" aria-label="Pages">
+    {%- if page > 1 %}<a href="{{ page_link(page - 1) }}" rel="prev">← Previous</a>{% endif %}
+    <span class="grow hint">Page {{ page }} of {{ pages }}</span>
+    {%- if page < pages %}<a href="{{ page_link(page + 1) }}" rel="next">Next →</a>{% endif %}
+  </nav>
+  {%- endif %}
+</section>
+{%- endif %}
+</div>
+{% endblock %}

@@ -1,4 +1,4 @@
-//! Keeps squad members' Armory data fresh in the background.
+//! Keeps squad members' and viewed guilds' Armory data fresh in the background.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -8,6 +8,7 @@ use tokio::sync::Notify;
 use zesquad_core::Region;
 use zesquad_core::armory::{Endpoint, Profile};
 use zesquad_core::discord;
+use zesquad_core::guild::{self, Slug};
 
 use crate::armory::{Client, Lookup};
 use crate::db::{self, Fetched};
@@ -15,6 +16,8 @@ use crate::discord::Discord;
 
 /// Without a wake-up, look for due characters this often.
 const TICK: Duration = Duration::from_secs(60);
+/// Guilds nobody opened for this long stop being refreshed.
+const GUILD_INTEREST: i64 = 7 * 86_400;
 /// Pause between characters. With ~6 requests each this stays far below Battle.net's
 /// 100 requests per second, and a squad of 40 still refreshes in a few seconds.
 const PAUSE: Duration = Duration::from_millis(100);
@@ -23,7 +26,8 @@ pub struct Syncer {
     pub db: SqlitePool,
     pub client: Arc<Client>,
     pub interval: Duration,
-    /// Notified when a character is added or a refresh asked for, so it's fetched right away.
+    /// Notified when a character or guild is added or a refresh asked for, so it's fetched
+    /// right away.
     pub wake: Arc<Notify>,
     /// Tells squads' Discord channels about level-ups.
     pub discord: Arc<Discord>,
@@ -35,6 +39,9 @@ impl Syncer {
         loop {
             if let Err(e) = self.refresh_due().await {
                 tracing::warn!("armory refresh failed: {e:#}");
+            }
+            if let Err(e) = self.refresh_guilds().await {
+                tracing::warn!("guild refresh failed: {e:#}");
             }
             tokio::select! {
                 () = self.wake.notified() => {}
@@ -68,6 +75,37 @@ impl Syncer {
             tokio::time::sleep(PAUSE).await;
         }
         Ok(())
+    }
+
+    /// Fetches every guild that's due and was viewed lately.
+    async fn refresh_guilds(&self) -> anyhow::Result<()> {
+        let interval = i64::try_from(self.interval.as_secs()).unwrap_or(i64::MAX);
+        let now = db::now();
+        for (region, slug) in db::due_guilds(&self.db, now, interval, now - GUILD_INTEREST).await? {
+            let fetched = self.fetch_guild(region, &slug).await;
+            if let Fetched::Failed(e) = &fetched {
+                tracing::warn!(guild = %slug, %region, "guild fetch failed: {e}");
+            }
+            db::store_guild(&self.db, region, &slug, fetched).await?;
+            tokio::time::sleep(PAUSE).await;
+        }
+        Ok(())
+    }
+
+    /// The guild document decides whether the guild exists; a 404 on the roster leaves it out.
+    async fn fetch_guild(&self, region: Region, slug: &Slug) -> Fetched<guild::Endpoint> {
+        let mut docs = Vec::new();
+        for endpoint in guild::Endpoint::ALL {
+            match self.client.guild(region, slug, endpoint).await {
+                Ok(Lookup::Found(doc)) => docs.push((endpoint, doc)),
+                Ok(Lookup::NotFound) if endpoint == guild::Endpoint::Guild => {
+                    return Fetched::NotFound;
+                }
+                Ok(Lookup::NotFound) => {}
+                Err(e) => return Fetched::Failed(format!("{e:#}")),
+            }
+        }
+        Fetched::Found(docs)
     }
 
     /// Tells every squad with this character and a Discord channel that it went up a level.

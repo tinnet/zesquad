@@ -12,6 +12,7 @@ use tokio::sync::Mutex;
 use zesquad_core::Region;
 use zesquad_core::armory::Endpoint;
 use zesquad_core::auctions::RULESET;
+use zesquad_core::guild::{self, Slug};
 
 /// Battle.net's OAuth token endpoint, for every region.
 pub const TOKEN_URL: &str = "https://oauth.battle.net/token";
@@ -135,10 +136,36 @@ impl Client {
     ) -> anyhow::Result<Lookup> {
         let mut segments = vec!["profile", "wow", "character", key];
         segments.extend_from_slice(endpoint.path());
+        self.lookup(region, &segments, endpoint.as_str()).await
+    }
+
+    /// Looks up one document of a guild by its slug in its region.
+    ///
+    /// # Errors
+    ///
+    /// On network errors, bad credentials, rate limiting or unexpected statuses.
+    pub async fn guild(
+        &self,
+        region: Region,
+        slug: &Slug,
+        endpoint: guild::Endpoint,
+    ) -> anyhow::Result<Lookup> {
+        let mut segments = vec!["data", "wow", "guild", slug.as_str()];
+        segments.extend_from_slice(endpoint.path());
+        self.lookup(region, &segments, endpoint.as_str()).await
+    }
+
+    /// A JSON document from the profile namespace: found, or a 404.
+    async fn lookup(
+        &self,
+        region: Region,
+        segments: &[&str],
+        what: &str,
+    ) -> anyhow::Result<Lookup> {
         let Reply { status, body, .. } = self
             .get(
                 region,
-                &segments,
+                segments,
                 &region.profile_namespace(),
                 LOOKUP_TIMEOUT,
                 None,
@@ -149,7 +176,7 @@ impl Client {
                 serde_json::from_str(&body).context("Battle.net sent invalid JSON")?,
             )),
             StatusCode::NOT_FOUND => Ok(Lookup::NotFound),
-            other => bail!("Battle.net answered {other} for {}", endpoint.as_str()),
+            other => bail!("Battle.net answered {other} for {what}"),
         }
     }
 

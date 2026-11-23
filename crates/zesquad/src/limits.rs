@@ -26,6 +26,8 @@ pub struct Limits {
     pub new_squad: Rule,
     /// Every other form: characters, tags, joining, settings.
     pub change: Rule,
+    /// Opening the page of a guild nobody opened before, which makes us ask Battle.net.
+    pub new_guild: Rule,
 }
 
 impl Default for Limits {
@@ -42,6 +44,10 @@ impl Default for Limits {
             change: Rule {
                 max: 60,
                 window: 60,
+            },
+            new_guild: Rule {
+                max: 10,
+                window: 3600,
             },
         }
     }
@@ -65,6 +71,8 @@ enum Kind {
     Login,
     NewSquad,
     Change,
+    /// Counted by the guild page itself, only for guilds not followed yet.
+    NewGuild,
 }
 
 impl Kind {
@@ -87,6 +95,7 @@ pub struct Limiter {
     login: Mutex<Counter<IpAddr>>,
     new_squad: Mutex<Counter<IpAddr>>,
     change: Mutex<Counter<IpAddr>>,
+    new_guild: Mutex<Counter<IpAddr>>,
 }
 
 impl Limiter {
@@ -98,6 +107,7 @@ impl Limiter {
             login: Mutex::new(Counter::new(limits.login)),
             new_squad: Mutex::new(Counter::new(limits.new_squad)),
             change: Mutex::new(Counter::new(limits.change)),
+            new_guild: Mutex::new(Counter::new(limits.new_guild)),
         }
     }
 
@@ -142,6 +152,7 @@ impl Limiter {
             Kind::Login => &self.login,
             Kind::NewSquad => &self.new_squad,
             Kind::Change => &self.change,
+            Kind::NewGuild => &self.new_guild,
         };
         let now = u64::try_from(crate::db::now()).unwrap_or_default();
         // A poisoned lock only means another request panicked mid-count; the counts are fine.
@@ -149,6 +160,23 @@ impl Limiter {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         counter.hit(client, now).map_err(|r| r.0)
+    }
+}
+
+impl Limiter {
+    /// Counts opening a guild nobody opened before.
+    ///
+    /// # Errors
+    ///
+    /// Over the limit: an error that's a 429 with `Retry-After`.
+    pub fn new_guild(&self, headers: &HeaderMap, peer: Option<IpAddr>) -> Result<(), AppError> {
+        let Some(client) = self.client(headers, peer) else {
+            return Ok(());
+        };
+        self.hit(Kind::NewGuild, client).map_err(|retry_after| {
+            tracing::info!(%client, kind = ?Kind::NewGuild, "over the rate limit");
+            AppError::TooManyRequests { retry_after }
+        })
     }
 }
 

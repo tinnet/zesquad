@@ -1,0 +1,28 @@
+{
+  "_links": {
+    "self": {
+      "href": "https://api.example/forever-eu/data/wow/guild/order-of-the-lantern?namespace=profile-forever-eu"
+    }
+  },
+  "id": 1000002,
+  "name": "Order of the Lantern",
+  "slug": "order-of-the-lantern",
+  "faction": {
+    "type": "ALLIANCE",
+    "name": "Alliance"
+  },
+  "achievement_points": 0,
+  "member_count": 61,
+  "name_search": "Order of the Lantern",
+  "created_timestamp": 1794000000000,
+  "ruleset": {
+    "key": {
+      "href": "https://api.example/forever-eu/data/wow/ruleset/2?namespace=dynamic-forever-eu"
+    },
+    "name": "Normal",
+    "id": 2
+  },
+  "roster": {
+    "href": "https://api.example/forever-eu/data/wow/guild/order-of-the-lantern/roster?namespace=profile-forever-eu"
+  }
+}

@@ -14,7 +14,11 @@
         {% if let Some(faction) = m.profile.faction %}<span class="faction {{ faction|lower }}">{{ faction|lower }}</span>{% endif %}
       </p>
       {%- let details = m.details_line() %}
-      {% if !details.is_empty() %}<p class="line sub">{{ details }}</p>{% endif %}
+      {% if m.profile.guild.is_some() || !details.is_empty() %}<p class="line sub">
+        {%- if let Some(guild) = m.profile.guild %}
+        {%- if let Some(link) = m.guild_link %}<a href="{{ link }}" class="guild">&lt;{{ guild }}&gt;</a>{% else %}&lt;{{ guild }}&gt;{% endif %}
+        {%- if !details.is_empty() %} · {% endif %}
+        {%- endif %}{{ details }}</p>{% endif %}
       {% if let Some(seen) = m.last_login %}<p class="line sub">last played {{ seen }}</p>{% endif %}
       {% endif %}
       {% match m.status %}

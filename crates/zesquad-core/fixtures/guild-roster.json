@@ -1,0 +1,1729 @@
+{
+  "_links": {
+    "self": {
+      "href": "https://api.example/forever-eu/data/wow/guild/order-of-the-lantern/roster?namespace=profile-forever-eu"
+    }
+  },
+  "guild": {
+    "key": {
+      "href": "https://api.example/forever-eu/data/wow/guild/order-of-the-lantern?namespace=profile-forever-eu"
+    },
+    "id": 1000002,
+    "name": "Order of the Lantern",
+    "slug": "order-of-the-lantern",
+    "faction": {
+      "type": "ALLIANCE",
+      "name": "Alliance"
+    }
+  },
+  "members": [
+    {
+      "character": {
+        "key": {
+          "href": "https://api.example/forever-eu/profile/wow/character/aldric-thornwood?namespace=profile-forever-eu"
+        },
+        "name": "Aldric",
+        "surname": "Thornwood",
+        "id": 2000000,
+        "slug": "aldric-thornwood",
+        "level": 26,
+        "playable_class": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-class/4?namespace=static-forever-eu"
+          },
+          "id": 4
+        },
+        "playable_race": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-race/4?namespace=static-forever-eu"
+          },
+          "id": 4
+        },
+        "faction": {
+          "type": "ALLIANCE"
+        }
+      },
+      "rank": 0
+    },
+    {
+      "character": {
+        "key": {
+          "href": "https://api.example/forever-eu/profile/wow/character/brannoc-ashby?namespace=profile-forever-eu"
+        },
+        "name": "Brannoc",
+        "surname": "Ashby",
+        "id": 2000001,
+        "slug": "brannoc-ashby",
+        "level": 8,
+        "playable_class": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-class/2?namespace=static-forever-eu"
+          },
+          "id": 2
+        },
+        "playable_race": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-race/3?namespace=static-forever-eu"
+          },
+          "id": 3
+        },
+        "faction": {
+          "type": "ALLIANCE"
+        }
+      },
+      "rank": 3
+    },
+    {
+      "character": {
+        "key": {
+          "href": "https://api.example/forever-eu/profile/wow/character/brannoc-fernhollow?namespace=profile-forever-eu"
+        },
+        "name": "Brannoc",
+        "surname": "Fernhollow",
+        "id": 2000002,
+        "slug": "brannoc-fernhollow",
+        "level": 15,
+        "playable_class": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-class/3?namespace=static-forever-eu"
+          },
+          "id": 3
+        },
+        "playable_race": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-race/4?namespace=static-forever-eu"
+          },
+          "id": 4
+        },
+        "faction": {
+          "type": "ALLIANCE"
+        }
+      },
+      "rank": 4
+    },
+    {
+      "character": {
+        "key": {
+          "href": "https://api.example/forever-eu/profile/wow/character/brannoc-quillon?namespace=profile-forever-eu"
+        },
+        "name": "Brannoc",
+        "surname": "Quillon",
+        "id": 2000003,
+        "slug": "brannoc-quillon",
+        "level": 22,
+        "playable_class": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-class/4?namespace=static-forever-eu"
+          },
+          "id": 4
+        },
+        "playable_race": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-race/7?namespace=static-forever-eu"
+          },
+          "id": 7
+        },
+        "faction": {
+          "type": "ALLIANCE"
+        }
+      },
+      "rank": 5
+    },
+    {
+      "character": {
+        "key": {
+          "href": "https://api.example/forever-eu/profile/wow/character/brannoc-brackwater?namespace=profile-forever-eu"
+        },
+        "name": "Brannoc",
+        "surname": "Brackwater",
+        "id": 2000004,
+        "slug": "brannoc-brackwater",
+        "level": 29,
+        "playable_class": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-class/5?namespace=static-forever-eu"
+          },
+          "id": 5
+        },
+        "playable_race": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-race/95?namespace=static-forever-eu"
+          },
+          "id": 95
+        },
+        "faction": {
+          "type": "ALLIANCE"
+        }
+      },
+      "rank": 5
+    },
+    {
+      "character": {
+        "key": {
+          "href": "https://api.example/forever-eu/profile/wow/character/brannoc-stonemere?namespace=profile-forever-eu"
+        },
+        "name": "Brannoc",
+        "surname": "Stonemere",
+        "id": 2000005,
+        "slug": "brannoc-stonemere",
+        "level": 36,
+        "playable_class": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-class/7?namespace=static-forever-eu"
+          },
+          "id": 7
+        },
+        "playable_race": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-race/1?namespace=static-forever-eu"
+          },
+          "id": 1
+        },
+        "faction": {
+          "type": "ALLIANCE"
+        }
+      },
+      "rank": 5
+    },
+    {
+      "character": {
+        "key": {
+          "href": "https://api.example/forever-eu/profile/wow/character/elowen-ashby?namespace=profile-forever-eu"
+        },
+        "name": "Elowen",
+        "surname": "Ashby",
+        "id": 2000006,
+        "slug": "elowen-ashby",
+        "level": 43,
+        "playable_class": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-class/8?namespace=static-forever-eu"
+          },
+          "id": 8
+        },
+        "playable_race": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-race/3?namespace=static-forever-eu"
+          },
+          "id": 3
+        },
+        "faction": {
+          "type": "ALLIANCE"
+        }
+      },
+      "rank": 6
+    },
+    {
+      "character": {
+        "key": {
+          "href": "https://api.example/forever-eu/profile/wow/character/elowen-fernhollow?namespace=profile-forever-eu"
+        },
+        "name": "Elowen",
+        "surname": "Fernhollow",
+        "id": 2000007,
+        "slug": "elowen-fernhollow",
+        "level": 50,
+        "playable_class": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-class/9?namespace=static-forever-eu"
+          },
+          "id": 9
+        },
+        "playable_race": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-race/4?namespace=static-forever-eu"
+          },
+          "id": 4
+        },
+        "faction": {
+          "type": "ALLIANCE"
+        }
+      },
+      "rank": 1
+    },
+    {
+      "character": {
+        "key": {
+          "href": "https://api.example/forever-eu/profile/wow/character/elowen-quillon?namespace=profile-forever-eu"
+        },
+        "name": "Elowen",
+        "surname": "Quillon",
+        "id": 2000008,
+        "slug": "elowen-quillon",
+        "level": 57,
+        "playable_class": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-class/11?namespace=static-forever-eu"
+          },
+          "id": 11
+        },
+        "playable_race": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-race/7?namespace=static-forever-eu"
+          },
+          "id": 7
+        },
+        "faction": {
+          "type": "ALLIANCE"
+        }
+      },
+      "rank": 3
+    },
+    {
+      "character": {
+        "key": {
+          "href": "https://api.example/forever-eu/profile/wow/character/elowen-brackwater?namespace=profile-forever-eu"
+        },
+        "name": "Elowen",
+        "surname": "Brackwater",
+        "id": 2000009,
+        "slug": "elowen-brackwater",
+        "level": 4,
+        "playable_class": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-class/1?namespace=static-forever-eu"
+          },
+          "id": 1
+        },
+        "playable_race": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-race/95?namespace=static-forever-eu"
+          },
+          "id": 95
+        },
+        "faction": {
+          "type": "ALLIANCE"
+        }
+      },
+      "rank": 4
+    },
+    {
+      "character": {
+        "key": {
+          "href": "https://api.example/forever-eu/profile/wow/character/elowen-stonemere?namespace=profile-forever-eu"
+        },
+        "name": "Elowen",
+        "surname": "Stonemere",
+        "id": 2000010,
+        "slug": "elowen-stonemere",
+        "level": 11,
+        "playable_class": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-class/2?namespace=static-forever-eu"
+          },
+          "id": 2
+        },
+        "playable_race": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-race/1?namespace=static-forever-eu"
+          },
+          "id": 1
+        },
+        "faction": {
+          "type": "ALLIANCE"
+        }
+      },
+      "rank": 5
+    },
+    {
+      "character": {
+        "key": {
+          "href": "https://api.example/forever-eu/profile/wow/character/corwin-ashby?namespace=profile-forever-eu"
+        },
+        "name": "Corwin",
+        "surname": "Ashby",
+        "id": 2000011,
+        "slug": "corwin-ashby",
+        "level": 18,
+        "playable_class": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-class/3?namespace=static-forever-eu"
+          },
+          "id": 3
+        },
+        "playable_race": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-race/3?namespace=static-forever-eu"
+          },
+          "id": 3
+        },
+        "faction": {
+          "type": "ALLIANCE"
+        }
+      },
+      "rank": 5
+    },
+    {
+      "character": {
+        "key": {
+          "href": "https://api.example/forever-eu/profile/wow/character/corwin-fernhollow?namespace=profile-forever-eu"
+        },
+        "name": "Corwin",
+        "surname": "Fernhollow",
+        "id": 2000012,
+        "slug": "corwin-fernhollow",
+        "level": 25,
+        "playable_class": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-class/4?namespace=static-forever-eu"
+          },
+          "id": 4
+        },
+        "playable_race": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-race/4?namespace=static-forever-eu"
+          },
+          "id": 4
+        },
+        "faction": {
+          "type": "ALLIANCE"
+        }
+      },
+      "rank": 5
+    },
+    {
+      "character": {
+        "key": {
+          "href": "https://api.example/forever-eu/profile/wow/character/corwin-quillon?namespace=profile-forever-eu"
+        },
+        "name": "Corwin",
+        "surname": "Quillon",
+        "id": 2000013,
+        "slug": "corwin-quillon",
+        "level": 32,
+        "playable_class": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-class/5?namespace=static-forever-eu"
+          },
+          "id": 5
+        },
+        "playable_race": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-race/7?namespace=static-forever-eu"
+          },
+          "id": 7
+        },
+        "faction": {
+          "type": "ALLIANCE"
+        }
+      },
+      "rank": 6
+    },
+    {
+      "character": {
+        "key": {
+          "href": "https://api.example/forever-eu/profile/wow/character/corwin-brackwater?namespace=profile-forever-eu"
+        },
+        "name": "Corwin",
+        "surname": "Brackwater",
+        "id": 2000014,
+        "slug": "corwin-brackwater",
+        "level": 39,
+        "playable_class": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-class/7?namespace=static-forever-eu"
+          },
+          "id": 7
+        },
+        "playable_race": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-race/95?namespace=static-forever-eu"
+          },
+          "id": 95
+        },
+        "faction": {
+          "type": "ALLIANCE"
+        }
+      },
+      "rank": 1
+    },
+    {
+      "character": {
+        "key": {
+          "href": "https://api.example/forever-eu/profile/wow/character/corwin-stonemere?namespace=profile-forever-eu"
+        },
+        "name": "Corwin",
+        "surname": "Stonemere",
+        "id": 2000015,
+        "slug": "corwin-stonemere",
+        "level": 46,
+        "playable_class": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-class/8?namespace=static-forever-eu"
+          },
+          "id": 8
+        },
+        "playable_race": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-race/1?namespace=static-forever-eu"
+          },
+          "id": 1
+        },
+        "faction": {
+          "type": "ALLIANCE"
+        }
+      },
+      "rank": 3
+    },
+    {
+      "character": {
+        "key": {
+          "href": "https://api.example/forever-eu/profile/wow/character/dagny-ashby?namespace=profile-forever-eu"
+        },
+        "name": "Dagny",
+        "surname": "Ashby",
+        "id": 2000016,
+        "slug": "dagny-ashby",
+        "level": 53,
+        "playable_class": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-class/9?namespace=static-forever-eu"
+          },
+          "id": 9
+        },
+        "playable_race": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-race/3?namespace=static-forever-eu"
+          },
+          "id": 3
+        },
+        "faction": {
+          "type": "ALLIANCE"
+        }
+      },
+      "rank": 4
+    },
+    {
+      "character": {
+        "key": {
+          "href": "https://api.example/forever-eu/profile/wow/character/dagny-fernhollow?namespace=profile-forever-eu"
+        },
+        "name": "Dagny",
+        "surname": "Fernhollow",
+        "id": 2000017,
+        "slug": "dagny-fernhollow",
+        "level": 60,
+        "playable_class": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-class/11?namespace=static-forever-eu"
+          },
+          "id": 11
+        },
+        "playable_race": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-race/4?namespace=static-forever-eu"
+          },
+          "id": 4
+        },
+        "faction": {
+          "type": "ALLIANCE"
+        }
+      },
+      "rank": 5
+    },
+    {
+      "character": {
+        "key": {
+          "href": "https://api.example/forever-eu/profile/wow/character/dagny-quillon?namespace=profile-forever-eu"
+        },
+        "name": "Dagny",
+        "surname": "Quillon",
+        "id": 2000018,
+        "slug": "dagny-quillon",
+        "level": 7,
+        "playable_class": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-class/1?namespace=static-forever-eu"
+          },
+          "id": 1
+        },
+        "playable_race": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-race/7?namespace=static-forever-eu"
+          },
+          "id": 7
+        },
+        "faction": {
+          "type": "ALLIANCE"
+        }
+      },
+      "rank": 5
+    },
+    {
+      "character": {
+        "key": {
+          "href": "https://api.example/forever-eu/profile/wow/character/dagny-brackwater?namespace=profile-forever-eu"
+        },
+        "name": "Dagny",
+        "surname": "Brackwater",
+        "id": 2000019,
+        "slug": "dagny-brackwater",
+        "level": 14,
+        "playable_class": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-class/2?namespace=static-forever-eu"
+          },
+          "id": 2
+        },
+        "playable_race": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-race/95?namespace=static-forever-eu"
+          },
+          "id": 95
+        },
+        "faction": {
+          "type": "ALLIANCE"
+        }
+      },
+      "rank": 5
+    },
+    {
+      "character": {
+        "key": {
+          "href": "https://api.example/forever-eu/profile/wow/character/dagny-stonemere?namespace=profile-forever-eu"
+        },
+        "name": "Dagny",
+        "surname": "Stonemere",
+        "id": 2000020,
+        "slug": "dagny-stonemere",
+        "level": 21,
+        "playable_class": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-class/3?namespace=static-forever-eu"
+          },
+          "id": 3
+        },
+        "playable_race": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-race/1?namespace=static-forever-eu"
+          },
+          "id": 1
+        },
+        "faction": {
+          "type": "ALLIANCE"
+        }
+      },
+      "rank": 6
+    },
+    {
+      "character": {
+        "key": {
+          "href": "https://api.example/forever-eu/profile/wow/character/ysolde-ashby?namespace=profile-forever-eu"
+        },
+        "name": "Ysolde",
+        "surname": "Ashby",
+        "id": 2000021,
+        "slug": "ysolde-ashby",
+        "level": 28,
+        "playable_class": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-class/4?namespace=static-forever-eu"
+          },
+          "id": 4
+        },
+        "playable_race": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-race/3?namespace=static-forever-eu"
+          },
+          "id": 3
+        },
+        "faction": {
+          "type": "ALLIANCE"
+        }
+      },
+      "rank": 1
+    },
+    {
+      "character": {
+        "key": {
+          "href": "https://api.example/forever-eu/profile/wow/character/ysolde-fernhollow?namespace=profile-forever-eu"
+        },
+        "name": "Ysolde",
+        "surname": "Fernhollow",
+        "id": 2000022,
+        "slug": "ysolde-fernhollow",
+        "level": 35,
+        "playable_class": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-class/5?namespace=static-forever-eu"
+          },
+          "id": 5
+        },
+        "playable_race": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-race/4?namespace=static-forever-eu"
+          },
+          "id": 4
+        },
+        "faction": {
+          "type": "ALLIANCE"
+        }
+      },
+      "rank": 3
+    },
+    {
+      "character": {
+        "key": {
+          "href": "https://api.example/forever-eu/profile/wow/character/ysolde-quillon?namespace=profile-forever-eu"
+        },
+        "name": "Ysolde",
+        "surname": "Quillon",
+        "id": 2000023,
+        "slug": "ysolde-quillon",
+        "level": 42,
+        "playable_class": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-class/7?namespace=static-forever-eu"
+          },
+          "id": 7
+        },
+        "playable_race": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-race/7?namespace=static-forever-eu"
+          },
+          "id": 7
+        },
+        "faction": {
+          "type": "ALLIANCE"
+        }
+      },
+      "rank": 4
+    },
+    {
+      "character": {
+        "key": {
+          "href": "https://api.example/forever-eu/profile/wow/character/ysolde-brackwater?namespace=profile-forever-eu"
+        },
+        "name": "Ysolde",
+        "surname": "Brackwater",
+        "id": 2000024,
+        "slug": "ysolde-brackwater",
+        "level": 49,
+        "playable_class": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-class/8?namespace=static-forever-eu"
+          },
+          "id": 8
+        },
+        "playable_race": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-race/95?namespace=static-forever-eu"
+          },
+          "id": 95
+        },
+        "faction": {
+          "type": "ALLIANCE"
+        }
+      },
+      "rank": 5
+    },
+    {
+      "character": {
+        "key": {
+          "href": "https://api.example/forever-eu/profile/wow/character/ysolde-stonemere?namespace=profile-forever-eu"
+        },
+        "name": "Ysolde",
+        "surname": "Stonemere",
+        "id": 2000025,
+        "slug": "ysolde-stonemere",
+        "level": 56,
+        "playable_class": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-class/9?namespace=static-forever-eu"
+          },
+          "id": 9
+        },
+        "playable_race": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-race/1?namespace=static-forever-eu"
+          },
+          "id": 1
+        },
+        "faction": {
+          "type": "ALLIANCE"
+        }
+      },
+      "rank": 5
+    },
+    {
+      "character": {
+        "key": {
+          "href": "https://api.example/forever-eu/profile/wow/character/torvin-ashby?namespace=profile-forever-eu"
+        },
+        "name": "Torvin",
+        "surname": "Ashby",
+        "id": 2000026,
+        "slug": "torvin-ashby",
+        "level": 3,
+        "playable_class": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-class/11?namespace=static-forever-eu"
+          },
+          "id": 11
+        },
+        "playable_race": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-race/3?namespace=static-forever-eu"
+          },
+          "id": 3
+        },
+        "faction": {
+          "type": "ALLIANCE"
+        }
+      },
+      "rank": 5
+    },
+    {
+      "character": {
+        "key": {
+          "href": "https://api.example/forever-eu/profile/wow/character/torvin-fernhollow?namespace=profile-forever-eu"
+        },
+        "name": "Torvin",
+        "surname": "Fernhollow",
+        "id": 2000027,
+        "slug": "torvin-fernhollow",
+        "level": 10,
+        "playable_class": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-class/1?namespace=static-forever-eu"
+          },
+          "id": 1
+        },
+        "playable_race": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-race/4?namespace=static-forever-eu"
+          },
+          "id": 4
+        },
+        "faction": {
+          "type": "ALLIANCE"
+        }
+      },
+      "rank": 6
+    },
+    {
+      "character": {
+        "key": {
+          "href": "https://api.example/forever-eu/profile/wow/character/torvin-quillon?namespace=profile-forever-eu"
+        },
+        "name": "Torvin",
+        "surname": "Quillon",
+        "id": 2000028,
+        "slug": "torvin-quillon",
+        "level": 17,
+        "playable_class": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-class/2?namespace=static-forever-eu"
+          },
+          "id": 2
+        },
+        "playable_race": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-race/7?namespace=static-forever-eu"
+          },
+          "id": 7
+        },
+        "faction": {
+          "type": "ALLIANCE"
+        }
+      },
+      "rank": 1
+    },
+    {
+      "character": {
+        "key": {
+          "href": "https://api.example/forever-eu/profile/wow/character/torvin-brackwater?namespace=profile-forever-eu"
+        },
+        "name": "Torvin",
+        "surname": "Brackwater",
+        "id": 2000029,
+        "slug": "torvin-brackwater",
+        "level": 24,
+        "playable_class": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-class/3?namespace=static-forever-eu"
+          },
+          "id": 3
+        },
+        "playable_race": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-race/95?namespace=static-forever-eu"
+          },
+          "id": 95
+        },
+        "faction": {
+          "type": "ALLIANCE"
+        }
+      },
+      "rank": 3
+    },
+    {
+      "character": {
+        "key": {
+          "href": "https://api.example/forever-eu/profile/wow/character/torvin-stonemere?namespace=profile-forever-eu"
+        },
+        "name": "Torvin",
+        "surname": "Stonemere",
+        "id": 2000030,
+        "slug": "torvin-stonemere",
+        "level": 31,
+        "playable_class": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-class/4?namespace=static-forever-eu"
+          },
+          "id": 4
+        },
+        "playable_race": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-race/1?namespace=static-forever-eu"
+          },
+          "id": 1
+        },
+        "faction": {
+          "type": "ALLIANCE"
+        }
+      },
+      "rank": 4
+    },
+    {
+      "character": {
+        "key": {
+          "href": "https://api.example/forever-eu/profile/wow/character/maelis-ashby?namespace=profile-forever-eu"
+        },
+        "name": "Maelis",
+        "surname": "Ashby",
+        "id": 2000031,
+        "slug": "maelis-ashby",
+        "level": 38,
+        "playable_class": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-class/5?namespace=static-forever-eu"
+          },
+          "id": 5
+        },
+        "playable_race": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-race/3?namespace=static-forever-eu"
+          },
+          "id": 3
+        },
+        "faction": {
+          "type": "ALLIANCE"
+        }
+      },
+      "rank": 5
+    },
+    {
+      "character": {
+        "key": {
+          "href": "https://api.example/forever-eu/profile/wow/character/maelis-fernhollow?namespace=profile-forever-eu"
+        },
+        "name": "Maelis",
+        "surname": "Fernhollow",
+        "id": 2000032,
+        "slug": "maelis-fernhollow",
+        "level": 45,
+        "playable_class": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-class/7?namespace=static-forever-eu"
+          },
+          "id": 7
+        },
+        "playable_race": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-race/4?namespace=static-forever-eu"
+          },
+          "id": 4
+        },
+        "faction": {
+          "type": "ALLIANCE"
+        }
+      },
+      "rank": 5
+    },
+    {
+      "character": {
+        "key": {
+          "href": "https://api.example/forever-eu/profile/wow/character/maelis-quillon?namespace=profile-forever-eu"
+        },
+        "name": "Maelis",
+        "surname": "Quillon",
+        "id": 2000033,
+        "slug": "maelis-quillon",
+        "level": 52,
+        "playable_class": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-class/8?namespace=static-forever-eu"
+          },
+          "id": 8
+        },
+        "playable_race": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-race/7?namespace=static-forever-eu"
+          },
+          "id": 7
+        },
+        "faction": {
+          "type": "ALLIANCE"
+        }
+      },
+      "rank": 5
+    },
+    {
+      "character": {
+        "key": {
+          "href": "https://api.example/forever-eu/profile/wow/character/maelis-brackwater?namespace=profile-forever-eu"
+        },
+        "name": "Maelis",
+        "surname": "Brackwater",
+        "id": 2000034,
+        "slug": "maelis-brackwater",
+        "level": 59,
+        "playable_class": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-class/9?namespace=static-forever-eu"
+          },
+          "id": 9
+        },
+        "playable_race": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-race/95?namespace=static-forever-eu"
+          },
+          "id": 95
+        },
+        "faction": {
+          "type": "ALLIANCE"
+        }
+      },
+      "rank": 6
+    },
+    {
+      "character": {
+        "key": {
+          "href": "https://api.example/forever-eu/profile/wow/character/maelis-stonemere?namespace=profile-forever-eu"
+        },
+        "name": "Maelis",
+        "surname": "Stonemere",
+        "id": 2000035,
+        "slug": "maelis-stonemere",
+        "level": 6,
+        "playable_class": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-class/11?namespace=static-forever-eu"
+          },
+          "id": 11
+        },
+        "playable_race": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-race/1?namespace=static-forever-eu"
+          },
+          "id": 1
+        },
+        "faction": {
+          "type": "ALLIANCE"
+        }
+      },
+      "rank": 1
+    },
+    {
+      "character": {
+        "key": {
+          "href": "https://api.example/forever-eu/profile/wow/character/gorrik-ashby?namespace=profile-forever-eu"
+        },
+        "name": "Gorrik",
+        "surname": "Ashby",
+        "id": 2000036,
+        "slug": "gorrik-ashby",
+        "level": 13,
+        "playable_class": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-class/1?namespace=static-forever-eu"
+          },
+          "id": 1
+        },
+        "playable_race": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-race/3?namespace=static-forever-eu"
+          },
+          "id": 3
+        },
+        "faction": {
+          "type": "ALLIANCE"
+        }
+      },
+      "rank": 3
+    },
+    {
+      "character": {
+        "key": {
+          "href": "https://api.example/forever-eu/profile/wow/character/gorrik-fernhollow?namespace=profile-forever-eu"
+        },
+        "name": "Gorrik",
+        "surname": "Fernhollow",
+        "id": 2000037,
+        "slug": "gorrik-fernhollow",
+        "level": 20,
+        "playable_class": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-class/2?namespace=static-forever-eu"
+          },
+          "id": 2
+        },
+        "playable_race": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-race/4?namespace=static-forever-eu"
+          },
+          "id": 4
+        },
+        "faction": {
+          "type": "ALLIANCE"
+        }
+      },
+      "rank": 4
+    },
+    {
+      "character": {
+        "key": {
+          "href": "https://api.example/forever-eu/profile/wow/character/gorrik-quillon?namespace=profile-forever-eu"
+        },
+        "name": "Gorrik",
+        "surname": "Quillon",
+        "id": 2000038,
+        "slug": "gorrik-quillon",
+        "level": 27,
+        "playable_class": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-class/3?namespace=static-forever-eu"
+          },
+          "id": 3
+        },
+        "playable_race": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-race/7?namespace=static-forever-eu"
+          },
+          "id": 7
+        },
+        "faction": {
+          "type": "ALLIANCE"
+        }
+      },
+      "rank": 5
+    },
+    {
+      "character": {
+        "key": {
+          "href": "https://api.example/forever-eu/profile/wow/character/gorrik-brackwater?namespace=profile-forever-eu"
+        },
+        "name": "Gorrik",
+        "surname": "Brackwater",
+        "id": 2000039,
+        "slug": "gorrik-brackwater",
+        "level": 34,
+        "playable_class": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-class/4?namespace=static-forever-eu"
+          },
+          "id": 4
+        },
+        "playable_race": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-race/95?namespace=static-forever-eu"
+          },
+          "id": 95
+        },
+        "faction": {
+          "type": "ALLIANCE"
+        }
+      },
+      "rank": 5
+    },
+    {
+      "character": {
+        "key": {
+          "href": "https://api.example/forever-eu/profile/wow/character/gorrik-stonemere?namespace=profile-forever-eu"
+        },
+        "name": "Gorrik",
+        "surname": "Stonemere",
+        "id": 2000040,
+        "slug": "gorrik-stonemere",
+        "level": 41,
+        "playable_class": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-class/5?namespace=static-forever-eu"
+          },
+          "id": 5
+        },
+        "playable_race": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-race/1?namespace=static-forever-eu"
+          },
+          "id": 1
+        },
+        "faction": {
+          "type": "ALLIANCE"
+        }
+      },
+      "rank": 5
+    },
+    {
+      "character": {
+        "key": {
+          "href": "https://api.example/forever-eu/profile/wow/character/sabeth-ashby?namespace=profile-forever-eu"
+        },
+        "name": "Sabeth",
+        "surname": "Ashby",
+        "id": 2000041,
+        "slug": "sabeth-ashby",
+        "level": 48,
+        "playable_class": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-class/7?namespace=static-forever-eu"
+          },
+          "id": 7
+        },
+        "playable_race": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-race/3?namespace=static-forever-eu"
+          },
+          "id": 3
+        },
+        "faction": {
+          "type": "ALLIANCE"
+        }
+      },
+      "rank": 6
+    },
+    {
+      "character": {
+        "key": {
+          "href": "https://api.example/forever-eu/profile/wow/character/sabeth-fernhollow?namespace=profile-forever-eu"
+        },
+        "name": "Sabeth",
+        "surname": "Fernhollow",
+        "id": 2000042,
+        "slug": "sabeth-fernhollow",
+        "level": 55,
+        "playable_class": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-class/8?namespace=static-forever-eu"
+          },
+          "id": 8
+        },
+        "playable_race": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-race/4?namespace=static-forever-eu"
+          },
+          "id": 4
+        },
+        "faction": {
+          "type": "ALLIANCE"
+        }
+      },
+      "rank": 1
+    },
+    {
+      "character": {
+        "key": {
+          "href": "https://api.example/forever-eu/profile/wow/character/sabeth-quillon?namespace=profile-forever-eu"
+        },
+        "name": "Sabeth",
+        "surname": "Quillon",
+        "id": 2000043,
+        "slug": "sabeth-quillon",
+        "level": 2,
+        "playable_class": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-class/9?namespace=static-forever-eu"
+          },
+          "id": 9
+        },
+        "playable_race": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-race/7?namespace=static-forever-eu"
+          },
+          "id": 7
+        },
+        "faction": {
+          "type": "ALLIANCE"
+        }
+      },
+      "rank": 3
+    },
+    {
+      "character": {
+        "key": {
+          "href": "https://api.example/forever-eu/profile/wow/character/sabeth-brackwater?namespace=profile-forever-eu"
+        },
+        "name": "Sabeth",
+        "surname": "Brackwater",
+        "id": 2000044,
+        "slug": "sabeth-brackwater",
+        "level": 9,
+        "playable_class": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-class/11?namespace=static-forever-eu"
+          },
+          "id": 11
+        },
+        "playable_race": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-race/95?namespace=static-forever-eu"
+          },
+          "id": 95
+        },
+        "faction": {
+          "type": "ALLIANCE"
+        }
+      },
+      "rank": 4
+    },
+    {
+      "character": {
+        "key": {
+          "href": "https://api.example/forever-eu/profile/wow/character/sabeth-stonemere?namespace=profile-forever-eu"
+        },
+        "name": "Sabeth",
+        "surname": "Stonemere",
+        "id": 2000045,
+        "slug": "sabeth-stonemere",
+        "level": 16,
+        "playable_class": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-class/1?namespace=static-forever-eu"
+          },
+          "id": 1
+        },
+        "playable_race": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-race/1?namespace=static-forever-eu"
+          },
+          "id": 1
+        },
+        "faction": {
+          "type": "ALLIANCE"
+        }
+      },
+      "rank": 5
+    },
+    {
+      "character": {
+        "key": {
+          "href": "https://api.example/forever-eu/profile/wow/character/fenwick-ashby?namespace=profile-forever-eu"
+        },
+        "name": "Fenwick",
+        "surname": "Ashby",
+        "id": 2000046,
+        "slug": "fenwick-ashby",
+        "level": 23,
+        "playable_class": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-class/2?namespace=static-forever-eu"
+          },
+          "id": 2
+        },
+        "playable_race": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-race/3?namespace=static-forever-eu"
+          },
+          "id": 3
+        },
+        "faction": {
+          "type": "ALLIANCE"
+        }
+      },
+      "rank": 5
+    },
+    {
+      "character": {
+        "key": {
+          "href": "https://api.example/forever-eu/profile/wow/character/fenwick-fernhollow?namespace=profile-forever-eu"
+        },
+        "name": "Fenwick",
+        "surname": "Fernhollow",
+        "id": 2000047,
+        "slug": "fenwick-fernhollow",
+        "level": 30,
+        "playable_class": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-class/3?namespace=static-forever-eu"
+          },
+          "id": 3
+        },
+        "playable_race": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-race/4?namespace=static-forever-eu"
+          },
+          "id": 4
+        },
+        "faction": {
+          "type": "ALLIANCE"
+        }
+      },
+      "rank": 5
+    },
+    {
+      "character": {
+        "key": {
+          "href": "https://api.example/forever-eu/profile/wow/character/fenwick-quillon?namespace=profile-forever-eu"
+        },
+        "name": "Fenwick",
+        "surname": "Quillon",
+        "id": 2000048,
+        "slug": "fenwick-quillon",
+        "level": 37,
+        "playable_class": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-class/4?namespace=static-forever-eu"
+          },
+          "id": 4
+        },
+        "playable_race": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-race/7?namespace=static-forever-eu"
+          },
+          "id": 7
+        },
+        "faction": {
+          "type": "ALLIANCE"
+        }
+      },
+      "rank": 6
+    },
+    {
+      "character": {
+        "key": {
+          "href": "https://api.example/forever-eu/profile/wow/character/fenwick-brackwater?namespace=profile-forever-eu"
+        },
+        "name": "Fenwick",
+        "surname": "Brackwater",
+        "id": 2000049,
+        "slug": "fenwick-brackwater",
+        "level": 44,
+        "playable_class": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-class/5?namespace=static-forever-eu"
+          },
+          "id": 5
+        },
+        "playable_race": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-race/95?namespace=static-forever-eu"
+          },
+          "id": 95
+        },
+        "faction": {
+          "type": "ALLIANCE"
+        }
+      },
+      "rank": 1
+    },
+    {
+      "character": {
+        "key": {
+          "href": "https://api.example/forever-eu/profile/wow/character/fenwick-stonemere?namespace=profile-forever-eu"
+        },
+        "name": "Fenwick",
+        "surname": "Stonemere",
+        "id": 2000050,
+        "slug": "fenwick-stonemere",
+        "level": 51,
+        "playable_class": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-class/7?namespace=static-forever-eu"
+          },
+          "id": 7
+        },
+        "playable_race": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-race/1?namespace=static-forever-eu"
+          },
+          "id": 1
+        },
+        "faction": {
+          "type": "ALLIANCE"
+        }
+      },
+      "rank": 3
+    },
+    {
+      "character": {
+        "key": {
+          "href": "https://api.example/forever-eu/profile/wow/character/isolde-ashby?namespace=profile-forever-eu"
+        },
+        "name": "Isolde",
+        "surname": "Ashby",
+        "id": 2000051,
+        "slug": "isolde-ashby",
+        "level": 58,
+        "playable_class": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-class/8?namespace=static-forever-eu"
+          },
+          "id": 8
+        },
+        "playable_race": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-race/3?namespace=static-forever-eu"
+          },
+          "id": 3
+        },
+        "faction": {
+          "type": "ALLIANCE"
+        }
+      },
+      "rank": 4
+    },
+    {
+      "character": {
+        "key": {
+          "href": "https://api.example/forever-eu/profile/wow/character/isolde-fernhollow?namespace=profile-forever-eu"
+        },
+        "name": "Isolde",
+        "surname": "Fernhollow",
+        "id": 2000052,
+        "slug": "isolde-fernhollow",
+        "level": 5,
+        "playable_class": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-class/9?namespace=static-forever-eu"
+          },
+          "id": 9
+        },
+        "playable_race": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-race/4?namespace=static-forever-eu"
+          },
+          "id": 4
+        },
+        "faction": {
+          "type": "ALLIANCE"
+        }
+      },
+      "rank": 5
+    },
+    {
+      "character": {
+        "key": {
+          "href": "https://api.example/forever-eu/profile/wow/character/isolde-quillon?namespace=profile-forever-eu"
+        },
+        "name": "Isolde",
+        "surname": "Quillon",
+        "id": 2000053,
+        "slug": "isolde-quillon",
+        "level": 12,
+        "playable_class": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-class/11?namespace=static-forever-eu"
+          },
+          "id": 11
+        },
+        "playable_race": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-race/7?namespace=static-forever-eu"
+          },
+          "id": 7
+        },
+        "faction": {
+          "type": "ALLIANCE"
+        }
+      },
+      "rank": 5
+    },
+    {
+      "character": {
+        "key": {
+          "href": "https://api.example/forever-eu/profile/wow/character/isolde-brackwater?namespace=profile-forever-eu"
+        },
+        "name": "Isolde",
+        "surname": "Brackwater",
+        "id": 2000054,
+        "slug": "isolde-brackwater",
+        "level": 19,
+        "playable_class": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-class/1?namespace=static-forever-eu"
+          },
+          "id": 1
+        },
+        "playable_race": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-race/95?namespace=static-forever-eu"
+          },
+          "id": 95
+        },
+        "faction": {
+          "type": "ALLIANCE"
+        }
+      },
+      "rank": 5
+    },
+    {
+      "character": {
+        "key": {
+          "href": "https://api.example/forever-eu/profile/wow/character/isolde-stonemere?namespace=profile-forever-eu"
+        },
+        "name": "Isolde",
+        "surname": "Stonemere",
+        "id": 2000055,
+        "slug": "isolde-stonemere",
+        "level": 26,
+        "playable_class": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-class/2?namespace=static-forever-eu"
+          },
+          "id": 2
+        },
+        "playable_race": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-race/1?namespace=static-forever-eu"
+          },
+          "id": 1
+        },
+        "faction": {
+          "type": "ALLIANCE"
+        }
+      },
+      "rank": 6
+    },
+    {
+      "character": {
+        "key": {
+          "href": "https://api.example/forever-eu/profile/wow/character/harrow-ashby?namespace=profile-forever-eu"
+        },
+        "name": "Harrow",
+        "surname": "Ashby",
+        "id": 2000056,
+        "slug": "harrow-ashby",
+        "level": 33,
+        "playable_class": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-class/3?namespace=static-forever-eu"
+          },
+          "id": 3
+        },
+        "playable_race": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-race/3?namespace=static-forever-eu"
+          },
+          "id": 3
+        },
+        "faction": {
+          "type": "ALLIANCE"
+        }
+      },
+      "rank": 1
+    },
+    {
+      "character": {
+        "key": {
+          "href": "https://api.example/forever-eu/profile/wow/character/harrow-fernhollow?namespace=profile-forever-eu"
+        },
+        "name": "Harrow",
+        "surname": "Fernhollow",
+        "id": 2000057,
+        "slug": "harrow-fernhollow",
+        "level": 40,
+        "playable_class": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-class/4?namespace=static-forever-eu"
+          },
+          "id": 4
+        },
+        "playable_race": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-race/4?namespace=static-forever-eu"
+          },
+          "id": 4
+        },
+        "faction": {
+          "type": "ALLIANCE"
+        }
+      },
+      "rank": 3
+    },
+    {
+      "character": {
+        "key": {
+          "href": "https://api.example/forever-eu/profile/wow/character/harrow-quillon?namespace=profile-forever-eu"
+        },
+        "name": "Harrow",
+        "surname": "Quillon",
+        "id": 2000058,
+        "slug": "harrow-quillon",
+        "level": 47,
+        "playable_class": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-class/5?namespace=static-forever-eu"
+          },
+          "id": 5
+        },
+        "playable_race": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-race/7?namespace=static-forever-eu"
+          },
+          "id": 7
+        },
+        "faction": {
+          "type": "ALLIANCE"
+        }
+      },
+      "rank": 4
+    },
+    {
+      "character": {
+        "key": {
+          "href": "https://api.example/forever-eu/profile/wow/character/harrow-brackwater?namespace=profile-forever-eu"
+        },
+        "name": "Harrow",
+        "surname": "Brackwater",
+        "id": 2000059,
+        "slug": "harrow-brackwater",
+        "level": 54,
+        "playable_class": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-class/7?namespace=static-forever-eu"
+          },
+          "id": 7
+        },
+        "playable_race": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-race/95?namespace=static-forever-eu"
+          },
+          "id": 95
+        },
+        "faction": {
+          "type": "ALLIANCE"
+        }
+      },
+      "rank": 5
+    },
+    {
+      "character": {
+        "key": {
+          "href": "https://api.example/forever-eu/profile/wow/character/harrow-stonemere?namespace=profile-forever-eu"
+        },
+        "name": "Harrow",
+        "surname": "Stonemere",
+        "id": 2000060,
+        "slug": "harrow-stonemere",
+        "level": 1,
+        "playable_class": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-class/8?namespace=static-forever-eu"
+          },
+          "id": 8
+        },
+        "playable_race": {
+          "key": {
+            "href": "https://api.example/forever-eu/data/wow/playable-race/1?namespace=static-forever-eu"
+          },
+          "id": 1
+        },
+        "faction": {
+          "type": "ALLIANCE"
+        }
+      },
+      "rank": 5
+    }
+  ]
+}

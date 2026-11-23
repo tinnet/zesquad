@@ -13,6 +13,7 @@ use zesquad_core::access::{Role, Visibility};
 use zesquad_core::armory::{Documents, Endpoint, Profile};
 use zesquad_core::auctions;
 use zesquad_core::discord::Webhook;
+use zesquad_core::guild::{self, Guild, Member as GuildMember, Slug};
 use zesquad_core::refresh::{Status, is_due};
 use zesquad_core::tags::Colour;
 use zesquad_core::{CharacterName, Region, SquadName, Tag};
@@ -877,18 +878,27 @@ pub struct Armory {
     pub answered: bool,
 }
 
-/// Parsed Armory documents by character, with the `fetched_at` and status they were parsed
-/// for, so a roster render (every 3s while polling) only reads and parses documents stored
-/// since the last one. One entry per character ever shown; a character is a few KB parsed.
-#[derive(Default)]
-pub struct ArmoryCache(Mutex<HashMap<(String, String), (Version, Armory)>>);
+/// Parsed documents by `(region, key)`, with the `fetched_at` and status they were parsed
+/// for, so a render (every 3s while polling) only reads and parses documents stored since the
+/// last one.
+pub struct Cache<T>(Mutex<HashMap<(String, String), (Version, T)>>);
+
+impl<T> Default for Cache<T> {
+    fn default() -> Self {
+        Self(Mutex::default())
+    }
+}
+
+/// Parsed Armory documents by character. One entry per character ever shown; a character is
+/// a few KB parsed.
+pub type ArmoryCache = Cache<Armory>;
 
 /// `fetched_at` is in seconds; the status tells apart two fetches in the same second that
 /// stored different results (found, then not found).
 type Version = (i64, Option<String>);
 
-impl ArmoryCache {
-    fn get(&self, key: &(String, String), version: &Version) -> Option<Armory> {
+impl<T: Clone> Cache<T> {
+    fn get(&self, key: &(String, String), version: &Version) -> Option<T> {
         let cache = self
             .0
             .lock()
@@ -899,12 +909,12 @@ impl ArmoryCache {
             .map(|(_, armory)| armory.clone())
     }
 
-    fn put(&self, key: (String, String), version: Version, armory: Armory) {
+    fn put(&self, key: (String, String), version: Version, value: T) {
         let mut cache = self
             .0
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        cache.insert(key, (version, armory));
+        cache.insert(key, (version, value));
     }
 }
 
@@ -1083,9 +1093,9 @@ pub async fn due(
         .collect())
 }
 
-/// The outcome of fetching one character.
-pub enum Fetched {
-    Found(Vec<(Endpoint, Value)>),
+/// The outcome of fetching one character (or, with guild endpoints, one guild).
+pub enum Fetched<E = Endpoint> {
+    Found(Vec<(E, Value)>),
     NotFound,
     Failed(String),
 }
@@ -1133,6 +1143,216 @@ pub async fn store(
                 .bind(body.to_string())
                 .execute(&mut *tx)
                 .await?;
+        }
+    }
+    tx.commit().await?;
+    Ok(())
+}
+
+// ---- guilds ----
+
+/// A guild page's guild: where its fetching stands and what its documents say.
+#[derive(Debug, Clone)]
+pub struct GuildPage {
+    pub status: Status,
+    pub fetched_at: Option<i64>,
+    pub data: Arc<GuildData>,
+}
+
+/// What a guild's stored documents add up to. Parsed once per fetch; a big roster is a few
+/// hundred KB.
+#[derive(Debug, Default)]
+pub struct GuildData {
+    pub guild: Guild,
+    pub members: Vec<GuildMember>,
+    /// The Armory has answered for this guild (kept through a failed refresh).
+    pub answered: bool,
+}
+
+/// Parsed guild documents by guild.
+pub type GuildCache = Cache<Arc<GuildData>>;
+
+/// A guild as stored, if anyone opened its page before.
+///
+/// # Errors
+///
+/// On database errors.
+pub async fn guild(
+    db: &SqlitePool,
+    cache: &GuildCache,
+    region: Region,
+    slug: &Slug,
+) -> anyhow::Result<Option<GuildPage>> {
+    let row: Option<(String, Option<i64>)> =
+        sqlx::query_as("SELECT status, fetched_at FROM guilds WHERE region = ? AND slug = ?")
+            .bind(region.as_str())
+            .bind(slug.as_str())
+            .fetch_optional(db)
+            .await?;
+    let Some((status, fetched_at)) = row else {
+        return Ok(None);
+    };
+    let data = match fetched_at {
+        None => Arc::default(),
+        Some(at) => {
+            let key = (region.as_str().to_owned(), slug.as_str().to_owned());
+            let version = (at, Some(status.clone()));
+            if let Some(data) = cache.get(&key, &version) {
+                data
+            } else {
+                let data = Arc::new(load_guild(db, region, slug).await?);
+                cache.put(key, version, data.clone());
+                data
+            }
+        }
+    };
+    Ok(Some(GuildPage {
+        status: Status::parse(&status),
+        fetched_at,
+        data,
+    }))
+}
+
+/// Reads and parses a guild's stored documents. The roster is parsed off the async threads:
+/// a big one is most of a megabyte.
+async fn load_guild(db: &SqlitePool, region: Region, slug: &Slug) -> anyhow::Result<GuildData> {
+    let rows: Vec<(String, String)> =
+        sqlx::query_as("SELECT endpoint, body FROM guild_documents WHERE region = ? AND slug = ?")
+            .bind(region.as_str())
+            .bind(slug.as_str())
+            .fetch_all(db)
+            .await?;
+    let data = tokio::task::spawn_blocking(move || {
+        let mut data = GuildData::default();
+        for (endpoint, body) in rows {
+            let Ok(doc) = serde_json::from_str::<Value>(&body) else {
+                continue;
+            };
+            match guild::Endpoint::parse(&endpoint) {
+                Some(guild::Endpoint::Guild) => {
+                    data.guild = Guild::parse(&doc);
+                    data.answered = true;
+                }
+                Some(guild::Endpoint::Roster) => data.members = guild::roster(&doc),
+                None => {}
+            }
+        }
+        data
+    })
+    .await?;
+    Ok(data)
+}
+
+/// Starts following a guild: its first fetch is due at once. `false` when it was already
+/// followed.
+///
+/// # Errors
+///
+/// On database errors.
+pub async fn add_guild(db: &SqlitePool, region: Region, slug: &Slug) -> anyhow::Result<bool> {
+    let added = sqlx::query(
+        "INSERT INTO guilds (region, slug, viewed_at) VALUES (?, ?, ?) ON CONFLICT DO NOTHING",
+    )
+    .bind(region.as_str())
+    .bind(slug.as_str())
+    .bind(now())
+    .execute(db)
+    .await?;
+    Ok(added.rows_affected() > 0)
+}
+
+/// Notes that someone opened the guild's page, which keeps it refreshed. Written at most
+/// hourly, so polling and paging don't write on every request.
+///
+/// # Errors
+///
+/// On database errors.
+pub async fn viewed_guild(db: &SqlitePool, region: Region, slug: &Slug) -> anyhow::Result<()> {
+    let now = now();
+    sqlx::query("UPDATE guilds SET viewed_at = ? WHERE region = ? AND slug = ? AND viewed_at <= ?")
+        .bind(now)
+        .bind(region.as_str())
+        .bind(slug.as_str())
+        .bind(now - 3600)
+        .execute(db)
+        .await?;
+    Ok(())
+}
+
+/// Guilds whose documents are due, among those viewed since `viewed_since`, oldest first.
+///
+/// # Errors
+///
+/// On database errors.
+pub async fn due_guilds(
+    db: &SqlitePool,
+    now: i64,
+    interval_secs: i64,
+    viewed_since: i64,
+) -> anyhow::Result<Vec<(Region, Slug)>> {
+    let rows: Vec<(String, String, String, Option<i64>)> = sqlx::query_as(
+        "SELECT region, slug, status, fetched_at FROM guilds WHERE viewed_at >= ?
+         ORDER BY fetched_at IS NOT NULL, fetched_at",
+    )
+    .bind(viewed_since)
+    .fetch_all(db)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .filter(|(_, _, status, fetched_at)| {
+            is_due(Status::parse(status), *fetched_at, now, interval_secs)
+        })
+        .filter_map(|(region, slug, _, _)| {
+            Some((Region::try_from(region).ok()?, Slug::parse(&slug).ok()?))
+        })
+        .collect())
+}
+
+/// Records a guild fetch. A failure keeps the documents from the last good fetch.
+///
+/// # Errors
+///
+/// On database errors.
+pub async fn store_guild(
+    db: &SqlitePool,
+    region: Region,
+    slug: &Slug,
+    fetched: Fetched<guild::Endpoint>,
+) -> anyhow::Result<()> {
+    let mut tx = begin_write(db).await?;
+    let (status, error) = match &fetched {
+        Fetched::Found(_) => (Status::Found, None),
+        Fetched::NotFound => (Status::NotFound, None),
+        Fetched::Failed(e) => (Status::Failed, Some(e.as_str())),
+    };
+    sqlx::query(
+        "UPDATE guilds SET status = ?, fetched_at = ?, error = ? WHERE region = ? AND slug = ?",
+    )
+    .bind(status.as_str())
+    .bind(now())
+    .bind(error)
+    .bind(region.as_str())
+    .bind(slug.as_str())
+    .execute(&mut *tx)
+    .await?;
+    if !matches!(fetched, Fetched::Failed(_)) {
+        sqlx::query("DELETE FROM guild_documents WHERE region = ? AND slug = ?")
+            .bind(region.as_str())
+            .bind(slug.as_str())
+            .execute(&mut *tx)
+            .await?;
+    }
+    if let Fetched::Found(docs) = fetched {
+        for (endpoint, body) in docs {
+            sqlx::query(
+                "INSERT INTO guild_documents (region, slug, endpoint, body) VALUES (?, ?, ?, ?)",
+            )
+            .bind(region.as_str())
+            .bind(slug.as_str())
+            .bind(endpoint.as_str())
+            .bind(body.to_string())
+            .execute(&mut *tx)
+            .await?;
         }
     }
     tx.commit().await?;

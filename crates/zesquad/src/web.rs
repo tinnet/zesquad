@@ -18,6 +18,7 @@ use zesquad_core::access::{self, Action, Role, Visibility};
 use zesquad_core::armory::Profile;
 use zesquad_core::auctions::{self, Money};
 use zesquad_core::discord::Webhook;
+use zesquad_core::guild::{self, Slug, Sort as GuildSort};
 use zesquad_core::recent::Recent;
 use zesquad_core::refresh::Status;
 use zesquad_core::roster::{self as order, Sort};
@@ -38,6 +39,7 @@ pub struct AppState {
     /// The auction sync runs.
     pub auctions_enabled: bool,
     pub armory_cache: Arc<db::ArmoryCache>,
+    pub guild_cache: Arc<db::GuildCache>,
     /// Set when a password protects the app.
     pub auth: Option<Arc<crate::auth::Auth>>,
     /// Set when people can log in with Battle.net.
@@ -64,6 +66,7 @@ pub fn router(state: AppState) -> Router {
     let protected = Router::new()
         .route("/", get(index))
         .route("/auctions", get(auctions_page))
+        .route("/g/{region}/{slug}", get(guild_page))
         .route("/auth/login", get(start_login))
         .route("/auth/callback", get(finish_login))
         .route("/account", get(account_page))
@@ -307,6 +310,12 @@ pub fn join_path(token: &str) -> String {
     format!("/join/{token}")
 }
 
+/// A guild's page.
+#[must_use]
+pub fn guild_path(region: Region, slug: &Slug) -> String {
+    format!("/g/{}/{}", region.as_str(), urlencode(slug.as_str()))
+}
+
 /// A squad's page; every form on it posts below this.
 #[must_use]
 pub fn squad_path(id: &str) -> String {
@@ -412,10 +421,14 @@ pub struct MemberView {
     pub class_key: String,
     pub last_login: Option<String>,
     pub checked: Option<String>,
+    /// The page of the character's guild, when it has one and lookups are on.
+    pub guild_link: Option<String>,
 }
 
 impl MemberView {
-    fn new(m: db::Member, now: i64, colours: &Colours) -> Self {
+    /// `region` is where the squad's characters are, for links to their guilds; `None` leaves
+    /// guilds unlinked.
+    fn new(m: db::Member, now: i64, colours: &Colours, region: Option<Region>) -> Self {
         let profile = m.armory.profile;
         let tags = tags::merge(tags::auto_tags(&profile), m.tags)
             .into_iter()
@@ -424,7 +437,11 @@ impl MemberView {
                 tag,
             })
             .collect();
+        let guild_link = region
+            .zip(profile.guild_slug.as_deref())
+            .and_then(|(region, slug)| Some(guild_path(region, &Slug::parse(slug).ok()?)));
         Self {
+            guild_link,
             has_profile: m.armory.answered,
             id: m.id,
             class_key: profile.class_key(),
@@ -450,7 +467,8 @@ impl MemberView {
         }
     }
 
-    /// Guild, item level and talents, separated by dots; empty parts left out.
+    /// Item level and talents, separated by dots; empty parts left out. The guild goes in
+    /// front of it, as a link.
     #[must_use]
     pub fn details_line(&self) -> String {
         let p = &self.profile;
@@ -461,7 +479,6 @@ impl MemberView {
             .collect::<Vec<_>>()
             .join(" / ");
         [
-            p.guild.as_ref().map(|g| format!("<{g}>")),
             p.item_level.map(|l| format!("item level {l}")),
             Some(talents).filter(|t| !t.is_empty()),
         ]
@@ -1149,7 +1166,7 @@ fn example_roster() -> Roster {
                 answered: true,
             },
         };
-        MemberView::new(m, now, &Colours(std::collections::HashMap::new()))
+        MemberView::new(m, now, &Colours(std::collections::HashMap::new()), None)
     };
     let members = vec![
         member(
@@ -1324,11 +1341,12 @@ async fn build_roster(
 ) -> Result<Roster> {
     let squad_id = access.squad.id.as_str();
     let now = db::now();
+    let region = state.armory_enabled.then_some(access.squad.region);
     let colours = Colours(db::tag_colours(&state.db, squad_id).await?);
     let mut members: Vec<MemberView> = db::members(&state.db, &state.armory_cache, squad_id)
         .await?
         .into_iter()
-        .map(|m| MemberView::new(m, now, &colours))
+        .map(|m| MemberView::new(m, now, &colours, region))
         .collect();
     // Every tag in the squad, alphabetically, spelled the way it first appears.
     let mut labels = std::collections::BTreeMap::new();
@@ -1971,6 +1989,262 @@ async fn auctions_page(State(state): State<AppState>, nav: Nav) -> Result<Auctio
         regions,
         spark: (SPARK_WIDTH, SPARK_HEIGHT),
     })
+}
+
+// ---- guilds ----
+
+#[derive(Deserialize)]
+struct GuildQuery {
+    q: Option<String>,
+    class: Option<String>,
+    sort: Option<String>,
+    page: Option<String>,
+}
+
+/// One roster member as the guild page shows them.
+pub struct GuildMemberView {
+    pub name: String,
+    pub surname: String,
+    pub rank: String,
+    pub level: Option<u64>,
+    pub race: Option<&'static str>,
+    pub class: Option<&'static str>,
+    pub class_key: String,
+}
+
+/// A class to filter on, with its colour and how many members have it.
+pub struct ClassChip {
+    pub label: &'static str,
+    pub key: String,
+    pub count: usize,
+    pub paint: Paint,
+}
+
+#[derive(Template, WebTemplate)]
+#[template(path = "guild.html")]
+struct GuildPage {
+    nav: Nav,
+    region: Region,
+    slug: Slug,
+    status: Status,
+    /// When the Armory was last asked, as "5 minutes ago".
+    checked: Option<String>,
+    guild: guild::Guild,
+    /// The Armory has answered for this guild.
+    answered: bool,
+    /// Every member, before the search.
+    total: usize,
+    classes: Vec<ClassChip>,
+    query: guild::Query,
+    members: Vec<GuildMemberView>,
+    matched: usize,
+    page: usize,
+    pages: usize,
+}
+
+impl GuildPage {
+    #[must_use]
+    pub fn base(&self) -> String {
+        guild_path(self.region, &self.slug)
+    }
+
+    /// The guild's name, or its slug until the Armory says.
+    #[must_use]
+    pub fn title(&self) -> String {
+        self.guild
+            .name
+            .clone()
+            .unwrap_or_else(|| self.slug.to_string())
+    }
+
+    /// "61 members · Alliance · founded 12 days ago · Europe", for the heading and previews.
+    #[must_use]
+    pub fn about(&self) -> String {
+        let g = &self.guild;
+        let members = g.member_count.or(u64::try_from(self.total).ok());
+        [
+            members.map(|n| format!("{n} member{}", if n == 1 { "" } else { "s" })),
+            g.faction.as_deref().map(title_case),
+            g.achievement_points
+                .filter(|p| *p > 0)
+                .map(|p| format!("{p} achievement points")),
+            g.created_ms
+                .map(|ms| format!("founded {}", ago(db::now() - ms / 1000))),
+            Some(self.region.name().to_owned()),
+        ]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join(" · ")
+    }
+
+    /// While the first lookup is waiting, the page polls for it.
+    #[must_use]
+    pub fn polling(&self) -> bool {
+        self.status == Status::Pending && !self.answered
+    }
+
+    /// "12 of 61 members" with a search or class, else "61 members".
+    #[must_use]
+    pub fn summary(&self) -> String {
+        let plural = if self.total == 1 { "" } else { "s" };
+        if self.matched == self.total {
+            format!("{} member{plural}", self.total)
+        } else {
+            format!("{} of {} member{plural}", self.matched, self.total)
+        }
+    }
+
+    /// This page with the search kept and `class`, `sort` and `page` set; defaults left out.
+    fn link(&self, class: Option<&str>, sort: guild::Sort, page: usize) -> String {
+        let parts: Vec<String> = [
+            Some(&self.query.search)
+                .filter(|q| !q.is_empty())
+                .map(|q| format!("q={}", urlencode(q))),
+            class.map(|c| format!("class={}", urlencode(c))),
+            (sort != guild::Sort::default()).then(|| format!("sort={}", sort.as_str())),
+            (page > 1).then(|| format!("page={page}")),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+        if parts.is_empty() {
+            self.base()
+        } else {
+            format!("{}?{}", self.base(), parts.join("&"))
+        }
+    }
+
+    #[must_use]
+    pub fn class_link(&self, key: Option<&str>) -> String {
+        self.link(key, self.query.sort, 1)
+    }
+
+    #[must_use]
+    pub fn sort_link(&self, sort: guild::Sort) -> String {
+        self.link(self.query.class.as_deref(), sort, 1)
+    }
+
+    #[must_use]
+    pub fn page_link(&self, page: usize) -> String {
+        self.link(self.query.class.as_deref(), self.query.sort, page)
+    }
+
+    #[must_use]
+    pub fn is_class(&self, key: Option<&str>) -> bool {
+        self.query.class.as_deref() == key
+    }
+
+    #[must_use]
+    pub fn is_sort(&self, sort: guild::Sort) -> bool {
+        self.query.sort == sort
+    }
+
+    #[must_use]
+    pub fn class_value(&self) -> &str {
+        self.query.class.as_deref().unwrap_or_default()
+    }
+
+    #[must_use]
+    pub fn sort_value(&self) -> &'static str {
+        self.query.sort.as_str()
+    }
+}
+
+/// `ALLIANCE` → `Alliance`.
+fn title_case(s: &str) -> String {
+    let lower = s.to_lowercase();
+    let mut chars = lower.chars();
+    chars.next().map_or_else(String::new, |first| {
+        first.to_uppercase().chain(chars).collect()
+    })
+}
+
+/// A guild's details and roster. The first time anyone opens a guild it's looked up in the
+/// background (and counts towards the new-guild limit); the page polls until it's there.
+async fn guild_page(
+    State(state): State<AppState>,
+    nav: Nav,
+    headers: HeaderMap,
+    connect: Option<axum::Extension<axum::extract::ConnectInfo<std::net::SocketAddr>>>,
+    Path((region, slug)): Path<(String, String)>,
+    Query(q): Query<GuildQuery>,
+) -> Result<Response> {
+    let region = Region::try_from(region).map_err(|_| AppError::NotFound)?;
+    let slug = Slug::parse(&slug).map_err(|_| AppError::NotFound)?;
+    if !state.armory_enabled {
+        return Err(AppError::NotFound);
+    }
+    let stored =
+        if let Some(stored) = db::guild(&state.db, &state.guild_cache, region, &slug).await? {
+            db::viewed_guild(&state.db, region, &slug).await?;
+            stored
+        } else {
+            state
+                .limiter
+                .new_guild(&headers, connect.map(|c| c.0.0.ip()))?;
+            if db::add_guild(&state.db, region, &slug).await? {
+                state.wake.notify_one();
+            }
+            db::guild(&state.db, &state.guild_cache, region, &slug)
+                .await?
+                .ok_or(AppError::NotFound)?
+        };
+    let query = guild::Query::new(
+        q.q.as_deref(),
+        q.class.as_deref(),
+        q.sort.as_deref(),
+        q.page.as_deref(),
+    );
+    let data = &stored.data;
+    let shown = guild::page(&data.members, &query);
+    let members = shown
+        .members
+        .iter()
+        .map(|m| GuildMemberView {
+            name: m.name.clone(),
+            surname: m.surname.clone(),
+            rank: m.rank_label(),
+            level: m.level,
+            race: m.race,
+            class: m.class,
+            class_key: m.class_key(),
+        })
+        .collect();
+    let classes = guild::classes(&data.members)
+        .into_iter()
+        .map(|(label, count)| {
+            let key = label.to_lowercase();
+            ClassChip {
+                paint: Paint(tags::default_colour(&key)),
+                label,
+                key,
+                count,
+            }
+        })
+        .collect();
+    let status = if stored.status == Status::NotFound {
+        StatusCode::NOT_FOUND
+    } else {
+        StatusCode::OK
+    };
+    let page = GuildPage {
+        nav,
+        region,
+        status: stored.status,
+        checked: stored.fetched_at.map(|t| ago(db::now() - t)),
+        guild: data.guild.clone(),
+        answered: data.answered,
+        total: data.members.len(),
+        classes,
+        matched: shown.matched,
+        page: shown.page,
+        pages: shown.pages,
+        members,
+        query,
+        slug,
+    };
+    Ok((status, page).into_response())
 }
 
 async fn healthz(State(state): State<AppState>) -> Response {

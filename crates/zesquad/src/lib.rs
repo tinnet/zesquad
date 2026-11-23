@@ -137,6 +137,7 @@ pub async fn start(
         armory_enabled,
         auctions_enabled,
         armory_cache: Arc::default(),
+        guild_cache: Arc::default(),
         auth,
         discord,
         limiter: Arc::new(limits::Limiter::new(settings.limits, settings.trust_proxy)),

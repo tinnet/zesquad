@@ -248,6 +248,15 @@ details h3 { font-size: .95rem; margin: .75rem 0 .25rem; }
 .class-warlock { --class: var(--warlock); }
 .class-druid { --class: var(--druid); }
 
+/* Guild page: the roster as a table with a class stripe, the search above it, pages below. */
+.guild-search { margin: 1rem 0 0; }
+.guild-roster tbody th { box-shadow: inset 4px 0 var(--class, var(--line)); padding-left: 1rem; }
+.guild-roster .surname { color: var(--muted); }
+.pager { gap: 1rem; margin: -.5rem 0 1.5rem; }
+.pager .hint { text-align: center; }
+a.guild { color: inherit; }
+a.guild:hover { color: var(--text); }
+
 /* Item quality */
 .q-poor { color: var(--q-poor); } .q-common { color: var(--q-common); } .q-uncommon { color: var(--q-uncommon); }
 .q-rare { color: var(--q-rare); } .q-epic { color: var(--q-epic); } .q-legendary { color: var(--q-legendary); }

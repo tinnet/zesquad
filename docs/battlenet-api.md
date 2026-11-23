@@ -284,8 +284,10 @@ launch. Now the path is routed: real characters return data, and unknown ones ge
   in EU and US (both factions, PvP and PvE). It reads both dumps of a house about hourly and
   keeps prices per item (lowest, median by units, quantity, auctions) for a week, and condensed
   per day for good. Not yet: the roleplay and Blackwater houses, item names.
-- Possible later: import a guild's roster into a squad (the roster lists every member's
-  name and surname).
+- A guild's page (`/g/{region}/{slug}`, linked from character cards) fetches the guild and its
+  roster: 2 requests per guild, not one per member. It shows the roster's own name, level,
+  class, race and rank, refreshed while people keep opening the page. Possible later: import a
+  guild's roster into a squad.
 - Not built: "sign in with Battle.net" to import a player's characters through
   `/profile/user/wow`. Not needed now that the public lookup works.
 

@@ -25,6 +25,7 @@ erDiagram
     squads ||--o{ squad_members : has
     users ||--o{ squad_members : "is in"
     users ||--o{ sessions : has
+    guilds ||--o{ guild_documents : stores
 ```
 
 - A squad has a region (`eu`, `us`, `tw`), picked when it's made and fixed after; its characters
@@ -36,6 +37,8 @@ erDiagram
   refreshed.
 - `tag_colours` holds the colours picked for a squad's tags, by tag key, separate from the
   tags themselves: a colour stays when a tag goes away and comes back.
+- `guilds` holds one row per `(region, slug)` someone opened a page for, apart from squads, and
+  `guild_documents` its guild and roster JSON, like `armory` and `armory_documents` (see Guilds).
 - `auction_houses`, `auction_snapshots`, `auction_snapshot_times` and `auction_daily` hold
   auction prices by region and house, apart from squads (see Auction prices).
 - `armory_documents` keeps each endpoint's raw JSON from the last good fetch; the pages parse it
@@ -53,6 +56,32 @@ media, equipment, specializations, professions and, for hunters, hunter pets. A 
 those is skipped; any other error marks the whole fetch failed. The app token is cached until
 five minutes before it expires (halfway, for one that lives shorter), and a 401 gets one retry
 with a new token; a second 401 fails the fetch.
+
+## Guilds
+
+`/g/<region>/<slug>` shows a guild: its name, member count, faction and age, then its roster
+as a table (name, level, class, race, rank), 50 members a page. Character cards link their
+guild there (`guild.slug` in the summary), when Armory lookups are on.
+
+A guild costs two requests, the guild and its roster, which already has every member's name,
+level, class and race (as ids, named in `zesquad_core::guild`). Members aren't looked up one by
+one: that would be 5-6 requests each, 4,000 or more for a big guild. Battle.net sends the
+whole roster at once, even 800 members (about 650 KB).
+
+The first time anyone opens a guild it's added to `guilds` as pending and the Armory sync is
+woken; the page polls itself (htmx, `hx-select`) until it's there. Opening guilds nobody opened
+before counts towards a limit of its own (10 an hour per client), so links can't make the
+server fetch any number of guilds. After that the sync refreshes a guild like a character
+(same interval and `refresh::is_due`), but only while someone opened its page in the last 7
+days (`viewed_at`, written at most hourly). A 404 on the guild shows "not on the Armory" with a
+404 status.
+
+The roster is parsed once per fetch, off the async threads, and kept in memory
+(`db::GuildCache`, the same kind of cache as the characters'). Searching, the class filter, sorting
+(rank, name, level) and paging are `zesquad_core::guild::page`, done per request on the parsed
+roster: every word typed has to appear in `name surname`. They're plain links and a GET form,
+so they work without script; with htmx the search updates the table as you type and puts the
+search in the address bar.
 
 ## Auction prices
 
