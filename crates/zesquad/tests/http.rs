@@ -565,7 +565,7 @@ async fn creating_a_squad_leads_to_its_page() {
     );
     let (status, page) = app.get(&squad).await;
     assert_eq!(status, StatusCode::OK);
-    assert!(page.contains("value=\"Thursday raiders\""), "{page}");
+    assert!(page.contains(">Thursday raiders</h1>"), "{page}");
     assert!(page.contains("No characters yet"));
 }
 
@@ -585,7 +585,7 @@ async fn squads_with_an_old_uuid_link_still_open() {
     .unwrap();
     let (status, page) = app.get(&format!("/s/{old}")).await;
     assert_eq!(status, StatusCode::OK);
-    assert!(page.contains("value=\"Old raiders\""), "{page}");
+    assert!(page.contains(">Old raiders</h1>"), "{page}");
 }
 
 #[tokio::test]
@@ -878,11 +878,23 @@ async fn link_previews_show_the_squad_and_pages_have_an_icon() {
 async fn renaming_a_squad() {
     let app = app(false).await;
     let squad = app.squad("Old name").await;
+    let (_, page) = app.get(&squad).await;
+    assert!(
+        page.contains(&format!("href=\"{squad}/settings\"")),
+        "{page}"
+    );
     let r = app
         .post(&format!("{squad}/name"), &[("name", "New name")])
         .await;
     assert_eq!(r.status(), StatusCode::SEE_OTHER);
-    assert!(app.get(&squad).await.1.contains("value=\"New name\""));
+    assert_eq!(r.headers()[header::LOCATION], format!("{squad}/settings"));
+    assert!(
+        app.get(&format!("{squad}/settings"))
+            .await
+            .1
+            .contains("value=\"New name\"")
+    );
+    assert!(app.get(&squad).await.1.contains(">New name</h1>"));
 }
 
 #[tokio::test]
@@ -1045,7 +1057,11 @@ async fn a_squad_posts_joins_and_level_ups_to_discord() {
     let app = app(true).await;
     let squad = app.squad("Thursday raiders").await;
     let id = squad.strip_prefix("/s/").unwrap();
+    let settings = format!("{squad}/settings");
+    // It's set up on the settings page, out of the roster's way.
     let (_, page) = app.get(&squad).await;
+    assert!(!page.contains("Discord"), "{page}");
+    let (_, page) = app.get(&settings).await;
     assert!(page.contains("Post to Discord"), "{page}");
 
     // Setting it up says hello, so whoever pasted the URL sees it work.
@@ -1069,7 +1085,7 @@ async fn a_squad_posts_joins_and_level_ups_to_discord() {
         assert_eq!(body["allowed_mentions"]["parse"], serde_json::json!([]));
     }
     // The page says it's on but never shows the token.
-    let (_, page) = app.get(&squad).await;
+    let (_, page) = app.get(&settings).await;
     assert!(
         page.contains("Posting to Discord") && page.contains("…5678"),
         "{page}"
@@ -1109,7 +1125,7 @@ async fn a_squad_posts_joins_and_level_ups_to_discord() {
     // Stopping.
     let r = app.post(&format!("{squad}/discord/delete"), &[]).await;
     assert_eq!(r.status(), StatusCode::SEE_OTHER);
-    assert!(app.get(&squad).await.1.contains("Post to Discord"));
+    assert!(app.get(&settings).await.1.contains("Post to Discord"));
     app.add(&squad, "Brena-Ashvale", "").await;
     tokio::time::sleep(Duration::from_millis(300)).await;
     assert_eq!(app.fake.discord_messages().len(), 3);
@@ -2648,6 +2664,8 @@ async fn only_members_change_a_squad() {
         page.contains("action=\"/s/") && page.contains("/characters\""),
         "{page}"
     );
+    let settings = format!("{squad}/settings");
+    let (_, page) = app.page_as(&owner, &settings).await;
     assert!(page.contains("Rename"), "{page}");
     let db = app.db().await;
     let before = squad_state(&db, &squad).await;
@@ -2665,6 +2683,8 @@ async fn only_members_change_a_squad() {
             page.contains("Ask a member for the invite link to edit"),
             "{page}"
         );
+        assert!(!page.contains("/settings\""), "{page}");
+        assert_eq!(app.page_as(who, &settings).await.0, StatusCode::FORBIDDEN);
         let (status, partial) = app.page_as(who, &format!("{squad}/roster")).await;
         assert_eq!(status, StatusCode::OK);
         assert!(!partial.contains("method=\"post\""), "{partial}");
@@ -2691,11 +2711,14 @@ async fn only_members_change_a_squad() {
     .await
     .unwrap();
     let (_, page) = app.page_as(&friend, &squad).await;
+    assert!(page.contains("/characters\""), "{page}");
+    assert!(!page.contains("Ask a member"), "{page}");
+    let (status, page) = app.page_as(&friend, &settings).await;
+    assert_eq!(status, StatusCode::OK);
     assert!(
-        page.contains("/characters\"") && !page.contains("Rename"),
+        !page.contains("Rename") && !page.contains("Discord"),
         "{page}"
     );
-    assert!(!page.contains("Ask a member"), "{page}");
     for (path, form) in squad_posts(&id) {
         let r = app.post_as(&friend, &format!("{squad}{path}"), &form).await;
         let expected = if path.starts_with("/name") || path.starts_with("/discord") {
@@ -2781,8 +2804,16 @@ async fn with_accounts_off_only_open_squads_change_and_private_ones_stay_hidden(
     }
     let r = app.add(&open, "Aldric-Thornwood", "").await;
     assert_eq!(r.status(), StatusCode::SEE_OTHER);
-    let (_, page) = app.get(&open).await;
-    assert!(page.contains("Rename"), "{page}");
+    let (_, page) = app.get(&format!("{open}/settings")).await;
+    assert!(
+        page.contains("Rename") && page.contains("Discord"),
+        "{page}"
+    );
+    // Nobody's a member, so there's no invite link or members list.
+    assert!(
+        !page.contains("Invite link") && !page.contains("Members ("),
+        "{page}"
+    );
 
     let (status, page) = app.get(&private).await;
     assert_eq!(status, StatusCode::NOT_FOUND);
@@ -2795,8 +2826,12 @@ async fn with_accounts_off_only_open_squads_change_and_private_ones_stay_hidden(
     let (status, page) = app.get(&unlisted).await;
     assert_eq!(status, StatusCode::OK);
     assert!(
-        !page.contains("Rename") && page.contains("Quiet raiders"),
+        !page.contains("/settings\"") && page.contains("Quiet raiders"),
         "{page}"
+    );
+    assert_eq!(
+        app.get(&format!("{unlisted}/settings")).await.0,
+        StatusCode::FORBIDDEN
     );
     assert_eq!(
         app.add(&unlisted, "Aldric-Thornwood", "").await.status(),
@@ -2814,7 +2849,7 @@ async fn with_accounts_off_only_open_squads_change_and_private_ones_stay_hidden(
     );
 }
 
-/// The invite link on a squad page, as a path: `/join/<token>`.
+/// The invite link on a squad's settings page, as a path: `/join/<token>`.
 fn invite_path(page: &str) -> String {
     let link = page
         .split("id=\"invite-link\" value=\"")
@@ -2829,8 +2864,11 @@ async fn friends_join_with_the_invite_link() {
     let app = app_with_login(None).await;
     let owner = log_in_as(&app, GOOD_CODE, "/").await;
     let squad = app.squad_as(&owner, "Thursday raiders").await;
+    let settings = format!("{squad}/settings");
     let (_, page) = app.page_as(&owner, &squad).await;
     assert!(page.contains("Anyone with this link can look"), "{page}");
+    assert!(!page.contains("/join/"), "{page}");
+    let (_, page) = app.page_as(&owner, &settings).await;
     assert!(
         page.contains("Anyone with this link can join and edit"),
         "{page}"
@@ -2876,7 +2914,7 @@ async fn friends_join_with_the_invite_link() {
         .await;
     assert_eq!(r.status(), StatusCode::SEE_OTHER);
     // Members pass the link on too, but can't reset it.
-    let (_, page) = app.page_as(&friend, &squad).await;
+    let (_, page) = app.page_as(&friend, &settings).await;
     assert_eq!(invite_path(&page), invite);
     assert!(!page.contains("/invite/reset"), "{page}");
     // Already in: the invite goes straight to the squad, and joining again changes nothing.
@@ -2905,7 +2943,7 @@ async fn the_owner_can_reset_the_invite_link() {
     let owner = log_in_as(&app, GOOD_CODE, "/").await;
     let friend = log_in_as(&app, FRIEND_CODE, "/").await;
     let squad = app.squad_as(&owner, "Thursday raiders").await;
-    let old = invite_path(&app.page_as(&owner, &squad).await.1);
+    let old = invite_path(&app.page_as(&owner, &format!("{squad}/settings")).await.1);
     app.post_as(&friend, &old, &[]).await;
     let r = app
         .post_as(&friend, &format!("{squad}/invite/reset"), &[])
@@ -2915,7 +2953,7 @@ async fn the_owner_can_reset_the_invite_link() {
         .post_as(&owner, &format!("{squad}/invite/reset"), &[])
         .await;
     assert_eq!(r.status(), StatusCode::SEE_OTHER);
-    let new = invite_path(&app.page_as(&owner, &squad).await.1);
+    let new = invite_path(&app.page_as(&owner, &format!("{squad}/settings")).await.1);
     assert_ne!(new, old);
     let stranger = log_in_as(&app, STRANGER_CODE, "/").await;
     assert_eq!(app.page_as(&stranger, &old).await.0, StatusCode::NOT_FOUND);
@@ -2961,7 +2999,7 @@ async fn squads_from_before_accounts_go_to_whoever_opens_them_first() {
         "{page}"
     );
     let me = log_in_as(&app, GOOD_CODE, "/").await;
-    let (_, page) = app.page_as(&me, "/s/oldsquad").await;
+    let (_, page) = app.page_as(&me, "/s/oldsquad/settings").await;
     assert!(
         page.contains("Anyone with this link can join and edit"),
         "{page}"
@@ -2987,22 +3025,20 @@ async fn the_owner_chooses_who_can_see_a_squad() {
     let app = app_with_login(None).await;
     let owner = log_in_as(&app, GOOD_CODE, "/").await;
     let squad = app.squad_as(&owner, "Secret raiders").await;
-    let invite = invite_path(&app.page_as(&owner, &squad).await.1);
+    let invite = invite_path(&app.page_as(&owner, &format!("{squad}/settings")).await.1);
     let friend = log_in_as(&app, FRIEND_CODE, "/").await;
     app.post_as(&friend, &invite, &[]).await;
     let stranger = log_in_as(&app, STRANGER_CODE, "/").await;
 
-    let (_, page) = app.page_as(&owner, &squad).await;
-    assert!(
-        page.contains("Who can see it: anyone with the link"),
-        "{page}"
-    );
+    let settings = format!("{squad}/settings");
+    let (_, page) = app.page_as(&owner, &settings).await;
+    assert!(page.contains("Who can see it"), "{page}");
     assert!(
         page.contains("value=\"unlisted\" checked") && page.contains("value=\"private\""),
         "{page}"
     );
     // Only the owner chooses.
-    let (_, page) = app.page_as(&friend, &squad).await;
+    let (_, page) = app.page_as(&friend, &settings).await;
     assert!(!page.contains("Who can see it"), "{page}");
     let to = |v: &'static str| [("visibility", v)];
     let r = app
@@ -3014,10 +3050,13 @@ async fn the_owner_chooses_who_can_see_a_squad() {
         .post_as(&owner, &format!("{squad}/visibility"), &to("private"))
         .await;
     assert_eq!(r.status(), StatusCode::SEE_OTHER);
+    assert_eq!(r.headers()[header::LOCATION], settings.as_str());
     for who in ["", stranger.as_str()] {
-        let (status, page) = app.page_as(who, &squad).await;
-        assert_eq!(status, StatusCode::NOT_FOUND);
-        assert!(!page.contains("Secret raiders"), "{page}");
+        for path in [&squad, &settings] {
+            let (status, page) = app.page_as(who, path).await;
+            assert_eq!(status, StatusCode::NOT_FOUND);
+            assert!(!page.contains("Secret raiders"), "{page}");
+        }
     }
     // Members still see it; previews never name it, and there's no view link to pass on.
     let (status, page) = app.page_as(&friend, &squad).await;
@@ -3028,6 +3067,8 @@ async fn the_owner_chooses_who_can_see_a_squad() {
     );
     assert!(page.contains("<title>zesquad</title>"), "{page}");
     assert!(!page.contains("id=\"squad-link\""), "{page}");
+    let (_, page) = app.page_as(&friend, &settings).await;
+    assert!(page.contains("<title>zesquad</title>"), "{page}");
     assert!(page.contains("id=\"invite-link\""), "{page}");
 
     // Back to old squads' "open" isn't a choice, nor is anything made up.
@@ -3062,7 +3103,7 @@ async fn the_front_page_lists_your_squads_first() {
     let raiders = app.squad_as(&owner, "Thursday raiders").await;
     let alts = app.squad_as(&friend, "Friendly alts").await;
     let secret = app.squad_as(&friend, "Friendly secrets").await;
-    let invite = invite_path(&app.page_as(&owner, &raiders).await.1);
+    let invite = invite_path(&app.page_as(&owner, &format!("{raiders}/settings")).await.1);
     app.post_as(&friend, &invite, &[]).await;
 
     // The friend is in two squads, one theirs, and their front page says so.
@@ -3129,14 +3170,17 @@ async fn members_see_each_other_and_the_owner_manages_them() {
     let friend = log_in_as(&app, FRIEND_CODE, "/").await;
     let stranger = log_in_as(&app, STRANGER_CODE, "/").await;
     let squad = app.squad_as(&owner, "Thursday raiders").await;
-    let invite = invite_path(&app.page_as(&owner, &squad).await.1);
+    let invite = invite_path(&app.page_as(&owner, &format!("{squad}/settings")).await.1);
     app.post_as(&friend, &invite, &[]).await;
     app.post_as(&stranger, &invite, &[]).await;
     let db = app.db().await;
     let friend_id = user_id(&db, "Friendly#5678").await;
     let owner_id = user_id(&db, "Testhero#1234").await;
 
+    let settings = format!("{squad}/settings");
     let (_, page) = app.page_as(&friend, &squad).await;
+    assert!(!page.contains("Members ("), "{page}");
+    let (_, page) = app.page_as(&friend, &settings).await;
     assert!(page.contains("Members (3)"), "{page}");
     assert!(
         page.contains("<strong>Testhero#1234</strong> · owner"),
@@ -3169,21 +3213,27 @@ async fn members_see_each_other_and_the_owner_manages_them() {
     assert_eq!(r.status(), StatusCode::SEE_OTHER);
     let (_, page) = app.page_as(&friend, &squad).await;
     assert!(page.contains("Ask a member for the invite link"), "{page}");
+    assert_eq!(
+        app.page_as(&friend, &settings).await.0,
+        StatusCode::FORBIDDEN
+    );
     let r = app.post_as(&friend, &invite, &[]).await;
     assert_eq!(r.status(), StatusCode::NOT_FOUND);
-    let (_, page) = app.page_as(&owner, &squad).await;
+    let (_, page) = app.page_as(&owner, &settings).await;
     assert_ne!(invite_path(&page), invite);
-    let (_, page) = app.page_as(&owner, &squad).await;
     assert!(
         page.contains("Members (2)") && !page.contains("Friendly#5678"),
         "{page}"
     );
 
     // The stranger leaves (the invite link stays as it is); the owner can't.
-    let invite = invite_path(&app.page_as(&owner, &squad).await.1);
+    let invite = invite_path(&app.page_as(&owner, &format!("{squad}/settings")).await.1);
     let r = app.post_as(&stranger, &format!("{squad}/leave"), &[]).await;
     assert_eq!(r.status(), StatusCode::SEE_OTHER);
-    assert_eq!(invite_path(&app.page_as(&owner, &squad).await.1), invite);
+    assert_eq!(
+        invite_path(&app.page_as(&owner, &format!("{squad}/settings")).await.1),
+        invite
+    );
     let r = app.post_as(&owner, &format!("{squad}/leave"), &[]).await;
     assert_eq!(r.status(), StatusCode::FORBIDDEN);
     let roles: Vec<String> = sqlx::query_scalar("SELECT role FROM squad_members")
@@ -3199,7 +3249,7 @@ async fn the_owner_can_delete_a_squad() {
     let owner = log_in_as(&app, GOOD_CODE, "/").await;
     let friend = log_in_as(&app, FRIEND_CODE, "/").await;
     let squad = app.squad_as(&owner, "Thursday raiders").await;
-    let invite = invite_path(&app.page_as(&owner, &squad).await.1);
+    let invite = invite_path(&app.page_as(&owner, &format!("{squad}/settings")).await.1);
     app.post_as(&friend, &invite, &[]).await;
     app.post_as(
         &friend,
@@ -3209,7 +3259,9 @@ async fn the_owner_can_delete_a_squad() {
     .await;
     let r = app.post_as(&friend, &format!("{squad}/delete"), &[]).await;
     assert_eq!(r.status(), StatusCode::FORBIDDEN);
-    let (_, page) = app.page_as(&owner, &squad).await;
+    let (_, page) = app.page_as(&friend, &format!("{squad}/settings")).await;
+    assert!(!page.contains("Delete squad"), "{page}");
+    let (_, page) = app.page_as(&owner, &format!("{squad}/settings")).await;
     assert!(page.contains("Delete squad"), "{page}");
     let r = app.post_as(&owner, &format!("{squad}/delete"), &[]).await;
     assert_eq!(r.status(), StatusCode::SEE_OTHER);
@@ -3234,7 +3286,7 @@ async fn deleting_your_account_hands_your_squads_on() {
     let stranger = log_in_as(&app, STRANGER_CODE, "/").await;
     let shared = app.squad_as(&owner, "Thursday raiders").await;
     let alone = app.squad_as(&owner, "Solo alts").await;
-    let invite = invite_path(&app.page_as(&owner, &shared).await.1);
+    let invite = invite_path(&app.page_as(&owner, &format!("{shared}/settings")).await.1);
     // The friend joined first, so the squad goes to them, not the stranger.
     app.post_as(&friend, &invite, &[]).await;
     app.post_as(&stranger, &invite, &[]).await;
@@ -3261,7 +3313,7 @@ async fn deleting_your_account_hands_your_squads_on() {
     let r = app.post_as(&owner, "/account/delete", &[]).await;
     assert_eq!(r.status(), StatusCode::SEE_OTHER);
     assert_eq!(app.page_as(&friend, &alone).await.0, StatusCode::NOT_FOUND);
-    let (_, page) = app.page_as(&friend, &shared).await;
+    let (_, page) = app.page_as(&friend, &format!("{shared}/settings")).await;
     assert!(
         page.contains("<strong>Friendly#5678</strong> · owner · you"),
         "{page}"
@@ -3270,7 +3322,7 @@ async fn deleting_your_account_hands_your_squads_on() {
         page.contains("Members (2)") && !page.contains("Testhero"),
         "{page}"
     );
-    let (_, page) = app.page_as(&friend, &theirs).await;
+    let (_, page) = app.page_as(&friend, &format!("{theirs}/settings")).await;
     assert!(page.contains("Members (1)"), "{page}");
 }
 

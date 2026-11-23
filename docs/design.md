@@ -210,13 +210,20 @@ with `HX-Refresh` instead, since htmx doesn't swap a 403, and the reload shows t
 may see it. Members change the roster; renaming and the Discord channel are the owner's. Anyone
 else gets the roster read-only (`editable: false`), polling included.
 
-Members see the squad's invite link, `/join/<invite token>`, next to its view link (left out for
-a private squad, where it would be a 404 to anyone else), and can pass it on. Opening it logged
+The squad page itself is the name, the view link and the roster. Everything else lives on
+`/s/<id>/settings`, linked from the squad's heading for whoever has something there (members,
+and anyone with an open squad): the name, the invite link, who can see it, the members, Discord
+and deleting it, each shown only to whoever may use it. Anyone else gets a 403 there. Changes
+made on it come back to it.
+
+Members see the squad's invite link, `/join/<invite token>`, on its settings page, and can pass
+it on; the squad page keeps only the view link (left out for a private squad, where it would be
+a 404 to anyone else). Opening it logged
 out sends you to log in and back; logged in, it asks "Join *squad*?" with one button. Only the
 POST joins, so a chat app previewing the link can't join anyone. The owner can **Reset** the
 token; the old link stops working, and members who joined with it stay.
 
-The owner picks who can see the squad on its page: **Only members** (`private`), **Anyone
+The owner picks who can see the squad on its settings page: **Only members** (`private`), **Anyone
 with the link** (`unlisted`) or **Everyone** (`public`); `open` isn't offered. A private squad's
 page never puts its name in the title or Open Graph tags, so even a preview made with a
 member's cookies says only "zesquad"; without them it's a 404 anyway.

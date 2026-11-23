@@ -1,0 +1,121 @@
+{% extends "base.html" %}
+{%- let squad = access.squad %}
+{%- let base = path() %}
+{% block title %}{% if shows_name() %}{{ squad.name }} settings · {% endif %}zesquad{% endblock %}
+{% block meta %}
+  <meta property="og:title" content="zesquad">
+{%- endblock %}
+{% block content %}
+<section class="settings">
+  <p class="back"><a href="{{ base }}">← Back to the squad</a></p>
+  <h1>{{ squad.name }} · settings</h1>
+
+  {%- if access.allows(Action::Configure) %}
+  <h2>Name</h2>
+  <form method="post" action="{{ base }}/name" class="row">
+    <label class="grow">
+      <span class="visually-hidden">Squad name</span>
+      <input name="name" value="{{ squad.name }}" required maxlength="64">
+    </label>
+    <button type="submit">Rename</button>
+  </form>
+  {%- endif %}
+
+  {%- if let Some(invite) = invite %}
+  <h2>Invite link</h2>
+  <p class="share-label">Anyone with this link can join and edit</p>
+  <div class="share row">
+    <label class="grow">
+      <span class="visually-hidden">Invite link</span>
+      <input id="invite-link" value="{{ invite }}" readonly>
+    </label>
+    <button type="button" class="quiet" data-copy="invite-link" hidden>Copy</button>
+    {%- if access.allows(Action::Own) %}
+    <form method="post" action="{{ base }}/invite/reset" onsubmit="return confirm('Make a new invite link? The old one stops working.')">
+      <button type="submit" class="quiet" title="Make a new invite link; the old one stops working">Reset</button>
+    </form>
+    {%- endif %}
+  </div>
+  <p class="hint">Send it only to friends: they log in with Battle.net and join.</p>
+  {%- endif %}
+
+  {%- if access.allows(Action::Own) %}
+  <h2>Who can see it</h2>
+  <form method="post" action="{{ base }}/visibility">
+    <fieldset class="plain">
+      <legend class="visually-hidden">Who can see this squad</legend>
+      {%- for v in Visibility::CHOICES %}
+      <label class="choice">
+        <input type="radio" name="visibility" value="{{ v }}"{% if v == squad.visibility %} checked{% endif %}>
+        <span><strong>{{ v.label() }}</strong>
+        {%- match v %}
+        {%- when Visibility::Private %} · others get "not found", even with the link
+        {%- when Visibility::Unlisted %} · they can look, not edit
+        {%- when Visibility::Public %} · listed on <a href="/squads">Squads</a>; they can look, not edit
+        {%- when Visibility::Open %}
+        {%- endmatch %}</span>
+      </label>
+      {%- endfor %}
+    </fieldset>
+    <button type="submit">Save</button>
+  </form>
+  {%- endif %}
+
+  {%- if !members.is_empty() %}
+  <h2>Members ({{ members.len() }})</h2>
+  <ul class="plain members-list">
+    {%- for m in members %}
+    <li class="row">
+      <span class="grow"><strong>{{ m.battletag }}</strong>{% if m.owner %} · owner{% endif %}{% if m.you %} · you{% endif %}</span>
+      <span class="hint">joined {{ m.joined }}</span>
+      {%- if !m.owner && access.allows(Action::Own) %}
+      <form method="post" action="{{ base }}/members/{{ m.user_id }}/delete" onsubmit="return confirm('Take this member out of the squad? The invite link changes too, so they can\'t rejoin with the old one.')">
+        <button type="submit" class="quiet danger">Remove</button>
+      </form>
+      {%- else if !m.owner && m.you %}
+      <form method="post" action="{{ base }}/leave" onsubmit="return confirm('Leave this squad?')">
+        <button type="submit" class="quiet danger">Leave</button>
+      </form>
+      {%- endif %}
+    </li>
+    {%- endfor %}
+  </ul>
+  <p class="hint">Members see each other's BattleTags; nobody else does.</p>
+  {%- endif %}
+
+  {%- if access.allows(Action::Configure) %}
+  {%- if let Some(hint) = webhook_hint() %}
+  <h2>Posting to Discord</h2>
+  <div class="row">
+    <p class="grow">New characters and level-ups go to a Discord channel (webhook {{ hint }}).</p>
+    <form method="post" action="{{ base }}/discord/delete">
+      <button type="submit" class="quiet danger">Stop posting</button>
+    </form>
+  </div>
+  {%- else %}
+  <h2>Post to Discord</h2>
+  <p class="hint">
+    Post new characters and level-ups to a channel in your Discord server: in the channel's
+    settings, open Integrations, then Webhooks, make a new webhook and copy its URL.
+  </p>
+  <form method="post" action="{{ base }}/discord" class="row">
+    <label class="grow">
+      <span class="visually-hidden">Discord webhook URL</span>
+      <input name="webhook" type="url" placeholder="https://discord.com/api/webhooks/…" required autocomplete="off">
+    </label>
+    <button type="submit">Start posting</button>
+  </form>
+  {%- endif %}
+  {% if let Some(error) = discord_error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
+  {%- endif %}
+
+  {%- if access.allows(Action::Own) %}
+  <h2 class="danger-zone">Delete squad</h2>
+  <p class="hint">Its characters, tags, colours and members go with it, for everyone. This can't be undone.</p>
+  <form method="post" action="{{ base }}/delete" onsubmit="return confirm('Delete this squad for everyone?')">
+    <button type="submit" class="quiet danger">Delete squad</button>
+  </form>
+  {%- endif %}
+</section>
+<script src="{{ crate::assets::base() }}/share.js" defer></script>
+{% endblock %}

@@ -74,6 +74,7 @@ pub fn router(state: AppState) -> Router {
         .route("/recent/{squad}/forget", post(forget_squad))
         .route("/s/{squad}", get(squad_page))
         .route("/s/{squad}/roster", get(roster_partial))
+        .route("/s/{squad}/settings", get(settings_page))
         .route("/s/{squad}/name", post(rename))
         .route("/s/{squad}/discord", post(set_webhook))
         .route("/s/{squad}/discord/delete", post(remove_webhook))
@@ -681,17 +682,70 @@ struct SquadPage {
     access: SquadAccess,
     /// The page's full link, to copy; just the path when the request's host looks wrong.
     link: String,
+    roster: Roster,
+}
+
+impl SquadPage {
+    fn new(nav: Nav, access: SquadAccess, roster: Roster) -> Self {
+        Self {
+            link: nav.link(&squad_path(&access.squad.id)),
+            nav,
+            access,
+            roster,
+        }
+    }
+
+    /// Link previews may name the squad: not when it's private, in case one is ever made with
+    /// a member's cookies.
+    fn shows_name_in_previews(&self) -> bool {
+        self.access.squad.visibility != Visibility::Private
+    }
+
+    /// The squad's own link is worth sharing: anyone but members would get a 404 for a
+    /// private one.
+    fn shows_view_link(&self) -> bool {
+        self.access.squad.visibility != Visibility::Private
+    }
+
+    /// Whether the settings page has anything for you.
+    fn shows_settings(&self) -> bool {
+        has_settings(&self.access)
+    }
+
+    /// One line about the squad for link previews: "6 characters in Europe on zesquad, …".
+    fn summary(&self) -> String {
+        let n = self.roster.total;
+        format!(
+            "{n} character{} in {} on zesquad, friend squads for WoW: Forever.",
+            if n == 1 { "" } else { "s" },
+            self.access.squad.region.name()
+        )
+    }
+}
+
+/// Whether there's anything on a squad's settings page for you: renaming and Discord, or the
+/// invite link and members.
+fn has_settings(access: &SquadAccess) -> bool {
+    access.allows(Action::Configure) || access.allows(Action::SeeMembers)
+}
+
+/// A squad's settings, apart from its roster: name, invite link, who can see it, members,
+/// Discord, deleting it. Each part shows only to whoever may use it.
+#[derive(Template, WebTemplate)]
+#[template(path = "settings.html")]
+struct SettingsPage {
+    nav: Nav,
+    access: SquadAccess,
     /// The invite link, for members to pass on.
     invite: Option<String>,
     /// Who's in the squad, for its members; empty for anyone else.
     members: Vec<MemberRow>,
-    roster: Roster,
     /// Why the Discord webhook someone pasted wasn't kept.
     discord_error: Option<String>,
 }
 
-impl SquadPage {
-    async fn new(state: &AppState, nav: Nav, access: SquadAccess, roster: Roster) -> Result<Self> {
+impl SettingsPage {
+    async fn new(state: &AppState, nav: Nav, access: SquadAccess) -> Result<Self> {
         let members = if access.allows(Action::SeeMembers) {
             let you = nav.user.as_ref().map(|u| u.id);
             let now = db::now();
@@ -716,25 +770,21 @@ impl SquadPage {
             .filter(|_| access.allows(Action::SeeMembers))
             .map(|token| nav.link(&join_path(token)));
         Ok(Self {
-            link: nav.link(&squad_path(&access.squad.id)),
             invite,
             members,
             nav,
             access,
-            roster,
             discord_error: None,
         })
     }
 
-    /// Link previews may name the squad: not when it's private, in case one is ever made with
-    /// a member's cookies.
-    fn shows_name_in_previews(&self) -> bool {
-        self.access.squad.visibility != Visibility::Private
+    /// The squad's path, which the settings' forms post below.
+    fn path(&self) -> String {
+        squad_path(&self.access.squad.id)
     }
 
-    /// The squad's own link is worth sharing: anyone but members would get a 404 for a
-    /// private one.
-    fn shows_view_link(&self) -> bool {
+    /// The title may name the squad: not when it's private, like the squad page.
+    fn shows_name(&self) -> bool {
         self.access.squad.visibility != Visibility::Private
     }
 
@@ -742,16 +792,11 @@ impl SquadPage {
     fn webhook_hint(&self) -> Option<String> {
         self.access.squad.webhook().map(|hook| hook.hint())
     }
+}
 
-    /// One line about the squad for link previews: "6 characters in Europe on zesquad, …".
-    fn summary(&self) -> String {
-        let n = self.roster.total;
-        format!(
-            "{n} character{} in {} on zesquad, friend squads for WoW: Forever.",
-            if n == 1 { "" } else { "s" },
-            self.access.squad.region.name()
-        )
-    }
+/// Where a squad's settings page is.
+fn settings_path(id: &str) -> String {
+    format!("{}/settings", squad_path(id))
 }
 
 /// Someone in the squad, as its members see them.
@@ -1344,8 +1389,20 @@ async fn squad_page(
     .await?;
     let mut recent = recent(&headers);
     recent.visit(&access.squad.id);
-    let page = SquadPage::new(&state, nav, access, roster).await?;
+    let page = SquadPage::new(nav, access, roster);
     Ok(([recent_cookie(&headers, &recent)], page).into_response())
+}
+
+/// Settings for members, and for anyone with an open squad; nothing there for anyone else.
+async fn settings_page(
+    State(state): State<AppState>,
+    nav: Nav,
+    CanView(access): CanView,
+) -> Result<SettingsPage> {
+    if !has_settings(&access) {
+        return Err(AppError::Forbidden { htmx: false });
+    }
+    SettingsPage::new(&state, nav, access).await
 }
 
 async fn roster_partial(
@@ -1375,7 +1432,7 @@ async fn rename(
     if let Ok(name) = SquadName::new(&form.name) {
         db::rename_squad(&state.db, &squad.id, &name).await?;
     }
-    Ok(Redirect::to(&squad_path(&squad.id)))
+    Ok(Redirect::to(&settings_path(&squad.id)))
 }
 
 /// The state of the roster's forms after a change. An error (bad input) is shown in the
@@ -1425,7 +1482,7 @@ async fn respond(
     } else {
         StatusCode::OK
     };
-    let page = SquadPage::new(state, nav.clone(), access, roster).await?;
+    let page = SquadPage::new(nav.clone(), access, roster);
     Ok((status, page).into_response())
 }
 
@@ -1497,7 +1554,7 @@ async fn set_visibility(
     {
         db::set_visibility(&state.db, &access.squad.id, visibility).await?;
     }
-    Ok(Redirect::to(&squad_path(&access.squad.id)))
+    Ok(Redirect::to(&settings_path(&access.squad.id)))
 }
 
 #[derive(Deserialize)]
@@ -1513,7 +1570,7 @@ async fn remove_member(
     Path(path): Path<MemberPath>,
 ) -> Result<Redirect> {
     db::remove_member(&state.db, &access.squad.id, path.user).await?;
-    Ok(Redirect::to(&squad_path(&access.squad.id)))
+    Ok(Redirect::to(&settings_path(&access.squad.id)))
 }
 
 /// A member leaves; the owner can't, only delete the squad.
@@ -1537,7 +1594,7 @@ async fn delete_squad(State(state): State<AppState>, CanOwn(access): CanOwn) -> 
 
 async fn reset_invite(State(state): State<AppState>, CanOwn(access): CanOwn) -> Result<Redirect> {
     db::reset_invite(&state.db, &access.squad.id).await?;
-    Ok(Redirect::to(&squad_path(&access.squad.id)))
+    Ok(Redirect::to(&settings_path(&access.squad.id)))
 }
 
 // ---- Discord ----
@@ -1579,12 +1636,11 @@ async fn set_webhook(
         }
     };
     let Some(error) = error else {
-        return Ok(Redirect::to(&squad_path(&squad.id)).into_response());
+        return Ok(Redirect::to(&settings_path(&squad.id)).into_response());
     };
-    let roster = build_roster(&state, &access, None, Sort::default(), Outcome::default()).await?;
-    let page = SquadPage {
+    let page = SettingsPage {
         discord_error: Some(error),
-        ..SquadPage::new(&state, nav, access, roster).await?
+        ..SettingsPage::new(&state, nav, access).await?
     };
     Ok((StatusCode::UNPROCESSABLE_ENTITY, page).into_response())
 }
@@ -1595,7 +1651,7 @@ async fn remove_webhook(
 ) -> Result<Redirect> {
     let squad = &access.squad;
     db::set_webhook(&state.db, &squad.id, None).await?;
-    Ok(Redirect::to(&squad_path(&squad.id)))
+    Ok(Redirect::to(&settings_path(&squad.id)))
 }
 
 /// The filter and sort a roster form was posted from, to come back to.
