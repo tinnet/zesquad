@@ -220,7 +220,8 @@ page never puts its name in the title or Open Graph tags, so even a preview made
 member's cookies says only "zesquad"; without them it's a 404 anyway.
 
 Members see a **Members** list: BattleTags, roles, when each joined; nobody else sees
-BattleTags. The owner can remove members and **Delete squad** (its characters, tags, colours
+BattleTags. The owner can remove members (which also resets the invite link, since they saw
+it as members) and **Delete squad** (its characters, tags, colours
 and members go through the foreign keys); a member can **Leave**; the owner can't leave, only
 delete. Deleting your account hands each squad you own to the member who's been in it
 longest, and deletes squads with nobody else in them (`db::delete_user`, one transaction);

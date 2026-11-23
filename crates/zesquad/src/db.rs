@@ -564,17 +564,44 @@ pub async fn squad_members(db: &SqlitePool, squad_id: &str) -> anyhow::Result<Ve
     .await?)
 }
 
-/// Takes a member (never the owner) out of a squad.
+/// A member (never the owner) leaves a squad.
 ///
 /// # Errors
 ///
 /// On database errors.
-pub async fn remove_member(db: &SqlitePool, squad_id: &str, user_id: i64) -> anyhow::Result<()> {
+pub async fn leave(db: &SqlitePool, squad_id: &str, user_id: i64) -> anyhow::Result<()> {
     sqlx::query("DELETE FROM squad_members WHERE squad_id = ? AND user_id = ? AND role = 'member'")
         .bind(squad_id)
         .bind(user_id)
         .execute(db)
         .await?;
+    Ok(())
+}
+
+/// Takes a member (never the owner) out of a squad, and gives the squad a new invite token:
+/// they saw the old one as a member, and could otherwise just join again.
+///
+/// # Errors
+///
+/// On database errors.
+pub async fn remove_member(db: &SqlitePool, squad_id: &str, user_id: i64) -> anyhow::Result<()> {
+    let mut tx = begin_write(db).await?;
+    let removed = sqlx::query(
+        "DELETE FROM squad_members WHERE squad_id = ? AND user_id = ? AND role = 'member'",
+    )
+    .bind(squad_id)
+    .bind(user_id)
+    .execute(&mut *tx)
+    .await?
+    .rows_affected();
+    if removed > 0 {
+        sqlx::query("UPDATE squads SET invite_token = ? WHERE id = ?")
+            .bind(invite_token())
+            .bind(squad_id)
+            .execute(&mut *tx)
+            .await?;
+    }
+    tx.commit().await?;
     Ok(())
 }
 

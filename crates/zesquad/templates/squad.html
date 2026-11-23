@@ -123,7 +123,7 @@
         <span class="grow"><strong>{{ m.battletag }}</strong>{% if m.owner %} · owner{% endif %}{% if m.you %} · you{% endif %}</span>
         <span class="hint">joined {{ m.joined }}</span>
         {%- if !m.owner && access.allows(Action::Own) %}
-        <form method="post" action="{{ base }}/members/{{ m.user_id }}/delete" onsubmit="return confirm('Take this member out of the squad?')">
+        <form method="post" action="{{ base }}/members/{{ m.user_id }}/delete" onsubmit="return confirm('Take this member out of the squad? The invite link changes too, so they can\'t rejoin with the old one.')">
           <button type="submit" class="quiet danger">Remove</button>
         </form>
         {%- else if !m.owner && m.you %}

@@ -1515,7 +1515,8 @@ struct MemberPath {
     user: i64,
 }
 
-/// The owner takes a member out of the squad; the owner stays.
+/// The owner takes a member out of the squad; the owner stays. The invite link changes, so
+/// they can't come back with it.
 async fn remove_member(
     State(state): State<AppState>,
     CanOwn(access): CanOwn,
@@ -1534,7 +1535,7 @@ async fn leave(
     let (Some(Role::Member), Some(user)) = (access.role, &nav.user) else {
         return Err(AppError::Forbidden { htmx: false });
     };
-    db::remove_member(&state.db, &access.squad.id, user.id).await?;
+    db::leave(&state.db, &access.squad.id, user.id).await?;
     Ok(Redirect::to("/").into_response())
 }
 

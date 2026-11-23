@@ -3129,20 +3129,27 @@ async fn members_see_each_other_and_the_owner_manages_them() {
     let r = app.post_as(&friend, &remove(owner_id), &[]).await;
     assert_eq!(r.status(), StatusCode::FORBIDDEN);
     app.post_as(&owner, &remove(owner_id), &[]).await;
-    // The owner removes the friend, who can then only look.
+    // The owner removes the friend, who can then only look, and can't come back with the
+    // invite link they saw as a member: it changed.
     let r = app.post_as(&owner, &remove(friend_id), &[]).await;
     assert_eq!(r.status(), StatusCode::SEE_OTHER);
     let (_, page) = app.page_as(&friend, &squad).await;
     assert!(page.contains("Ask a member for the invite link"), "{page}");
+    let r = app.post_as(&friend, &invite, &[]).await;
+    assert_eq!(r.status(), StatusCode::NOT_FOUND);
+    let (_, page) = app.page_as(&owner, &squad).await;
+    assert_ne!(invite_path(&page), invite);
     let (_, page) = app.page_as(&owner, &squad).await;
     assert!(
         page.contains("Members (2)") && !page.contains("Friendly#5678"),
         "{page}"
     );
 
-    // The stranger leaves; the owner can't.
+    // The stranger leaves (the invite link stays as it is); the owner can't.
+    let invite = invite_path(&app.page_as(&owner, &squad).await.1);
     let r = app.post_as(&stranger, &format!("{squad}/leave"), &[]).await;
     assert_eq!(r.status(), StatusCode::SEE_OTHER);
+    assert_eq!(invite_path(&app.page_as(&owner, &squad).await.1), invite);
     let r = app.post_as(&owner, &format!("{squad}/leave"), &[]).await;
     assert_eq!(r.status(), StatusCode::FORBIDDEN);
     let roles: Vec<String> = sqlx::query_scalar("SELECT role FROM squad_members")
