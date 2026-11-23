@@ -76,6 +76,7 @@ pub fn router(state: AppState) -> Router {
         .route("/s/{squad}/discord", post(set_webhook))
         .route("/s/{squad}/discord/delete", post(remove_webhook))
         .route("/s/{squad}/invite/reset", post(reset_invite))
+        .route("/s/{squad}/visibility", post(set_visibility))
         .route("/join/{token}", get(join_page).post(join))
         .route("/s/{squad}/characters", post(add_character))
         .route("/s/{squad}/characters/{id}/tags", post(add_tags))
@@ -671,6 +672,12 @@ impl SquadPage {
             roster,
             discord_error: None,
         }
+    }
+
+    /// Link previews may name the squad: not when it's private, in case one is ever made with
+    /// a member's cookies.
+    fn shows_name_in_previews(&self) -> bool {
+        self.access.squad.visibility != Visibility::Private
     }
 
     /// The squad's own link is worth sharing: anyone but members would get a 404 for a
@@ -1363,6 +1370,26 @@ async fn join(
     db::join(&state.db, &squad.id, user.id).await?;
     tracing::info!(user = user.id, squad = squad.id, "joined a squad");
     Ok(Redirect::to(&squad_path(&squad.id)).into_response())
+}
+
+#[derive(Deserialize)]
+struct VisibilityForm {
+    visibility: String,
+}
+
+/// Who can see the squad, one of [`Visibility::CHOICES`]; anything else (`open` included,
+/// which is only for squads from before accounts) changes nothing.
+async fn set_visibility(
+    State(state): State<AppState>,
+    CanOwn(access): CanOwn,
+    Form(form): Form<VisibilityForm>,
+) -> Result<Redirect> {
+    if let Ok(visibility) = form.visibility.parse::<Visibility>()
+        && Visibility::CHOICES.contains(&visibility)
+    {
+        db::set_visibility(&state.db, &access.squad.id, visibility).await?;
+    }
+    Ok(Redirect::to(&squad_path(&access.squad.id)))
 }
 
 async fn reset_invite(State(state): State<AppState>, CanOwn(access): CanOwn) -> Result<Redirect> {

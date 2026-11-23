@@ -299,6 +299,22 @@ pub async fn claim(db: &SqlitePool, squad_id: &str, user_id: i64) -> anyhow::Res
     Ok(claimed)
 }
 
+/// # Errors
+///
+/// On database errors.
+pub async fn set_visibility(
+    db: &SqlitePool,
+    squad_id: &str,
+    visibility: Visibility,
+) -> anyhow::Result<()> {
+    sqlx::query("UPDATE squads SET visibility = ? WHERE id = ?")
+        .bind(visibility.as_str())
+        .bind(squad_id)
+        .execute(db)
+        .await?;
+    Ok(())
+}
+
 /// Gives a squad a new invite token; the old one stops working.
 ///
 /// # Errors

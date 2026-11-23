@@ -2933,3 +2933,75 @@ async fn squads_from_before_accounts_go_to_whoever_opens_them_first() {
     let r = app.add("/s/oldsquad", "Aldric-Thornwood", "").await;
     assert_eq!(r.status(), StatusCode::FORBIDDEN);
 }
+
+#[tokio::test]
+async fn the_owner_chooses_who_can_see_a_squad() {
+    let app = app_with_login(None).await;
+    let owner = log_in_as(&app, GOOD_CODE, "/").await;
+    let squad = app.squad_as(&owner, "Secret raiders").await;
+    let invite = invite_path(&app.page_as(&owner, &squad).await.1);
+    let friend = log_in_as(&app, FRIEND_CODE, "/").await;
+    app.post_as(&friend, &invite, &[]).await;
+    let stranger = log_in_as(&app, STRANGER_CODE, "/").await;
+
+    let (_, page) = app.page_as(&owner, &squad).await;
+    assert!(
+        page.contains("Who can see it: anyone with the link"),
+        "{page}"
+    );
+    assert!(
+        page.contains("value=\"unlisted\" checked") && page.contains("value=\"private\""),
+        "{page}"
+    );
+    // Only the owner chooses.
+    let (_, page) = app.page_as(&friend, &squad).await;
+    assert!(!page.contains("Who can see it"), "{page}");
+    let to = |v: &'static str| [("visibility", v)];
+    let r = app
+        .post_as(&friend, &format!("{squad}/visibility"), &to("private"))
+        .await;
+    assert_eq!(r.status(), StatusCode::FORBIDDEN);
+
+    let r = app
+        .post_as(&owner, &format!("{squad}/visibility"), &to("private"))
+        .await;
+    assert_eq!(r.status(), StatusCode::SEE_OTHER);
+    for who in ["", stranger.as_str()] {
+        let (status, page) = app.page_as(who, &squad).await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        assert!(!page.contains("Secret raiders"), "{page}");
+    }
+    // Members still see it; previews never name it, and there's no view link to pass on.
+    let (status, page) = app.page_as(&friend, &squad).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        page.contains("<meta property=\"og:title\" content=\"zesquad\">"),
+        "{page}"
+    );
+    assert!(page.contains("<title>zesquad</title>"), "{page}");
+    assert!(!page.contains("id=\"squad-link\""), "{page}");
+    assert!(page.contains("id=\"invite-link\""), "{page}");
+
+    // Back to old squads' "open" isn't a choice, nor is anything made up.
+    for bad in ["open", "everyone", ""] {
+        let r = app
+            .post_as(&owner, &format!("{squad}/visibility"), &to(bad))
+            .await;
+        assert_eq!(r.status(), StatusCode::SEE_OTHER);
+        assert_eq!(
+            app.page_as("", &squad).await.0,
+            StatusCode::NOT_FOUND,
+            "{bad}"
+        );
+    }
+    let r = app
+        .post_as(&owner, &format!("{squad}/visibility"), &to("public"))
+        .await;
+    assert_eq!(r.status(), StatusCode::SEE_OTHER);
+    let (status, page) = app.page_as(&stranger, &squad).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        page.contains("og:title\" content=\"Secret raiders\""),
+        "{page}"
+    );
+}

@@ -1,11 +1,15 @@
 {% extends "base.html" %}
 {%- let squad = access.squad %}
-{% block title %}{{ squad.name }} · zesquad{% endblock %}
+{% block title %}{% if shows_name_in_previews() %}{{ squad.name }} · {% endif %}zesquad{% endblock %}
 {% block meta %}
+  {%- if shows_name_in_previews() %}
   {%- let summary = summary() %}
   <meta name="description" content="{{ summary }}">
   <meta property="og:title" content="{{ squad.name }}">
   <meta property="og:description" content="{{ summary }}">
+  {%- else %}
+  <meta property="og:title" content="zesquad">
+  {%- endif %}
 {%- endblock %}
 {% block content %}
 <section class="squad-head">
@@ -57,6 +61,29 @@
     {%- if access.allows(Action::Edit) %} Share this link with your squad: anyone who has it can see and edit the squad.
     {%- else %} Anyone with this link can look.
     {%- endif %}</p>
+  {%- endif %}
+  {%- if access.allows(Action::Own) %}
+  <details class="visibility">
+    <summary>Who can see it: {{ squad.visibility.label()|lower }}</summary>
+    <form method="post" action="{{ roster.base() }}/visibility">
+      <fieldset class="plain">
+        <legend class="visually-hidden">Who can see this squad</legend>
+        {%- for v in Visibility::CHOICES %}
+        <label class="choice">
+          <input type="radio" name="visibility" value="{{ v }}"{% if v == squad.visibility %} checked{% endif %}>
+          <span><strong>{{ v.label() }}</strong>
+          {%- match v %}
+          {%- when Visibility::Private %} · others get "not found", even with the link
+          {%- when Visibility::Unlisted %} · they can look, not edit
+          {%- when Visibility::Public %} · they can look, not edit
+          {%- when Visibility::Open %}
+          {%- endmatch %}</span>
+        </label>
+        {%- endfor %}
+      </fieldset>
+      <button type="submit">Save</button>
+    </form>
+  </details>
   {%- endif %}
   {%- if access.allows(Action::Configure) %}
   <details class="discord"{% if discord_error.is_some() %} open{% endif %}>

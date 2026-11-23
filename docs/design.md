@@ -211,6 +211,11 @@ out sends you to log in and back; logged in, it asks "Join *squad*?" with one bu
 POST joins, so a chat app previewing the link can't join anyone. The owner can **Reset** the
 token; the old link stops working, and members who joined with it stay.
 
+The owner picks who can see the squad on its page: **Only members** (`private`), **Anyone
+with the link** (`unlisted`) or **Everyone** (`public`); `open` isn't offered. A private squad's
+page never puts its name in the title or Open Graph tags, so even a preview made with a
+member's cookies says only "zesquad"; without them it's a 404 anyway.
+
 A squad's id, a random UUID v4 written in Crockford base32 (`squad_id.rs` in core), is the
 secret of an `open` squad, and the view link of the others; squads made before that have the dashed UUID form, which still works. Anything that
 changes a squad checks the character belongs to that squad. Optionally, `ZESQUAD_PASSWORD`
