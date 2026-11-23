@@ -950,6 +950,7 @@ async fn added_characters_get_their_armory_details() {
         "Aldric <span class=\"surname\">Thornwood</span>",
         "Level 26",
         "Rogue",
+        "<span class=\"ruleset\" title=\"Ruleset\">Normal</span>",
         "&lt;Order of the Lantern&gt;</a> · item level 14 · Combat 17 / Assassination 5",
         "Red Defias Mask",
         "Skinning 158/225",

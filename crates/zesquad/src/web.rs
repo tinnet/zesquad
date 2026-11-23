@@ -1145,6 +1145,7 @@ fn example_roster() -> Roster {
             class: Some(class.into()),
             faction: Some(faction.into()),
             guild: guild.map(Into::into),
+            ruleset: Some("Normal".into()),
             item_level: Some(item_level),
             last_login_ms: Some((now * 1000) - hours_ago * HOUR_MS),
             talents: talents.iter().map(|(t, p)| ((*t).into(), *p)).collect(),

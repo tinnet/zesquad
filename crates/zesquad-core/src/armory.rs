@@ -98,6 +98,8 @@ pub struct Profile {
     pub guild: Option<String>,
     /// The guild's slug, for linking to its page.
     pub guild_slug: Option<String>,
+    /// The ruleset the character plays on: `Normal`, `PvP`, `Roleplay` or `Roleplay PvP`.
+    pub ruleset: Option<String>,
     pub item_level: Option<u64>,
     /// Milliseconds since the epoch.
     pub last_login_ms: Option<i64>,
@@ -148,6 +150,7 @@ impl Profile {
             p.faction = str_at(s, &["faction", "type"]);
             p.guild = str_at(s, &["guild", "name"]);
             p.guild_slug = str_at(s, &["guild", "slug"]);
+            p.ruleset = str_at(s, &["ruleset", "name"]);
             p.item_level = s["equipped_item_level"]
                 .as_u64()
                 .or_else(|| s["average_item_level"].as_u64());
@@ -307,6 +310,7 @@ mod tests {
         assert_eq!(p.faction.as_deref(), Some("ALLIANCE"));
         assert_eq!(p.guild.as_deref(), Some("Order of the Lantern"));
         assert_eq!(p.guild_slug.as_deref(), Some("order-of-the-lantern"));
+        assert_eq!(p.ruleset.as_deref(), Some("Normal"));
         assert_eq!(p.item_level, Some(14));
         assert_eq!(p.last_login_ms, Some(1_794_955_893_000));
         assert_eq!(p.class_key(), "rogue");

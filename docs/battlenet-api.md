@@ -163,7 +163,8 @@ with made-up values and the `_links` / `href` fields left out:
 - The summary links to `achievements`, `titles`, `pvp_summary`, `encounters`, `media`,
   `specializations`, `statistics`, `mythic_keystone_profile`, `equipment`, `appearance`,
   `collections`, `reputations`, `quests`, `achievements_statistics`, `professions`.
-- `ruleset` (dynamic namespace) is new with Forever; "Normal" is the only value seen so far.
+- `ruleset` (dynamic namespace) is new with Forever; "Normal" is the only value seen so far;
+  the cards show its `name`. The ruleset index lists the others (see Auction houses).
 
 ### Other responses zesquad reads
 

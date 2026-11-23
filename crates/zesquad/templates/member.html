@@ -12,6 +12,7 @@
         {% if let Some(race) = m.profile.race %}{{ race }}{% endif %}
         {% if let Some(class) = m.profile.class %}<span class="class">{{ class }}</span>{% endif %}
         {% if let Some(faction) = m.profile.faction %}<span class="faction {{ faction|lower }}">{{ faction|lower }}</span>{% endif %}
+        {% if let Some(ruleset) = m.profile.ruleset %}<span class="ruleset" title="Ruleset">{{ ruleset }}</span>{% endif %}
       </p>
       {%- let details = m.details_line() %}
       {% if m.profile.guild.is_some() || !details.is_empty() %}<p class="line sub">

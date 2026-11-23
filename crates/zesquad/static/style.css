@@ -187,6 +187,11 @@ fieldset.plain { border: 0; margin: 0; padding: 0; }
 .faction { font-size: .75rem; text-transform: uppercase; letter-spacing: .05em; margin-left: .25rem; }
 .faction.alliance { color: var(--alliance); }
 .faction.horde { color: var(--horde); }
+.ruleset {
+  font-size: .7rem; text-transform: uppercase; letter-spacing: .05em; margin-left: .25rem;
+  color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 0 .45rem;
+  white-space: nowrap;
+}
 
 .tags { display: flex; flex-wrap: wrap; gap: .4rem; align-items: center; }
 .add-tag input { width: 7rem; padding: .15rem .6rem; border-radius: 999px; font-size: .85rem; }
