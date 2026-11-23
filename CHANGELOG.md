@@ -2,6 +2,16 @@
 
 What changed in each zesquad release. Versions are dates (CalVer).
 
+## 2026.11.23.2
+
+### Features
+
+- **web**: Guild pages with a searchable roster ([051cbe8](https://github.com/tinnet/zesquad/commit/051cbe8b84acffdf1ae76c76905efc1349d0a5fe))
+
+### Documentation
+
+- Guild rosters come whole, without paging ([23fef0f](https://github.com/tinnet/zesquad/commit/23fef0fe4810910567b9f905cf5c43814c1cc90b))
+
 ## 2026.11.23.1
 
 ### Features
