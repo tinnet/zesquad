@@ -2,6 +2,12 @@
 
 What changed in each zesquad release. Versions are dates (CalVer).
 
+## 2026.11.23.3
+
+### Features
+
+- **web**: Show each character's ruleset on its card ([5d9f327](https://github.com/tinnet/zesquad/commit/5d9f327afd3c28e17e2180b5683d420bfa0ea64e))
+
 ## 2026.11.23.2
 
 ### Features
