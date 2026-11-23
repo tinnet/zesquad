@@ -139,11 +139,13 @@ impl SquadAccess {
             .extensions
             .get::<crate::login::CurrentUser>()
             .and_then(|u| u.0.as_ref());
-        // A squad from before accounts goes to the first person logged in to open it.
-        if let (Some(_), Some(user), Visibility::Open) = (&state.login, user, squad.visibility)
-            && db::claim(&state.db, &squad.id, user.id).await?
-        {
-            tracing::info!(user = user.id, squad = squad.id, "claimed a squad");
+        // A squad from before accounts goes to the first person logged in to open it. Read it
+        // again either way: if someone else got there first, it isn't open any more, and the
+        // old copy would still grant everyone an open squad's rights.
+        if let (Some(_), Some(user), Visibility::Open) = (&state.login, user, squad.visibility) {
+            if db::claim(&state.db, &squad.id, user.id).await? {
+                tracing::info!(user = user.id, squad = squad.id, "claimed a squad");
+            }
             squad = db::squad(&state.db, id).await?.ok_or(AppError::NotFound)?;
         }
         let (visibility, role) = match (&state.login, user) {
