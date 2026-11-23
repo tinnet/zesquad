@@ -55,7 +55,7 @@ header.site {
 }
 .brand { font-weight: 700; font-size: 1.25rem; color: var(--accent); text-decoration: none; }
 .tagline { color: var(--muted); font-size: .9rem; }
-.site-nav { font-size: .9rem; }
+.site-nav { font-size: .9rem; display: flex; gap: 1rem; }
 .site-nav a { text-decoration: none; }
 .site-nav a:hover { text-decoration: underline; }
 .account { margin-left: auto; display: flex; gap: .6rem; align-items: baseline; font-size: .9rem; }

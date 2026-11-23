@@ -3218,3 +3218,50 @@ async fn deleting_your_account_hands_your_squads_on() {
     let (_, page) = app.page_as(&friend, &theirs).await;
     assert!(page.contains("Members (1)"), "{page}");
 }
+
+#[tokio::test]
+async fn public_squads_are_listed_for_everyone() {
+    let app = app_with_login(None).await;
+    let owner = log_in_as(&app, GOOD_CODE, "/").await;
+    let (_, front) = app.get("/").await;
+    assert!(front.contains("href=\"/squads\""), "{front}");
+    let (status, page) = app.get("/squads").await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(page.contains("No public squads yet"), "{page}");
+
+    let listed = app.squad_as(&owner, "zebra raiders").await;
+    let unlisted = app.squad_as(&owner, "Quiet alts").await;
+    let first = app.squad_as(&owner, "Alpha team").await;
+    for squad in [&listed, &first] {
+        app.post_as(
+            &owner,
+            &format!("{squad}/visibility"),
+            &[("visibility", "public")],
+        )
+        .await;
+    }
+    app.post_as(
+        &owner,
+        &format!("{first}/characters"),
+        &[("character", "Aldric-Thornwood")],
+    )
+    .await;
+    let (_, page) = app.get("/squads").await;
+    let alpha = page.find("Alpha team").unwrap();
+    let zebra = page.find("zebra raiders").unwrap();
+    assert!(alpha < zebra, "{page}");
+    assert!(page.contains("1 character · Europe"), "{page}");
+    assert!(page.contains(&format!("href=\"{listed}\"")), "{page}");
+    assert!(
+        !page.contains("Quiet alts") && !page.contains(&unlisted),
+        "{page}"
+    );
+}
+
+#[tokio::test]
+async fn without_accounts_there_is_no_public_list() {
+    let app = app(false).await;
+    let (_, front) = app.get("/").await;
+    assert!(!front.contains("href=\"/squads\""), "{front}");
+    assert_eq!(app.get("/squads").await.0, StatusCode::NOT_FOUND);
+}

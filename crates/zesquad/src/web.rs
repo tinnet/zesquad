@@ -68,7 +68,7 @@ pub fn router(state: AppState) -> Router {
         .route("/account/sessions/delete", post(log_out_everywhere))
         .route("/account/delete", post(delete_account))
         .route("/privacy", get(privacy_page))
-        .route("/squads", post(create_squad))
+        .route("/squads", get(public_squads).post(create_squad))
         .route("/recent/{squad}/forget", post(forget_squad))
         .route("/s/{squad}", get(squad_page))
         .route("/s/{squad}/roster", get(roster_partial))
@@ -1169,6 +1169,23 @@ async fn index(State(state): State<AppState>, headers: HeaderMap, nav: Nav) -> R
         region: state.default_region,
     };
     Ok((AppendHeaders(cookie), page).into_response())
+}
+
+#[derive(Template, WebTemplate)]
+#[template(path = "squads.html")]
+struct SquadsPage {
+    nav: Nav,
+    squads: Vec<db::PublicSquad>,
+}
+
+/// The public squads, for anyone to browse; only with accounts on, since without them no squad
+/// is public.
+async fn public_squads(State(state): State<AppState>, nav: Nav) -> Result<SquadsPage> {
+    if state.login.is_none() {
+        return Err(AppError::NotFound);
+    }
+    let squads = db::public_squads(&state.db).await?;
+    Ok(SquadsPage { nav, squads })
 }
 
 async fn forget_squad(headers: HeaderMap, Path(squad): Path<String>) -> Response {

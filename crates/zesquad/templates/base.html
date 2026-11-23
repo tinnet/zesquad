@@ -22,7 +22,7 @@
   <header class="site">
     <a href="/" class="brand">zesquad</a>
     <span class="tagline">friend squads for WoW: Forever</span>
-    <nav class="site-nav"><a href="/auctions">Auction house</a></nav>
+    <nav class="site-nav">{% if nav.login %}<a href="/squads">Squads</a>{% endif %}<a href="/auctions">Auction house</a></nav>
     <div class="account">
       {%- if let Some(user) = nav.user %}
       <a href="/account" class="battletag" title="Your account">{{ user.battletag }}</a>

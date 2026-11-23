@@ -226,6 +226,9 @@ delete. Deleting your account hands each squad you own to the member who's been 
 longest, and deletes squads with nobody else in them (`db::delete_user`, one transaction);
 `/account` lists which before you confirm.
 
+`/squads` (**Squads** in the header, with accounts on) lists the public squads by name, with
+their character count and region.
+
 A squad's id, a random UUID v4 written in Crockford base32 (`squad_id.rs` in core), is the
 secret of an `open` squad, and the view link of the others; squads made before that have the dashed UUID form, which still works. Anything that
 changes a squad checks the character belongs to that squad. Optionally, `ZESQUAD_PASSWORD`

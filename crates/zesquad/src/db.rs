@@ -622,6 +622,31 @@ impl SquadSummary {
     }
 }
 
+/// A squad on the public list.
+#[derive(Debug, sqlx::FromRow)]
+pub struct PublicSquad {
+    pub id: String,
+    pub name: String,
+    #[sqlx(try_from = "String")]
+    pub region: Region,
+    pub characters: i64,
+}
+
+/// Every public squad, by name.
+///
+/// # Errors
+///
+/// On database errors.
+pub async fn public_squads(db: &SqlitePool) -> anyhow::Result<Vec<PublicSquad>> {
+    Ok(sqlx::query_as(
+        "SELECT s.id, s.name, s.region,
+                (SELECT COUNT(*) FROM characters c WHERE c.squad_id = s.id) AS characters
+         FROM squads s WHERE s.visibility = 'public' ORDER BY s.name COLLATE NOCASE, s.id",
+    )
+    .fetch_all(db)
+    .await?)
+}
+
 /// The squads `user_id` is in, the latest joined first.
 ///
 /// # Errors

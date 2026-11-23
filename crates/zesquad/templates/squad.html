@@ -75,7 +75,7 @@
           {%- match v %}
           {%- when Visibility::Private %} · others get "not found", even with the link
           {%- when Visibility::Unlisted %} · they can look, not edit
-          {%- when Visibility::Public %} · they can look, not edit
+          {%- when Visibility::Public %} · listed on <a href="/squads">Squads</a>; they can look, not edit
           {%- when Visibility::Open %}
           {%- endmatch %}</span>
         </label>

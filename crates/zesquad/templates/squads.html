@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}Squads · zesquad{% endblock %}
+{% block content %}
+<section class="recent">
+  <h1>Squads</h1>
+  {%- if squads.is_empty() %}
+  <p class="empty">No public squads yet. A squad's owner can list it here: on the squad's page, under "Who can see it", pick <strong>Everyone</strong>.</p>
+  {%- else %}
+  <ul class="plain recent-list">
+    {%- for s in squads %}
+    <li class="row">
+      <a href="/s/{{ s.id }}" class="grow">{{ s.name }}</a>
+      <span class="hint">{{ s.characters }} character{% if s.characters != 1 %}s{% endif %} · {{ s.region.name() }}</span>
+    </li>
+    {%- endfor %}
+  </ul>
+  <p class="hint">Squads whose owners chose to list them. Anyone can look; members edit.</p>
+  {%- endif %}
+</section>
+{% endblock %}
