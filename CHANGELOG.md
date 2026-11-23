@@ -2,6 +2,18 @@
 
 What changed in each zesquad release. Versions are dates (CalVer).
 
+## 2026.11.23
+
+### Features
+
+- **web**: Slow down repeated logins and changes ([72e28e3](https://github.com/tinnet/zesquad/commit/72e28e31888e6941b75b55bf058afc1488f7a032))
+
+### Fixes
+
+- **web**: A removed member can't rejoin with the old invite link ([6993168](https://github.com/tinnet/zesquad/commit/6993168c2b9985778aa9d27b55dc3ad15ffff78a))
+- **web**: Losing the race to claim an old squad grants nothing ([f82ca99](https://github.com/tinnet/zesquad/commit/f82ca99d22efced0ab2e3274ddb572404f564b53))
+- **web**: Turning logins off no longer exposes private squads ([f6672f9](https://github.com/tinnet/zesquad/commit/f6672f92ea55bd2a6008b7677d47f5b25ea6afea))
+
 ## 2026.11.22.4
 
 ### Features
