@@ -2,6 +2,12 @@
 
 What changed in each zesquad release. Versions are dates (CalVer).
 
+## 2026.11.23.1
+
+### Features
+
+- **web**: Move squad settings to their own page ([0af68fb](https://github.com/tinnet/zesquad/commit/0af68fbb03b93650c1297ff56acc912bc8cc6f3d))
+
 ## 2026.11.23
 
 ### Features
