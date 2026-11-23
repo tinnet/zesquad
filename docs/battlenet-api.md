@@ -125,7 +125,7 @@ Classic doesn't list); the status column is what we saw on Forever on 2026-11-17
 | Quests | `.../quests` | **200**: `in_progress` list (retail endpoint) |
 | Titles, encounters, collections, mythic keystone | `.../titles`, `.../encounters`, ... | 200 but empty or index-only so far |
 | Guild | `/data/wow/guild/{guild-slug}` | **200**, realmless like characters: `id`, `name`, `name_search`, `faction`, `member_count`, `achievement_points`, `created_timestamp`, `ruleset` |
-| Guild roster | `/data/wow/guild/{guild-slug}/roster` | **200**: `members[] {rank, character {name, surname, id, slug, level, playable_class, playable_race, faction}}` |
+| Guild roster | `/data/wow/guild/{guild-slug}/roster` | **200**: `_links`, `guild`, `members[] {rank, character {key, name, surname, id, slug, level, playable_class, playable_race, faction}}`. The whole roster in one response, no paging (see Verified) |
 | Guild achievements, activity | `/data/wow/guild/{guild-slug}/achievements`, `.../activity` | 200, empty so far |
 
 Static and dynamic data (classes, races, items, realms) are in the [Classic Game Data APIs][classic-data];
@@ -264,6 +264,7 @@ repeats any of them.
 | `/data/wow/ruleset/index`, `/ruleset/{1,2,3,15}/auctions/index` (EU and US, 2026-11-20) | **200**, see Auction houses |
 | `/data/wow/ruleset/{1,2}/auctions/{house}[/commodities]` for every house id, EU and US | **200**, see Auction houses |
 | `/data/wow/guild/{slug}`, `/roster` for a real guild | **200**, see Endpoints |
+| `/data/wow/guild/{slug}`, `/roster` for a big US guild (`profile-forever-us`, 2026-11-23) | **200**: `member_count` 823 and 823 `members`, no paging keys; about 650 KB indented. Ranks 0-6, 0 is the guild master |
 | `/profile/wow/character/{name}-{surname}[/...]` for real level 10-30 characters | **200** for the summary and every sub-endpoint listed above, except `hunter-pets` (404; neither is a hunter) |
 
 An unrouted path gives an empty 404, which is what the forum saw for `/{name}-{surname}` before
