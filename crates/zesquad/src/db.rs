@@ -495,6 +495,35 @@ pub struct SquadSummary {
     pub id: String,
     pub name: String,
     pub characters: i64,
+    #[sqlx(try_from = "String")]
+    pub visibility: Visibility,
+    /// Your role in it, for the squads you're in.
+    #[sqlx(default)]
+    pub role: Option<String>,
+}
+
+impl SquadSummary {
+    #[must_use]
+    pub fn is_owner(&self) -> bool {
+        self.role.as_deref() == Some(Role::Owner.as_str())
+    }
+}
+
+/// The squads `user_id` is in, the latest joined first.
+///
+/// # Errors
+///
+/// On database errors.
+pub async fn member_squads(db: &SqlitePool, user_id: i64) -> anyhow::Result<Vec<SquadSummary>> {
+    Ok(sqlx::query_as(
+        "SELECT s.id, s.name, s.visibility, m.role,
+                (SELECT COUNT(*) FROM characters c WHERE c.squad_id = s.id) AS characters
+         FROM squad_members m JOIN squads s ON s.id = m.squad_id
+         WHERE m.user_id = ? ORDER BY m.joined_at DESC, s.name",
+    )
+    .bind(user_id)
+    .fetch_all(db)
+    .await?)
 }
 
 /// The squads with these ids that exist, in the order given.
@@ -504,7 +533,8 @@ pub struct SquadSummary {
 /// On database errors.
 pub async fn squad_summaries(db: &SqlitePool, ids: &[String]) -> anyhow::Result<Vec<SquadSummary>> {
     let mut found: Vec<SquadSummary> = sqlx::query_as(
-        "SELECT s.id, s.name, (SELECT COUNT(*) FROM characters c WHERE c.squad_id = s.id) AS characters
+        "SELECT s.id, s.name, s.visibility,
+                (SELECT COUNT(*) FROM characters c WHERE c.squad_id = s.id) AS characters
          FROM squads s WHERE s.id IN (SELECT value FROM json_each(?))",
     )
     .bind(serde_json::to_string(ids)?)

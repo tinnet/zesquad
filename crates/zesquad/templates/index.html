@@ -1,8 +1,22 @@
 {% extends "base.html" %}
 {% block content %}
-{% if !recent.is_empty() %}
+{% if !mine.is_empty() || !recent.is_empty() %}
 <section class="recent">
   <h1>Your squads</h1>
+  {%- if !mine.is_empty() %}
+  <ul class="plain recent-list">
+    {% for s in mine %}
+    <li class="row">
+      <a href="/s/{{ s.id }}" class="grow">{{ s.name }}</a>
+      <span class="hint">{% if s.is_owner() %}yours · {% endif %}{{ s.characters }} character{% if s.characters != 1 %}s{% endif %}</span>
+    </li>
+    {% endfor %}
+  </ul>
+  {%- endif %}
+  {%- if !recent.is_empty() %}
+  {%- if !mine.is_empty() %}
+  <h2 class="list-title">Also opened in this browser</h2>
+  {%- endif %}
   <ul class="plain recent-list">
     {% for s in recent %}
     <li class="row">
@@ -14,7 +28,10 @@
     </li>
     {% endfor %}
   </ul>
+  {%- if mine.is_empty() %}
   <p class="hint">Squads you opened in this browser.</p>
+  {%- endif %}
+  {%- endif %}
 </section>
 {% endif %}
 <section class="intro">
@@ -53,7 +70,7 @@
   {%- endif %}
   {% if let Some(error) = error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
 </section>
-{% if recent.is_empty() %}
+{% if mine.is_empty() && recent.is_empty() %}
 <section class="how">
   <h2>How it works</h2>
   <ol class="steps">

@@ -156,6 +156,9 @@ Someone without squads yet gets, on the front page, "how it works" in three step
 example squad of made-up characters, rendered with the same card (`member.html`) as a real
 roster in its read-only form: no forms, no links.
 
+Logged in, the front page lists the squads you're in first, then the others this browser
+opened. Either way, squads you can't see (private ones you're not in) are left out.
+
 The front page lists the squads this browser opened lately, from a cookie (`zesquad_recent`,
 HttpOnly, `SameSite=Lax`) holding up to ten squad ids, newest first (`recent.rs` in core). A
 squad page puts its id first; **Forget** takes one off. Ids of squads that are gone are dropped

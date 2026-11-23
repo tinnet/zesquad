@@ -632,7 +632,9 @@ pub fn urlencode(s: &str) -> String {
 #[template(path = "index.html")]
 struct IndexPage {
     nav: Nav,
-    /// Squads this browser opened lately, newest first.
+    /// Squads you're in, when logged in.
+    mine: Vec<db::SquadSummary>,
+    /// Other squads this browser opened lately that you can still see, newest first.
     recent: Vec<db::SquadSummary>,
     /// Example characters showing what a squad looks like.
     example: Roster,
@@ -1086,10 +1088,38 @@ fn example_roster() -> Roster {
     }
 }
 
+/// The front page's lists: the squads you're in, then the others this browser opened that you
+/// can still see; and the cookie to write back when some of those are gone.
+async fn front_lists(
+    state: &AppState,
+    headers: &HeaderMap,
+    nav: &Nav,
+) -> Result<(
+    Vec<db::SquadSummary>,
+    Vec<db::SquadSummary>,
+    Option<(header::HeaderName, String)>,
+)> {
+    let mine = match (&state.login, &nav.user) {
+        (Some(_), Some(user)) => db::member_squads(&state.db, user.id).await?,
+        _ => Vec::new(),
+    };
+    let (mut recent, cookie) = recent_squads(state, headers).await?;
+    recent.retain(|s| {
+        let visibility = if state.login.is_some() {
+            s.visibility
+        } else {
+            Visibility::Open
+        };
+        !mine.iter().any(|m| m.id == s.id) && access::allows(visibility, None, Action::View)
+    });
+    Ok((mine, recent, cookie))
+}
+
 async fn index(State(state): State<AppState>, headers: HeaderMap, nav: Nav) -> Result<Response> {
-    let (recent, cookie) = recent_squads(&state, &headers).await?;
+    let (mine, recent, cookie) = front_lists(&state, &headers, &nav).await?;
     let page = IndexPage {
         nav,
+        mine,
         recent,
         example: example_roster(),
         error: None,
@@ -1142,9 +1172,10 @@ async fn create_squad(
             Ok(Redirect::to(&squad_path(&id)).into_response())
         }
         Err(error) => {
-            let (recent, _) = recent_squads(&state, &headers).await?;
+            let (mine, recent, _) = front_lists(&state, &headers, &nav).await?;
             let page = IndexPage {
                 nav,
+                mine,
                 recent,
                 example: example_roster(),
                 error: Some(error),

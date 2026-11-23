@@ -3005,3 +3005,62 @@ async fn the_owner_chooses_who_can_see_a_squad() {
         "{page}"
     );
 }
+
+#[tokio::test]
+async fn the_front_page_lists_your_squads_first() {
+    let app = app_with_login(None).await;
+    let owner = log_in_as(&app, GOOD_CODE, "/").await;
+    let friend = log_in_as(&app, FRIEND_CODE, "/").await;
+    let raiders = app.squad_as(&owner, "Thursday raiders").await;
+    let alts = app.squad_as(&friend, "Friendly alts").await;
+    let secret = app.squad_as(&friend, "Friendly secrets").await;
+    let invite = invite_path(&app.page_as(&owner, &raiders).await.1);
+    app.post_as(&friend, &invite, &[]).await;
+
+    // The friend is in two squads, one theirs, and their front page says so.
+    let (_, front) = app.page_as(&friend, "/").await;
+    let section = front.split("<section class=\"intro\">").next().unwrap();
+    assert!(section.contains("Thursday raiders"), "{section}");
+    assert!(section.contains("yours · 0 characters"), "{section}");
+    assert!(!section.contains("Forget"), "{section}");
+
+    // The owner opened the friend's squads in this browser; only the one they can still see
+    // stays, after their own.
+    app.post_as(
+        &friend,
+        &format!("{secret}/visibility"),
+        &[("visibility", "private")],
+    )
+    .await;
+    let ids = |paths: &[&String]| {
+        paths
+            .iter()
+            .map(|p| p.strip_prefix("/s/").unwrap())
+            .collect::<Vec<_>>()
+            .join(".")
+    };
+    let cookie = format!(
+        "{owner}; zesquad_recent={}",
+        ids(&[&secret, &alts, &raiders])
+    );
+    let (_, front) = app.page_as(&cookie, "/").await;
+    let section = front.split("<section class=\"intro\">").next().unwrap();
+    let raiders_at = section.find("Thursday raiders").unwrap();
+    let alts_at = section.find("Friendly alts").unwrap();
+    assert!(raiders_at < alts_at, "{section}");
+    assert!(section.contains("Also opened in this browser"), "{section}");
+    assert!(!section.contains("Friendly secrets"), "{section}");
+    // Logged out, the same browser sees only what anyone with the links may.
+    let (_, front) = app
+        .page_as(
+            &format!("zesquad_recent={}", ids(&[&secret, &alts, &raiders])),
+            "/",
+        )
+        .await;
+    let section = front.split("<section class=\"intro\">").next().unwrap();
+    assert!(
+        section.contains("Friendly alts") && section.contains("Thursday raiders"),
+        "{section}"
+    );
+    assert!(!section.contains("Friendly secrets"), "{section}");
+}
