@@ -2485,6 +2485,18 @@ impl App {
             .unwrap()
     }
 
+    /// Posts like htmx does, with `cookie`.
+    async fn htmx_as(&self, cookie: &str, path: &str, form: &[(&str, &str)]) -> reqwest::Response {
+        self.http
+            .post(format!("{}{path}", self.base))
+            .header(header::COOKIE, cookie)
+            .header("HX-Request", "true")
+            .form(form)
+            .send()
+            .await
+            .unwrap()
+    }
+
     /// GETs a page with `cookie`: its status and text.
     async fn page_as(&self, cookie: &str, path: &str) -> (StatusCode, String) {
         let r = self.get_with(path, cookie).await;
@@ -2561,4 +2573,195 @@ async fn without_accounts_squads_are_open_and_nobodys() {
         .await
         .unwrap();
     assert_eq!(members, 0);
+}
+
+/// Every form a squad page can post, below the squad's path, for character `id` tagged `raid`.
+fn squad_posts(id: &str) -> Vec<(String, Vec<(&'static str, &'static str)>)> {
+    vec![
+        ("/name".into(), vec![("name", "Renamed")]),
+        (
+            "/discord".into(),
+            vec![("webhook", "https://discord.com/api/webhooks/1/x")],
+        ),
+        ("/discord/delete".into(), vec![]),
+        ("/characters".into(), vec![("character", "Bryn-Ashvale")]),
+        (format!("/characters/{id}/tags"), vec![("tags", "tank")]),
+        (format!("/characters/{id}/tags/raid/delete"), vec![]),
+        ("/tags/raid/colour".into(), vec![("colour", "#ff0000")]),
+        (format!("/characters/{id}/refresh"), vec![]),
+        (format!("/characters/{id}/delete"), vec![]),
+    ]
+}
+
+/// What a squad looks like in the database: its name and characters with their tags.
+async fn squad_state(db: &sqlx::SqlitePool, squad: &str) -> String {
+    let id = squad.strip_prefix("/s/").unwrap();
+    let rows: Vec<(String, String, Option<String>)> = sqlx::query_as(
+        "SELECT s.name || ' ' || COALESCE(s.discord_webhook, ''), COALESCE(c.char_key, ''),
+                (SELECT group_concat(tag_key) FROM character_tags t WHERE t.character_id = c.id)
+         FROM squads s LEFT JOIN characters c ON c.squad_id = s.id WHERE s.id = ? ORDER BY c.id",
+    )
+    .bind(id)
+    .fetch_all(db)
+    .await
+    .unwrap();
+    let colours: Vec<String> =
+        sqlx::query_scalar("SELECT tag_key || colour FROM tag_colours WHERE squad_id = ?")
+            .bind(id)
+            .fetch_all(db)
+            .await
+            .unwrap();
+    format!("{rows:?} {colours:?}")
+}
+
+#[tokio::test]
+async fn only_members_change_a_squad() {
+    let app = app_with_login(None).await;
+    let owner = log_in_as(&app, GOOD_CODE, "/").await;
+    let stranger = log_in_as(&app, STRANGER_CODE, "/").await;
+    let squad = app.squad_as(&owner, "Thursday raiders").await;
+    let r = app
+        .post_as(
+            &owner,
+            &format!("{squad}/characters"),
+            &[("character", "Aldric-Thornwood"), ("tags", "raid")],
+        )
+        .await;
+    assert_eq!(r.status(), StatusCode::SEE_OTHER);
+    let (_, page) = app.page_as(&owner, &squad).await;
+    let id = member_id(&page, 0);
+    assert!(
+        page.contains("action=\"/s/") && page.contains("/characters\""),
+        "{page}"
+    );
+    assert!(page.contains("Rename"), "{page}");
+    let db = app.db().await;
+    let before = squad_state(&db, &squad).await;
+
+    // Logged out or not in the squad: the roster, read-only, and every change refused.
+    for who in ["", stranger.as_str()] {
+        let (status, page) = app.page_as(who, &squad).await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(
+            page.contains("Thursday raiders") && page.contains("Aldric"),
+            "{page}"
+        );
+        assert!(!page.contains("method=\"post\" action=\"/s/"), "{page}");
+        assert!(
+            page.contains("Ask a member for the invite link to edit"),
+            "{page}"
+        );
+        let (status, partial) = app.page_as(who, &format!("{squad}/roster")).await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(!partial.contains("method=\"post\""), "{partial}");
+        for (path, form) in squad_posts(&id) {
+            let r = app.post_as(who, &format!("{squad}{path}"), &form).await;
+            assert_eq!(r.status(), StatusCode::FORBIDDEN, "{path}");
+            assert!(r.text().await.unwrap().contains("invite link"), "{path}");
+            // htmx can't swap a 403, so it's told to reload, which shows the read-only page.
+            let r = app.htmx_as(who, &format!("{squad}{path}"), &form).await;
+            assert_eq!(r.status(), StatusCode::OK, "{path}");
+            assert_eq!(r.headers()["hx-refresh"], "true", "{path}");
+        }
+    }
+    assert_eq!(squad_state(&db, &squad).await, before);
+
+    // A member edits the roster, but renaming and Discord are the owner's.
+    let friend = log_in_as(&app, FRIEND_CODE, "/").await;
+    sqlx::query(
+        "INSERT INTO squad_members (squad_id, user_id, role, joined_at)
+         SELECT ?, id, 'member', 0 FROM users WHERE battletag = 'Friendly#5678'",
+    )
+    .bind(squad.strip_prefix("/s/").unwrap())
+    .execute(&db)
+    .await
+    .unwrap();
+    let (_, page) = app.page_as(&friend, &squad).await;
+    assert!(
+        page.contains("/characters\"") && !page.contains("Rename"),
+        "{page}"
+    );
+    assert!(!page.contains("Ask a member"), "{page}");
+    for (path, form) in squad_posts(&id) {
+        let r = app.post_as(&friend, &format!("{squad}{path}"), &form).await;
+        let expected = if path.starts_with("/name") || path.starts_with("/discord") {
+            StatusCode::FORBIDDEN
+        } else {
+            StatusCode::SEE_OTHER
+        };
+        assert_eq!(r.status(), expected, "{path}");
+    }
+    let r = app
+        .post_as(&owner, &format!("{squad}/name"), &[("name", "Renamed")])
+        .await;
+    assert_eq!(r.status(), StatusCode::SEE_OTHER);
+    let (_, page) = app.page_as("", &squad).await;
+    assert!(page.contains("Renamed"), "{page}");
+}
+
+#[tokio::test]
+async fn a_private_squad_is_not_there_for_anyone_else() {
+    let app = app_with_login(None).await;
+    let owner = log_in_as(&app, GOOD_CODE, "/").await;
+    let stranger = log_in_as(&app, STRANGER_CODE, "/").await;
+    let squad = app.squad_as(&owner, "Secret raiders").await;
+    let db = app.db().await;
+    sqlx::query("UPDATE squads SET visibility = 'private'")
+        .execute(&db)
+        .await
+        .unwrap();
+    assert_eq!(app.page_as(&owner, &squad).await.0, StatusCode::OK);
+    for who in ["", stranger.as_str()] {
+        let (status, page) = app.page_as(who, &squad).await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        assert!(!page.contains("Secret raiders"), "{page}");
+        assert_eq!(
+            app.page_as(who, &format!("{squad}/roster")).await.0,
+            StatusCode::NOT_FOUND
+        );
+        for (path, form) in squad_posts("1") {
+            let r = app.post_as(who, &format!("{squad}{path}"), &form).await;
+            assert_eq!(r.status(), StatusCode::NOT_FOUND, "{path}");
+        }
+    }
+}
+
+#[tokio::test]
+async fn open_squads_stay_editable_by_anyone_with_the_link() {
+    let app = app_with_login(None).await;
+    let db = app.db().await;
+    sqlx::query(
+        "INSERT INTO squads (id, name, region, created_at) VALUES ('oldsquad', 'Old raiders', 'eu', 0)",
+    )
+    .execute(&db)
+    .await
+    .unwrap();
+    let r = app.add("/s/oldsquad", "Aldric-Thornwood", "").await;
+    assert_eq!(r.status(), StatusCode::SEE_OTHER);
+    let r = app
+        .post("/s/oldsquad/name", &[("name", "Older raiders")])
+        .await;
+    assert_eq!(r.status(), StatusCode::SEE_OTHER);
+    let (_, page) = app.get("/s/oldsquad").await;
+    assert!(
+        page.contains("Older raiders") && page.contains("see and edit"),
+        "{page}"
+    );
+}
+
+#[tokio::test]
+async fn with_accounts_off_every_squad_is_open() {
+    let app = app(false).await;
+    let squad = app.squad("Thursday raiders").await;
+    let db = app.db().await;
+    // Even one made private while accounts were on.
+    sqlx::query("UPDATE squads SET visibility = 'private'")
+        .execute(&db)
+        .await
+        .unwrap();
+    let r = app.add(&squad, "Aldric-Thornwood", "").await;
+    assert_eq!(r.status(), StatusCode::SEE_OTHER);
+    let (status, page) = app.get(&squad).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(page.contains("Rename"), "{page}");
 }

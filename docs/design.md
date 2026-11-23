@@ -193,10 +193,18 @@ With accounts on, a squad has members (`squad_members`): one `owner`, who starte
 `open`: anyone with the link sees and edits them, and nobody owns them. What a role may do
 with a squad of a given visibility is one function, `access::allows` in core. Starting a squad
 takes a login; it starts `unlisted`, with a random invite token (`squads.invite_token`). With
-accounts off, squads are made `open` and stay that way.
+accounts off, squads are made `open` and stay that way, and every squad is treated as `open`.
 
-A squad's id, a random UUID v4 written in Crockford base32 (`squad_id.rs` in core), is its
-secret; squads made before that have the dashed UUID form, which still works. Anything that
+Every squad route takes one of the extractors in `web.rs` (`CanView`, `CanEdit`,
+`CanConfigure`, …), which loads the squad and your role and applies the rule; `db::Squad` itself
+isn't an extractor, so a new route can't skip the check. A squad you can't see is a 404, the
+same as one that doesn't exist. One you can see but not change is a 403; for htmx it's a 200
+with `HX-Refresh` instead, since htmx doesn't swap a 403, and the reload shows the page as you
+may see it. Members change the roster; renaming and the Discord channel are the owner's. Anyone
+else gets the roster read-only (`editable: false`), polling included.
+
+A squad's id, a random UUID v4 written in Crockford base32 (`squad_id.rs` in core), is the
+secret of an `open` squad, and the view link of the others; squads made before that have the dashed UUID form, which still works. Anything that
 changes a squad checks the character belongs to that squad. Optionally, `ZESQUAD_PASSWORD`
 puts one shared password in front of everything (`auth.rs`, an axum middleware). Logging in sets an HttpOnly, `SameSite=Lax` cookie holding
 `sha256(key, 0, password)`, where the key is random and kept in the `settings` table: sessions

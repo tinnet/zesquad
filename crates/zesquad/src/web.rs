@@ -14,6 +14,7 @@ use axum::{Json, Router};
 use serde::Deserialize;
 use sqlx::SqlitePool;
 use tokio::sync::Notify;
+use zesquad_core::access::{self, Action, Role, Visibility};
 use zesquad_core::armory::Profile;
 use zesquad_core::auctions::{self, Money};
 use zesquad_core::discord::Webhook;
@@ -95,11 +96,24 @@ pub fn router(state: AppState) -> Router {
     open.merge(protected).with_state(state)
 }
 
-/// A squad from the `{squad}` part of the path; unknown ids are a 404.
-impl FromRequestParts<AppState> for db::Squad {
-    type Rejection = AppError;
+/// A squad from the `{squad}` part of the path, and what the person asking may do with it.
+pub struct SquadAccess {
+    pub squad: db::Squad,
+    /// Their role in it; `None` when logged out or not in it.
+    pub role: Option<Role>,
+    /// The visibility the rule goes by: the squad's, or `Open` with accounts off.
+    visibility: Visibility,
+}
 
-    async fn from_request_parts(parts: &mut Parts, state: &AppState) -> Result<Self> {
+impl SquadAccess {
+    #[must_use]
+    pub fn allows(&self, action: Action) -> bool {
+        access::allows(self.visibility, self.role, action)
+    }
+
+    /// Loads the squad and applies the rule for `action`: a squad you can't see is a 404, the
+    /// same as one that doesn't exist; one you can see but not change this way is a 403.
+    async fn load(parts: &mut Parts, state: &AppState, action: Action) -> Result<Self> {
         let params = RawPathParams::from_request_parts(parts, state)
             .await
             .map_err(|_| AppError::NotFound)?;
@@ -107,9 +121,69 @@ impl FromRequestParts<AppState> for db::Squad {
             .iter()
             .find_map(|(name, value)| (name == "squad").then_some(value))
             .ok_or(AppError::NotFound)?;
-        db::squad(&state.db, id).await?.ok_or(AppError::NotFound)
+        let squad = db::squad(&state.db, id).await?.ok_or(AppError::NotFound)?;
+        let user = parts
+            .extensions
+            .get::<crate::login::CurrentUser>()
+            .and_then(|u| u.0.as_ref());
+        let (visibility, role) = match (&state.login, user) {
+            (None, _) => (Visibility::Open, None),
+            (Some(_), None) => (squad.visibility, None),
+            (Some(_), Some(user)) => (
+                squad.visibility,
+                db::role(&state.db, &squad.id, user.id).await?,
+            ),
+        };
+        let access = Self {
+            squad,
+            role,
+            visibility,
+        };
+        if !access.allows(Action::View) {
+            return Err(AppError::NotFound);
+        }
+        if !access.allows(action) {
+            return Err(AppError::Forbidden {
+                htmx: Htmx::of(&parts.headers),
+            });
+        }
+        Ok(access)
     }
 }
+
+/// Extractors for a squad route, one per thing it does; each loads the squad and refuses
+/// anyone the rule (`zesquad_core::access`) doesn't allow. Every squad route takes one, so a
+/// new route can't forget the check.
+macro_rules! squad_extractor {
+    ($(#[$doc:meta])* $name:ident, $action:expr) => {
+        $(#[$doc])*
+        pub struct $name(pub SquadAccess);
+
+        impl FromRequestParts<AppState> for $name {
+            type Rejection = AppError;
+
+            async fn from_request_parts(parts: &mut Parts, state: &AppState) -> Result<Self> {
+                SquadAccess::load(parts, state, $action).await.map(Self)
+            }
+        }
+    };
+}
+
+squad_extractor!(
+    /// A squad you can see.
+    CanView,
+    Action::View
+);
+squad_extractor!(
+    /// A squad whose roster you can change.
+    CanEdit,
+    Action::Edit
+);
+squad_extractor!(
+    /// A squad you can rename and point at a Discord channel.
+    CanConfigure,
+    Action::Configure
+);
 
 /// Whether htmx sent the request (it swaps part of the page rather than loading a new one).
 pub struct Htmx(pub bool);
@@ -211,6 +285,11 @@ pub fn squad_path(id: &str) -> String {
 
 pub enum AppError {
     NotFound,
+    /// Not allowed to change this; `htmx` asked from a page that showed forms it shouldn't
+    /// have (a session that ended, a membership that did), so it gets the page reloaded.
+    Forbidden {
+        htmx: bool,
+    },
     Internal(anyhow::Error),
 }
 
@@ -231,6 +310,16 @@ struct ErrorPage {
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         let (status, title, message) = match self {
+            Self::Forbidden { htmx: true } => {
+                // htmx doesn't swap a 403, but it does follow HX-Refresh on a 200: the reload
+                // shows the page as this person may see it.
+                return (StatusCode::OK, [("hx-refresh", "true")]).into_response();
+            }
+            Self::Forbidden { htmx: false } => (
+                StatusCode::FORBIDDEN,
+                "Only members can change this squad",
+                "Ask a member of the squad for its invite link, then log in and join.",
+            ),
             Self::NotFound => (
                 StatusCode::NOT_FOUND,
                 "Not found",
@@ -536,7 +625,7 @@ struct IndexPage {
 #[template(path = "squad.html")]
 struct SquadPage {
     nav: Nav,
-    squad: db::Squad,
+    access: SquadAccess,
     /// The page's full link, to copy; just the path when the request's host looks wrong.
     link: String,
     roster: Roster,
@@ -545,9 +634,19 @@ struct SquadPage {
 }
 
 impl SquadPage {
+    fn new(nav: Nav, access: SquadAccess, roster: Roster) -> Self {
+        Self {
+            link: nav.link(&squad_path(&access.squad.id)),
+            nav,
+            access,
+            roster,
+            discord_error: None,
+        }
+    }
+
     /// The end of the squad's Discord webhook id, to recognise it by; never the token.
     fn webhook_hint(&self) -> Option<String> {
-        self.squad.webhook().map(|hook| hook.hint())
+        self.access.squad.webhook().map(|hook| hook.hint())
     }
 
     /// One line about the squad for link previews: "6 characters in Europe on zesquad, …".
@@ -556,7 +655,7 @@ impl SquadPage {
         format!(
             "{n} character{} in {} on zesquad, friend squads for WoW: Forever.",
             if n == 1 { "" } else { "s" },
-            self.squad.region.name()
+            self.access.squad.region.name()
         )
     }
 }
@@ -1024,11 +1123,12 @@ struct FilterQuery {
 /// The roster with `filter`, a tag key from `tag_filter`, applied, in `sort`'s order.
 async fn build_roster(
     state: &AppState,
-    squad_id: &str,
+    access: &SquadAccess,
     filter: Option<String>,
     sort: Sort,
     form: Outcome,
 ) -> Result<Roster> {
+    let squad_id = access.squad.id.as_str();
     let now = db::now();
     let colours = Colours(db::tag_colours(&state.db, squad_id).await?);
     let mut members: Vec<MemberView> = db::members(&state.db, &state.armory_cache, squad_id)
@@ -1073,7 +1173,7 @@ async fn build_roster(
         filter,
         sort,
         armory_enabled: state.armory_enabled,
-        editable: true,
+        editable: access.allows(Action::Edit),
         form,
     })
 }
@@ -1082,39 +1182,32 @@ async fn squad_page(
     State(state): State<AppState>,
     headers: HeaderMap,
     nav: Nav,
-    squad: db::Squad,
+    CanView(access): CanView,
     Query(q): Query<FilterQuery>,
 ) -> Result<Response> {
-    let sort = Sort::parse(q.sort.as_deref());
     let roster = build_roster(
         &state,
-        &squad.id,
+        &access,
         tag_filter(q.tag),
-        sort,
+        Sort::parse(q.sort.as_deref()),
         Outcome::default(),
     )
     .await?;
     let mut recent = recent(&headers);
-    recent.visit(&squad.id);
-    let page = SquadPage {
-        link: nav.link(&squad_path(&squad.id)),
-        nav,
-        squad,
-        roster,
-        discord_error: None,
-    };
+    recent.visit(&access.squad.id);
+    let page = SquadPage::new(nav, access, roster);
     Ok(([recent_cookie(&headers, &recent)], page).into_response())
 }
 
 async fn roster_partial(
     State(state): State<AppState>,
-    squad: db::Squad,
+    CanView(access): CanView,
     Query(q): Query<FilterQuery>,
 ) -> Result<RosterPartial> {
     Ok(RosterPartial {
         roster: build_roster(
             &state,
-            &squad.id,
+            &access,
             tag_filter(q.tag),
             Sort::parse(q.sort.as_deref()),
             Outcome::default(),
@@ -1125,9 +1218,10 @@ async fn roster_partial(
 
 async fn rename(
     State(state): State<AppState>,
-    squad: db::Squad,
+    CanConfigure(access): CanConfigure,
     Form(form): Form<NameForm>,
 ) -> Result<Redirect> {
+    let squad = &access.squad;
     // An invalid name just keeps the old one; the field is required in the form anyway.
     if let Ok(name) = SquadName::new(&form.name) {
         db::rename_squad(&state.db, &squad.id, &name).await?;
@@ -1160,7 +1254,7 @@ async fn respond(
     state: &AppState,
     Htmx(htmx): Htmx,
     nav: &Nav,
-    squad: db::Squad,
+    access: SquadAccess,
     view: &ViewForm,
     outcome: Outcome,
 ) -> Result<Response> {
@@ -1169,9 +1263,11 @@ async fn respond(
     let failed = outcome.error.is_some();
     if !htmx && !failed {
         let query = view_query(filter.as_deref(), sort);
-        return Ok(Redirect::to(&format!("{}{query}", squad_path(&squad.id))).into_response());
+        return Ok(
+            Redirect::to(&format!("{}{query}", squad_path(&access.squad.id))).into_response(),
+        );
     }
-    let roster = build_roster(state, &squad.id, filter, sort, outcome).await?;
+    let roster = build_roster(state, &access, filter, sort, outcome).await?;
     if htmx {
         return Ok(RosterPartial { roster }.into_response());
     }
@@ -1180,14 +1276,7 @@ async fn respond(
     } else {
         StatusCode::OK
     };
-    let page = SquadPage {
-        link: nav.link(&squad_path(&squad.id)),
-        nav: nav.clone(),
-        squad,
-        roster,
-        discord_error: None,
-    };
-    Ok((status, page).into_response())
+    Ok((status, SquadPage::new(nav.clone(), access, roster)).into_response())
 }
 
 // ---- Discord ----
@@ -1203,9 +1292,10 @@ struct WebhookForm {
 async fn set_webhook(
     State(state): State<AppState>,
     nav: Nav,
-    squad: db::Squad,
+    CanConfigure(access): CanConfigure,
     Form(form): Form<WebhookForm>,
 ) -> Result<Response> {
+    let squad = &access.squad;
     let error = match Webhook::parse(&form.webhook) {
         Err(e) => Some(e.to_string()),
         Ok(hook) => {
@@ -1230,18 +1320,19 @@ async fn set_webhook(
     let Some(error) = error else {
         return Ok(Redirect::to(&squad_path(&squad.id)).into_response());
     };
-    let roster = build_roster(&state, &squad.id, None, Sort::default(), Outcome::default()).await?;
+    let roster = build_roster(&state, &access, None, Sort::default(), Outcome::default()).await?;
     let page = SquadPage {
-        link: nav.link(&squad_path(&squad.id)),
-        nav,
-        squad,
-        roster,
         discord_error: Some(error),
+        ..SquadPage::new(nav, access, roster)
     };
     Ok((StatusCode::UNPROCESSABLE_ENTITY, page).into_response())
 }
 
-async fn remove_webhook(State(state): State<AppState>, squad: db::Squad) -> Result<Redirect> {
+async fn remove_webhook(
+    State(state): State<AppState>,
+    CanConfigure(access): CanConfigure,
+) -> Result<Redirect> {
+    let squad = &access.squad;
     db::set_webhook(&state.db, &squad.id, None).await?;
     Ok(Redirect::to(&squad_path(&squad.id)))
 }
@@ -1266,11 +1357,12 @@ struct AddForm {
 
 async fn add_character(
     State(state): State<AppState>,
-    squad: db::Squad,
+    CanEdit(access): CanEdit,
     htmx: Htmx,
     nav: Nav,
     Form(form): Form<AddForm>,
 ) -> Result<Response> {
+    let squad = &access.squad;
     let parsed = form
         .character
         .parse::<CharacterName>()
@@ -1302,7 +1394,7 @@ async fn add_character(
             ..Outcome::default()
         },
     };
-    respond(&state, htmx, &nav, squad, &form.view, outcome).await
+    respond(&state, htmx, &nav, access, &form.view, outcome).await
 }
 
 #[derive(Deserialize)]
@@ -1332,12 +1424,13 @@ struct CharacterTagPath {
 
 async fn add_tags(
     State(state): State<AppState>,
-    squad: db::Squad,
+    CanEdit(access): CanEdit,
     Path(path): Path<CharacterPath>,
     htmx: Htmx,
     nav: Nav,
     Form(form): Form<TagsForm>,
 ) -> Result<Response> {
+    let squad = &access.squad;
     let outcome = match parse_tags(&form.tags) {
         Ok(tags) => {
             db::add_tags(&state.db, &squad.id, path.id, &tags).await?;
@@ -1345,7 +1438,7 @@ async fn add_tags(
         }
         Err(e) => Outcome::error(e.to_string()),
     };
-    respond(&state, htmx, &nav, squad, &form.view, outcome).await
+    respond(&state, htmx, &nav, access, &form.view, outcome).await
 }
 
 #[derive(Deserialize)]
@@ -1356,14 +1449,15 @@ struct FilterForm {
 
 async fn remove_tag(
     State(state): State<AppState>,
-    squad: db::Squad,
+    CanEdit(access): CanEdit,
     Path(path): Path<CharacterTagPath>,
     htmx: Htmx,
     nav: Nav,
     Form(form): Form<FilterForm>,
 ) -> Result<Response> {
+    let squad = &access.squad;
     db::remove_tag(&state.db, &squad.id, path.id, &path.tag).await?;
-    respond(&state, htmx, &nav, squad, &form.view, Outcome::default()).await
+    respond(&state, htmx, &nav, access, &form.view, Outcome::default()).await
 }
 
 #[derive(Deserialize)]
@@ -1379,12 +1473,13 @@ struct ColourForm {
 
 async fn set_colour(
     State(state): State<AppState>,
-    squad: db::Squad,
+    CanEdit(access): CanEdit,
     Path(path): Path<TagPath>,
     htmx: Htmx,
     nav: Nav,
     Form(form): Form<ColourForm>,
 ) -> Result<Response> {
+    let squad = &access.squad;
     let colour = if form.reset.is_some() {
         Ok(None)
     } else {
@@ -1404,7 +1499,7 @@ async fn set_colour(
         &state,
         htmx,
         &nav,
-        squad,
+        access,
         &form.view,
         Outcome {
             colours_open: true,
@@ -1416,27 +1511,29 @@ async fn set_colour(
 
 async fn remove_character(
     State(state): State<AppState>,
-    squad: db::Squad,
+    CanEdit(access): CanEdit,
     Path(path): Path<CharacterPath>,
     htmx: Htmx,
     nav: Nav,
     Form(form): Form<FilterForm>,
 ) -> Result<Response> {
+    let squad = &access.squad;
     db::remove_character(&state.db, &squad.id, path.id).await?;
-    respond(&state, htmx, &nav, squad, &form.view, Outcome::default()).await
+    respond(&state, htmx, &nav, access, &form.view, Outcome::default()).await
 }
 
 async fn refresh(
     State(state): State<AppState>,
-    squad: db::Squad,
+    CanEdit(access): CanEdit,
     Path(path): Path<CharacterPath>,
     htmx: Htmx,
     nav: Nav,
     Form(form): Form<FilterForm>,
 ) -> Result<Response> {
+    let squad = &access.squad;
     db::request_refresh(&state.db, &squad.id, path.id).await?;
     state.wake.notify_one();
-    respond(&state, htmx, &nav, squad, &form.view, Outcome::default()).await
+    respond(&state, htmx, &nav, access, &form.view, Outcome::default()).await
 }
 
 // ---- auction prices ----

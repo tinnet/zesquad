@@ -3,6 +3,7 @@
   {#- The poll swaps the whole section, so it waits while someone is typing into it or has a colour picker open. #}
   {%- if roster.polling() %} hx-get="{{ base }}/roster{{ roster.query() }}" hx-swap="outerHTML"
     hx-trigger="every 3s [!this.querySelector('input:not([type=hidden]):focus, input:not([type=hidden]):not([type=color]):not(:placeholder-shown)')]"{% endif %}>
+  {%- if roster.editable %}
   <form method="post" action="{{ base }}/characters" class="add row"
     hx-post="{{ base }}/characters" hx-target="#roster" hx-swap="outerHTML">
     <input type="hidden" name="filter" value="{{ roster.filter_value() }}"><input type="hidden" name="sort" value="{{ roster.sort_value() }}">
@@ -16,6 +17,9 @@
     </label>
     <button type="submit">Add</button>
   </form>
+  {%- else %}
+  <p class="hint">Ask a member for the invite link to edit.</p>
+  {%- endif %}
   {% if let Some(error) = roster.form.error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
   {% if !roster.armory_enabled %}<p class="hint">Armory lookups are off on this server, so only names and tags are shown.</p>{% endif %}
 
@@ -26,6 +30,7 @@
     <a href="{{ roster.tag_link(t.key) }}" class="chip{{ t.paint.class() }}{% if roster.is_filter(t.key) %} on{% endif %}" style="{{ t.paint.style() }}">{{ t.label }}</a>
     {% endfor %}
   </nav>
+  {%- if roster.editable %}
   <details class="colours"{% if roster.form.colours_open %} open{% endif %}>
     <summary>Tag colours</summary>
     <ul class="plain colour-list">
@@ -43,6 +48,7 @@
       {% endfor %}
     </ul>
   </details>
+  {%- endif %}
   {% endif %}
 
   {% if roster.total > 0 %}
@@ -58,7 +64,7 @@
   {% endif %}
 
   {% if roster.members.is_empty() %}
-  <p class="empty">{% if roster.filter.is_some() %}No one has that tag.{% else %}No characters yet. Add the first one above.{% endif %}</p>
+  <p class="empty">{% if roster.filter.is_some() %}No one has that tag.{% else %}No characters yet.{% if roster.editable %} Add the first one above.{% endif %}{% endif %}</p>
   {% else %}
   <ul class="members">
     {% for m in roster.members %}
