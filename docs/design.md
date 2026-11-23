@@ -22,6 +22,9 @@ erDiagram
     characters ||--o{ character_tags : has
     characters }o--|| armory : "region + char_key"
     armory ||--o{ armory_documents : stores
+    squads ||--o{ squad_members : has
+    users ||--o{ squad_members : "is in"
+    users ||--o{ sessions : has
 ```
 
 - A squad has a region (`eu`, `us`, `tw`), picked when it's made and fixed after; its characters
@@ -183,6 +186,14 @@ ends both this session and the shared-password one. `/account` shows your Battle
 everywhere (every session of yours deleted) or delete your account (the `users` row, and
 through foreign keys everything hanging off it). `/privacy`, linked from every page, lists
 everything zesquad keeps.
+
+With accounts on, a squad has members (`squad_members`): one `owner`, who started it, and
+`member`s. A squad's `visibility` says who else sees it: `private` (only members), `unlisted`
+(anyone with the link can look) or `public` (also listed). Squads from before accounts are
+`open`: anyone with the link sees and edits them, and nobody owns them. What a role may do
+with a squad of a given visibility is one function, `access::allows` in core. Starting a squad
+takes a login; it starts `unlisted`, with a random invite token (`squads.invite_token`). With
+accounts off, squads are made `open` and stay that way.
 
 A squad's id, a random UUID v4 written in Crockford base32 (`squad_id.rs` in core), is its
 secret; squads made before that have the dashed UUID form, which still works. Anything that

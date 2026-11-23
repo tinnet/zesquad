@@ -1,6 +1,7 @@
 //! Zesquad's pure logic: validating what people type (character names, tags, squad names) and
 //! turning Battle.net responses into what the pages show. Nothing here does I/O.
 
+pub mod access;
 pub mod account;
 pub mod archive;
 pub mod armory;

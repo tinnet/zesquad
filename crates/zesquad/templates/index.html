@@ -19,11 +19,22 @@
 {% endif %}
 <section class="intro">
   <h1>Start a squad</h1>
+  {%- if nav.login %}
+  <p>
+    A squad is a list of characters you play with, tagged however you like. Anyone with its link
+    can look; friends you invite can add and tag characters. Character details come from the
+    Battle.net Armory.
+  </p>
+  {%- else %}
   <p>
     A squad is a list of characters you play with, tagged however you like. It lives at its own
     link: anyone with the link can see and edit it, so share it only with your friends.
     Character details come from the Battle.net Armory.
   </p>
+  {%- endif %}
+  {%- if nav.login && nav.user.is_none() %}
+  <p><a href="{{ nav.login_link() }}" class="button">Log in with Battle.net to start a squad</a></p>
+  {%- else %}
   <form method="post" action="/squads" class="row">
     <label class="grow">
       <span class="visually-hidden">Squad name</span>
@@ -39,6 +50,7 @@
     </label>
     <button type="submit">Create squad</button>
   </form>
+  {%- endif %}
   {% if let Some(error) = error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
 </section>
 {% if recent.is_empty() %}
@@ -46,7 +58,11 @@
   <h2>How it works</h2>
   <ol class="steps">
     <li><strong>Start a squad</strong> with a name and your region.</li>
+    {%- if nav.login %}
+    <li><strong>Invite your friends</strong> with its invite link. They log in with Battle.net, then add characters as <code>Name-Surname</code> and tag them.</li>
+    {%- else %}
     <li><strong>Share its link</strong> with your friends. Anyone with it can add characters as <code>Name-Surname</code> and tag them.</li>
+    {%- endif %}
     <li><strong>Watch it fill in.</strong> Level, class, guild, talents, gear and professions come from the Battle.net Armory and refresh every hour.</li>
   </ol>
 </section>

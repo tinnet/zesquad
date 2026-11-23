@@ -9,6 +9,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use anyhow::Context as _;
 use serde_json::Value;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqlitePoolOptions};
+use zesquad_core::access::{Role, Visibility};
 use zesquad_core::armory::{Documents, Endpoint, Profile};
 use zesquad_core::auctions;
 use zesquad_core::discord::Webhook;
@@ -63,6 +64,10 @@ pub struct Squad {
     pub region: Region,
     /// The Discord webhook's path, as stored; see [`Squad::webhook`].
     discord_webhook: Option<String>,
+    #[sqlx(try_from = "String")]
+    pub visibility: Visibility,
+    /// The secret in its `/join/<token>` link; `None` for squads nobody owns yet.
+    pub invite_token: Option<String>,
 }
 
 impl Squad {
@@ -153,6 +158,9 @@ pub async fn armory_level(db: &SqlitePool, region: &str, key: &str) -> anyhow::R
     Ok(level.flatten().and_then(|l| u64::try_from(l).ok()))
 }
 
+/// Starts a squad. With an `owner` (accounts on), it's theirs, unlisted, with an invite link;
+/// without, it's `open` as squads were before accounts.
+///
 /// # Errors
 ///
 /// On database errors.
@@ -160,28 +168,76 @@ pub async fn create_squad(
     db: &SqlitePool,
     name: &SquadName,
     region: Region,
+    owner: Option<i64>,
 ) -> anyhow::Result<String> {
     let id = zesquad_core::squad_id::encode(uuid::Uuid::new_v4().as_u128());
-    sqlx::query("INSERT INTO squads (id, name, region, created_at) VALUES (?, ?, ?, ?)")
+    let now = now();
+    let mut tx = db.begin().await?;
+    let (visibility, token) = match owner {
+        Some(_) => (Visibility::Unlisted, Some(invite_token())),
+        None => (Visibility::Open, None),
+    };
+    sqlx::query(
+        "INSERT INTO squads (id, name, region, created_at, visibility, invite_token)
+         VALUES (?, ?, ?, ?, ?, ?)",
+    )
+    .bind(&id)
+    .bind(name.as_str())
+    .bind(region.as_str())
+    .bind(now)
+    .bind(visibility.as_str())
+    .bind(token)
+    .execute(&mut *tx)
+    .await?;
+    if let Some(owner) = owner {
+        sqlx::query(
+            "INSERT INTO squad_members (squad_id, user_id, role, joined_at) VALUES (?, ?, 'owner', ?)",
+        )
         .bind(&id)
-        .bind(name.as_str())
-        .bind(region.as_str())
-        .bind(now())
-        .execute(db)
+        .bind(owner)
+        .bind(now)
+        .execute(&mut *tx)
         .await?;
+    }
+    tx.commit().await?;
     Ok(id)
+}
+
+/// A new invite token: as random as a session token, and as long.
+fn invite_token() -> String {
+    format!(
+        "{}{}",
+        uuid::Uuid::new_v4().simple(),
+        uuid::Uuid::new_v4().simple()
+    )
 }
 
 /// # Errors
 ///
 /// On database errors.
 pub async fn squad(db: &SqlitePool, id: &str) -> anyhow::Result<Option<Squad>> {
-    Ok(
-        sqlx::query_as("SELECT id, name, region, discord_webhook FROM squads WHERE id = ?")
-            .bind(id)
-            .fetch_optional(db)
-            .await?,
+    Ok(sqlx::query_as(
+        "SELECT id, name, region, discord_webhook, visibility, invite_token
+             FROM squads WHERE id = ?",
     )
+    .bind(id)
+    .fetch_optional(db)
+    .await?)
+}
+
+/// `user_id`'s role in a squad; `None` when they aren't in it.
+///
+/// # Errors
+///
+/// On database errors.
+pub async fn role(db: &SqlitePool, squad_id: &str, user_id: i64) -> anyhow::Result<Option<Role>> {
+    let role: Option<String> =
+        sqlx::query_scalar("SELECT role FROM squad_members WHERE squad_id = ? AND user_id = ?")
+            .bind(squad_id)
+            .bind(user_id)
+            .fetch_optional(db)
+            .await?;
+    Ok(role.map(Role::try_from).transpose()?)
 }
 
 /// Someone logged in.

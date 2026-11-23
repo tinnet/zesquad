@@ -144,6 +144,12 @@ const DUMPS_MODIFIED: &str = "Fri, 20 Nov 2026 20:23:48 GMT";
 /// A player's token from the fake login, and the code it's swapped for.
 const USER_TOKEN: &str = "test-user-token";
 const GOOD_CODE: &str = "good-code";
+/// Another player, a friend, logs in with this code.
+const FRIEND_CODE: &str = "friend-code";
+const FRIEND_TOKEN: &str = "test-friend-token";
+/// And a third, a stranger.
+const STRANGER_CODE: &str = "stranger-code";
+const STRANGER_TOKEN: &str = "test-stranger-token";
 /// Where the test app says it lives; Battle.net must be told the same redirect.
 const PUBLIC_URL: &str = "https://zesquad.test";
 
@@ -164,13 +170,17 @@ async fn fake_token(
     }
     if form.get("grant_type").map(String::as_str) == Some("authorization_code") {
         let redirect = format!("{PUBLIC_URL}/auth/callback");
-        if form.get("code").map(String::as_str) != Some(GOOD_CODE)
-            || form.get("redirect_uri") != Some(&redirect)
-        {
+        let token = match form.get("code").map(String::as_str) {
+            Some(GOOD_CODE) => USER_TOKEN,
+            Some(FRIEND_CODE) => FRIEND_TOKEN,
+            Some(STRANGER_CODE) => STRANGER_TOKEN,
+            _ => return (StatusCode::BAD_REQUEST, r#"{"error":"invalid_grant"}"#).into_response(),
+        };
+        if form.get("redirect_uri") != Some(&redirect) {
             return (StatusCode::BAD_REQUEST, r#"{"error":"invalid_grant"}"#).into_response();
         }
         return axum::Json(serde_json::json!({
-            "access_token": USER_TOKEN, "token_type": "bearer", "expires_in": 86399,
+            "access_token": token, "token_type": "bearer", "expires_in": 86399,
             "scope": "openid"
         }))
         .into_response();
@@ -181,17 +191,20 @@ async fn fake_token(
     .into_response()
 }
 
-/// Who the player token belongs to: a made-up account.
+/// Who a player token belongs to: made-up accounts.
 async fn fake_userinfo(headers: HeaderMap) -> Response {
-    if headers
+    let bearer = headers
         .get(header::AUTHORIZATION)
         .and_then(|v| v.to_str().ok())
-        != Some(&format!("Bearer {USER_TOKEN}"))
-    {
-        return StatusCode::UNAUTHORIZED.into_response();
-    }
+        .and_then(|v| v.strip_prefix("Bearer "));
+    let (id, battletag) = match bearer {
+        Some(USER_TOKEN) => (424_242, "Testhero#1234"),
+        Some(FRIEND_TOKEN) => (515_151, "Friendly#5678"),
+        Some(STRANGER_TOKEN) => (616_161, "Stranger#9012"),
+        _ => return StatusCode::UNAUTHORIZED.into_response(),
+    };
     axum::Json(serde_json::json!({
-        "sub": "424242", "id": 424_242, "battletag": "Testhero#1234"
+        "sub": id.to_string(), "id": id, "battletag": battletag
     }))
     .into_response()
 }
@@ -1840,10 +1853,15 @@ fn urlencode(s: &str) -> String {
 
 /// Logs in through the fake Battle.net and returns the session cookie.
 async fn log_in_bnet(app: &App, next: &str) -> String {
+    log_in_as(app, GOOD_CODE, next).await
+}
+
+/// Logs in as whoever `code` belongs to (`GOOD_CODE`, `FRIEND_CODE`, `STRANGER_CODE`).
+async fn log_in_as(app: &App, code: &str, next: &str) -> String {
     let (cookie, state) = start_login(app, next).await;
     let r = app
         .get_with(
-            &format!("/auth/callback?code={GOOD_CODE}&state={state}"),
+            &format!("/auth/callback?code={code}&state={state}"),
             &cookie,
         )
         .await;
@@ -2444,4 +2462,103 @@ async fn auction_prices_are_off_unless_asked_for() {
         *app.fake.auction_requests.lock().unwrap(),
         Vec::<String>::new()
     );
+}
+
+// ---- owners, members and visibility ----
+
+impl App {
+    /// The app's database, opened next to it.
+    async fn db(&self) -> sqlx::SqlitePool {
+        zesquad::db::open(&self.dir.path().join("zesquad.db"), Region::Eu)
+            .await
+            .unwrap()
+    }
+
+    /// POSTs a form with `cookie`.
+    async fn post_as(&self, cookie: &str, path: &str, form: &[(&str, &str)]) -> reqwest::Response {
+        self.http
+            .post(format!("{}{path}", self.base))
+            .header(header::COOKIE, cookie)
+            .form(form)
+            .send()
+            .await
+            .unwrap()
+    }
+
+    /// GETs a page with `cookie`: its status and text.
+    async fn page_as(&self, cookie: &str, path: &str) -> (StatusCode, String) {
+        let r = self.get_with(path, cookie).await;
+        (r.status(), r.text().await.unwrap())
+    }
+
+    /// Creates a squad as whoever `cookie` logs in, and returns its path.
+    async fn squad_as(&self, cookie: &str, name: &str) -> String {
+        let r = self.post_as(cookie, "/squads", &[("name", name)]).await;
+        assert_eq!(r.status(), StatusCode::SEE_OTHER);
+        r.headers()[header::LOCATION].to_str().unwrap().to_owned()
+    }
+}
+
+#[tokio::test]
+async fn starting_a_squad_takes_a_login_and_makes_you_its_owner() {
+    let app = app_with_login(None).await;
+    let (_, front) = app.get("/").await;
+    assert!(
+        front.contains("Log in with Battle.net to start a squad"),
+        "{front}"
+    );
+    assert!(!front.contains("action=\"/squads\""), "{front}");
+    let r = app.post("/squads", &[("name", "Sneaky")]).await;
+    assert_eq!(r.status(), StatusCode::SEE_OTHER);
+    assert_eq!(r.headers()[header::LOCATION], "/auth/login?next=%2F");
+    let db = app.db().await;
+    let squads: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM squads")
+        .fetch_one(&db)
+        .await
+        .unwrap();
+    assert_eq!(squads, 0);
+
+    let me = log_in_bnet(&app, "/").await;
+    let (_, front) = app.page_as(&me, "/").await;
+    assert!(front.contains("action=\"/squads\""), "{front}");
+    let squad = app.squad_as(&me, "Thursday raiders").await;
+    let id = squad.strip_prefix("/s/").unwrap();
+    let (visibility, token): (String, String) =
+        sqlx::query_as("SELECT visibility, invite_token FROM squads WHERE id = ?")
+            .bind(id)
+            .fetch_one(&db)
+            .await
+            .unwrap();
+    assert_eq!(visibility, "unlisted");
+    assert_eq!(token.len(), 64);
+    let members: Vec<(String, String)> = sqlx::query_as(
+        "SELECT u.battletag, m.role FROM squad_members m JOIN users u ON u.id = m.user_id
+         WHERE m.squad_id = ?",
+    )
+    .bind(id)
+    .fetch_all(&db)
+    .await
+    .unwrap();
+    assert_eq!(members, [("Testhero#1234".to_owned(), "owner".to_owned())]);
+}
+
+#[tokio::test]
+async fn without_accounts_squads_are_open_and_nobodys() {
+    let app = app(false).await;
+    let (_, front) = app.get("/").await;
+    assert!(!front.contains("to start a squad"), "{front}");
+    let squad = app.squad("Thursday raiders").await;
+    let db = app.db().await;
+    let (visibility, token): (String, Option<String>) =
+        sqlx::query_as("SELECT visibility, invite_token FROM squads WHERE id = ?")
+            .bind(squad.strip_prefix("/s/").unwrap())
+            .fetch_one(&db)
+            .await
+            .unwrap();
+    assert_eq!((visibility.as_str(), token), ("open", None));
+    let members: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM squad_members")
+        .fetch_one(&db)
+        .await
+        .unwrap();
+    assert_eq!(members, 0);
 }

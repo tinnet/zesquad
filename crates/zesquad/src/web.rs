@@ -989,9 +989,15 @@ async fn create_squad(
     let parsed = SquadName::new(&form.name)
         .map_err(|e| e.to_string())
         .and_then(|name| Ok((name, region.clone().map_err(|e| e.to_string())?)));
+    // With accounts on, a squad belongs to whoever starts it, so that takes a login.
+    let owner = match (&state.login, &nav.user) {
+        (None, _) => None,
+        (Some(_), Some(user)) => Some(user.id),
+        (Some(_), None) => return Ok(Redirect::to("/auth/login?next=%2F").into_response()),
+    };
     match parsed {
         Ok((name, region)) => {
-            let id = db::create_squad(&state.db, &name, region).await?;
+            let id = db::create_squad(&state.db, &name, region, owner).await?;
             Ok(Redirect::to(&squad_path(&id)).into_response())
         }
         Err(error) => {
