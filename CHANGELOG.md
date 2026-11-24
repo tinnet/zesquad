@@ -2,6 +2,13 @@
 
 What changed in each zesquad release. Versions are dates (CalVer).
 
+## 2026.11.24
+
+### Features
+
+- Add flavour lines to Discord join and level-up messages ([5648675](https://github.com/tinnet/zesquad/commit/56486756ea0460b61a507243587fe39048d487f5))
+- More variety in Discord flavour lines ([b82edcb](https://github.com/tinnet/zesquad/commit/b82edcb4ab61e0e757b33995b04e328ca1ea05c4))
+
 ## 2026.11.23.3
 
 ### Features
