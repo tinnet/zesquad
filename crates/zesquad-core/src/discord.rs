@@ -222,8 +222,8 @@ pub fn levelled(
 fn level_flavour(character: &str, level: u64, class: Option<&str>) -> &'static str {
     let level_text = level.to_string();
     let seed = [character, level_text.as_str()];
-    if let Some(line) = class.and_then(|class| class_milestone(class, level)) {
-        return line;
+    if let Some(lines) = class.and_then(|class| class_milestone(class, level)) {
+        return pick(lines, &seed);
     }
     if let Some(lines) = milestone(level) {
         return pick(lines, &seed);
@@ -255,6 +255,12 @@ const JOINED: &[&str] = &[
     "Grab a hearthstone and pull up a campfire.",
     "Rumour has it they brought snacks. And bandages.",
     "The inn has another regular.",
+    "A new name on the roster. Try not to pull extra mobs on their first run.",
+    "Welcome! Loot rules are need before greed, and no rolling on the bags.",
+    "One more sword arm, staff, bow or wand for the cause.",
+    "They've signed the charter. No refunds.",
+    "Somebody fetch them a stack of linen bandages.",
+    "The party is complete. Well, more complete.",
 ];
 
 const LEVELLED: &[&str] = &[
@@ -268,6 +274,13 @@ const LEVELLED: &[&str] = &[
     "One step closer to the next bag. Or the next mount.",
     "Nobody tell the flight master, but it was mostly walking.",
     "Somewhere a vendor is already eyeing the grey items.",
+    "Ten more boar livers, and they'll be ready for the next one.",
+    "The spirit healer is going to miss them.",
+    "Another ding, another trip back to town to train.",
+    "Experience bar reset. Morale restored.",
+    "Kill ten rats? Done. Kill ten more? Also done.",
+    "A little stronger, a little poorer, a lot further from home.",
+    "The bag space problem remains unsolved.",
 ];
 
 /// Lines for the levels everyone remembers.
@@ -276,47 +289,107 @@ fn milestone(level: u64) -> Option<&'static [&'static str]> {
         10 => &[
             "Talent points unlocked. Time to agonise over the first one.",
             "Double digits! The first talent point is burning a hole in the pocket.",
+            "Level 10. The starting zone waves goodbye.",
+            "No longer a total beginner. Just a mostly total beginner.",
         ],
         20 => &[
             "Level 20. Dungeons are calling, and so is the repair bill.",
             "Twenty levels in. The world map suddenly looks a lot bigger.",
+            "Twenty! Old enough for the Barrens chat, wise enough to ignore it.",
+            "A fifth of the way to sixty, if you count the easy part.",
         ],
         30 => &[
             "Halfway to the top. The hard part is the other half.",
             "Thirty! Scarlet Monastery has opened its doors. Mind the zealots.",
+            "Level 30. Stranglethorn Vale awaits, and so does everyone else.",
+            "Thirty levels. The hearthstone has seen things.",
         ],
         40 => &[
             "Level 40: mount time, if the gold is there. It never is.",
             "Forty! Riding lessons await, and so does a lighter purse.",
+            "Forty. Time to start saving every last copper.",
+            "Level 40. Somewhere, a riding trainer is rubbing their hands together.",
         ],
         50 => &[
             "Fifty. Blackrock Mountain is looming on the horizon.",
             "Ten more to go. The endgame can smell them coming.",
+            "Level 50. The quests are getting longer and the gnolls are getting bigger.",
+            "Fifty! Un'Goro's dinosaurs are not impressed.",
         ],
         60 => &[
             "Max level! Welcome to the endgame. Raid starts at eight, don't be late.",
             "Sixty! No more experience bars, only loot tables now.",
             "The journey is complete. Now the real grind begins.",
+            "Level 60. Time to find out what a pre-raid best in slot list is.",
+            "Sixty! The experience bar is gone. It will not be missed.",
         ],
         _ => return None,
     })
 }
 
 /// Milestones that only some classes get, from the trainers and class quests of the era.
-fn class_milestone(class: &str, level: u64) -> Option<&'static str> {
+fn class_milestone(class: &str, level: u64) -> Option<&'static [&'static str]> {
     Some(match (class, level) {
-        ("Hunter", 10) => "A pet of their own at last. Go tame something with teeth.",
-        ("Warrior", 10) => "Defensive Stance is on the horizon. Shields up.",
-        ("Warlock", 10) => "The Voidwalker answers. Someone else gets to take the hits now.",
-        ("Druid", 10) => "Bear Form awakens. Hibernation is not an option.",
-        ("Druid", 20) => "Cat Form unlocked. Prowl responsibly.",
-        ("Shaman", 20) => "Ghost Wolf! Walking is for other people now.",
-        ("Warlock", 20) => "The Succubus has arrived. Nobody ask.",
-        ("Druid", 30) => "Travel Form. The road just got a lot shorter.",
-        ("Warrior", 30) => "Berserker Stance unlocked. Indoor voices no longer apply.",
-        ("Warlock", 30) => "A Felhunter joins the household. The mages are nervous.",
-        ("Paladin", 40) => "A Warhorse, summoned out of thin air. No stable fees.",
-        ("Warlock", 40) => "Felsteed summoned. Walking is officially over.",
+        ("Hunter", 10) => &[
+            "A pet of their own at last. Go tame something with teeth.",
+            "Pet unlocked. Naming it is the hardest decision of the game.",
+            "Level 10. The hunter is now officially half of a team.",
+        ],
+        ("Warrior", 10) => &[
+            "Defensive Stance is on the horizon. Shields up.",
+            "Level 10. Time to learn which end of the shield goes forward.",
+            "Taunt incoming. Everything will be looking at them now.",
+        ],
+        ("Warlock", 10) => &[
+            "The Voidwalker answers. Someone else gets to take the hits now.",
+            "A Voidwalker joins the party. It will not be doing the talking.",
+            "Level 10. The imp has been demoted.",
+        ],
+        ("Druid", 10) => &[
+            "Bear Form awakens. Hibernation is not an option.",
+            "Level 10. Time to go grizzly.",
+            "Bear Form! The party tank has never been fluffier.",
+        ],
+        ("Druid", 20) => &[
+            "Cat Form unlocked. Prowl responsibly.",
+            "Level 20. Now with whiskers.",
+            "Cat Form. The mobs never saw it coming, mostly because it was stealthed.",
+        ],
+        ("Shaman", 20) => &[
+            "Ghost Wolf! Walking is for other people now.",
+            "Level 20. Four paws, no saddle, no problem.",
+            "Ghost Wolf unlocked. The hunters are taking notes.",
+        ],
+        ("Warlock", 20) => &[
+            "The Succubus has arrived. Nobody ask.",
+            "Level 20. The demon roster grows, and so does the awkwardness.",
+            "A Succubus joins the household. The Voidwalker is sulking.",
+        ],
+        ("Druid", 30) => &[
+            "Travel Form. The road just got a lot shorter.",
+            "Level 30. The flight master is going to miss the business.",
+            "Travel Form unlocked. All cheetah, all speed.",
+        ],
+        ("Warrior", 30) => &[
+            "Berserker Stance unlocked. Indoor voices no longer apply.",
+            "Level 30. Three stances, zero patience.",
+            "Berserker Stance. The healer has concerns.",
+        ],
+        ("Warlock", 30) => &[
+            "A Felhunter joins the household. The mages are nervous.",
+            "Level 30. The Felhunter has picked up the scent of magic.",
+            "Felhunter unlocked. Casters, consider yourselves warned.",
+        ],
+        ("Paladin", 40) => &[
+            "A Warhorse, summoned out of thin air. No stable fees.",
+            "Level 40. The Light provides, and it provides a horse.",
+            "Warhorse unlocked. The other classes are checking their purses.",
+        ],
+        ("Warlock", 40) => &[
+            "Felsteed summoned. Walking is officially over.",
+            "Level 40. A flaming horse, and not a single copper spent.",
+            "Felsteed unlocked. The hooves are on fire. That's normal.",
+        ],
         _ => return None,
     })
 }
@@ -328,46 +401,73 @@ fn class_lines(class: &str) -> &'static [&'static str] {
             "Rage generated, enemies thoroughly charged.",
             "Still no healer, still standing.",
             "Bandages remain a warrior's best friend.",
+            "Charge, hit things, eat bread, repeat.",
+            "The repair bill grows with every level.",
+            "Another level, another sword that's slightly bigger.",
         ],
         "Paladin" => &[
             "Seal, judge, repeat.",
             "Blessed be the level. Now buff everyone.",
             "No bubble-hearth was needed this time.",
+            "The Light approves. The repair bill does not.",
+            "Auras on, blessings up, onwards.",
+            "Another level in the service of the Light. And of the party's mana.",
         ],
         "Hunter" => &[
             "The pet did most of the work. The hunter takes the credit.",
             "Arrows restocked? Arrows restocked.",
             "Feed the pet. Seriously, feed the pet.",
+            "Need on everything with agility. Just kidding. Mostly.",
+            "Aspect of the Cheetah, straight into a new level.",
+            "Feign Death worked perfectly. Again.",
         ],
         "Rogue" => &[
             "Nobody saw it happen.",
             "Pockets were picked on the way up.",
             "Sap, sneak, ding.",
+            "Vanished, reappeared a level higher.",
+            "Poisons applied, coin purses emptied.",
+            "Stabbed their way up another rung.",
         ],
         "Priest" => &[
             "Healed through it all, including the party's poor decisions.",
             "Power Word. Ding.",
             "The wand was doing a lot of the heavy lifting.",
+            "Fortitude for everyone, a level for the priest.",
+            "Shields up, mana down, level gained.",
+            "Another level spent drinking between fights.",
         ],
         "Shaman" => &[
             "The totems are proud.",
             "The elements approve.",
             "Windfury would have been faster. It was.",
+            "Totems dropped, totems forgotten, totems trained anew.",
+            "Lightning Bolt, Lightning Bolt, ding.",
+            "The spirits whisper congratulations.",
         ],
         "Mage" => &[
             "Conjured a whole level out of thin air.",
             "Free water for everyone. Form an orderly line.",
             "Frost Nova, step back, ding.",
+            "Another level, another polymorph target.",
+            "Blink, Fireball, profit.",
+            "The sheep remain undefeated.",
         ],
         "Warlock" => &[
             "Soul shards in the bag, a new level in the pocket.",
             "The demon is unimpressed. The warlock is not.",
             "Life Tap, drink, repeat.",
+            "Corruption ticks, levels tick.",
+            "Another level, another bag full of soul shards.",
+            "Fear sent them running. Experience did not.",
         ],
         "Druid" => &[
             "Bear, cat, or seal? Yes.",
             "Shapeshifted straight into a new level.",
             "Nature provides.",
+            "Moonfire, Wrath, ding.",
+            "Every form, one level up.",
+            "Another level, and still no idea which form to stay in.",
         ],
         _ => &[],
     }
@@ -469,9 +569,11 @@ mod tests {
     #[test]
     fn milestones_and_classes_get_their_own_lines() {
         let message = levelled("Brena Ashvale", 10, Some("Hunter"), "Raiders", None);
-        assert_eq!(
-            flavour(&message),
-            "A pet of their own at last. Go tame something with teeth."
+        assert!(
+            class_milestone("Hunter", 10)
+                .unwrap()
+                .contains(&flavour(&message)),
+            "{message}"
         );
         // A class without a milestone at that level gets the general one.
         let message = levelled("Brena Ashvale", 60, Some("Rogue"), "Raiders", None);
@@ -507,7 +609,12 @@ mod tests {
         let mut all: Vec<&str> = JOINED.iter().chain(LEVELLED).copied().collect();
         for level in 1..=60 {
             all.extend(milestone(level).unwrap_or_default());
-            all.extend(classes.iter().filter_map(|c| class_milestone(c, level)));
+            all.extend(
+                classes
+                    .iter()
+                    .filter_map(|c| class_milestone(c, level))
+                    .flatten(),
+            );
         }
         all.extend(classes.iter().flat_map(|c| class_lines(c)));
         for class in classes {
