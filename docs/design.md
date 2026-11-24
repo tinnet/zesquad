@@ -206,6 +206,10 @@ deleted webhook is refused on the spot; later posts go in the background and a f
 logged. Messages turn mentions off (`allowed_mentions`) and escape Markdown, so names can't
 ping anyone or add links, and they link the squad when `ZESQUAD_PUBLIC_URL` is set. Group DMs
 can't have webhooks, so it's a server channel or one of its threads (`?thread_id=`).
+Each news message ends with a line of flavour in Discord's small print (`-# `): a welcome for
+a join, and for a level-up a line for the milestone (10, 20, … 60, some per class, like a
+hunter's pet at 10) or else one for the character's class or anyone. The line is picked by
+hashing the name and level rather than at random, so the same event always reads the same.
 
 With `ZESQUAD_PUBLIC_URL` and Battle.net credentials, people can log in with Battle.net
 (`login.rs`, authorization code flow, `scope=openid`): zesquad keeps the account id and

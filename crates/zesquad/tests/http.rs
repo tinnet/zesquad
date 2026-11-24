@@ -1135,6 +1135,8 @@ async fn a_squad_posts_joins_and_level_ups_to_discord() {
         messages[1].starts_with("**Aldric Thornwood** joined [Thursday raiders]"),
         "{messages:?}"
     );
+    // Each news message has a line of flavour under it, in Discord's small print.
+    assert!(messages[1].contains(").\n-# "), "{messages:?}");
     app.fake.level.store(27, Ordering::SeqCst);
     let member = member_id(&page, 0);
     app.post(&format!("{squad}/characters/{member}/refresh"), &[])
@@ -1144,6 +1146,7 @@ async fn a_squad_posts_joins_and_level_ups_to_discord() {
         messages[2].starts_with("**Aldric Thornwood** reached level 27 · [Thursday raiders]"),
         "{messages:?}"
     );
+    assert!(messages[2].contains(">)\n-# "), "{messages:?}");
     // The same level again says nothing: wait for the refresh's lookups to be done.
     let lookups = app.fake.lookups.load(Ordering::SeqCst);
     app.post(&format!("{squad}/characters/{member}/refresh"), &[])

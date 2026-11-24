@@ -61,16 +61,21 @@ impl Syncer {
             if let Fetched::Failed(e) = &fetched {
                 tracing::warn!(character = %key, %region, "armory fetch failed: {e}");
             }
-            let after = match &fetched {
+            let summary = match &fetched {
                 Fetched::Found(docs) => docs
                     .iter()
                     .find(|(e, _)| *e == Endpoint::Summary)
-                    .and_then(|(_, doc)| doc["level"].as_u64()),
+                    .map(|(_, doc)| doc),
                 _ => None,
             };
+            let after = summary.and_then(|doc| doc["level"].as_u64());
+            let class = summary
+                .and_then(|doc| doc["character_class"]["name"].as_str())
+                .map(str::to_owned);
             db::store(&self.db, region.as_str(), key, fetched).await?;
             if let Some(level) = discord::level_up(before, after) {
-                self.announce_level(*region, key, level).await?;
+                self.announce_level(*region, key, level, class.as_deref())
+                    .await?;
             }
             tokio::time::sleep(PAUSE).await;
         }
@@ -109,11 +114,22 @@ impl Syncer {
     }
 
     /// Tells every squad with this character and a Discord channel that it went up a level.
-    async fn announce_level(&self, region: Region, key: &str, level: u64) -> anyhow::Result<()> {
+    async fn announce_level(
+        &self,
+        region: Region,
+        key: &str,
+        level: u64,
+        class: Option<&str>,
+    ) -> anyhow::Result<()> {
         for squad in db::discord_squads_with(&self.db, region, key).await? {
             let link = self.discord.squad_link(&squad.squad_id);
-            let message =
-                discord::levelled(&squad.character, level, &squad.squad_name, link.as_deref());
+            let message = discord::levelled(
+                &squad.character,
+                level,
+                class,
+                &squad.squad_name,
+                link.as_deref(),
+            );
             self.discord.send(squad.webhook, message);
         }
         Ok(())

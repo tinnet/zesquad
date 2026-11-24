@@ -188,22 +188,189 @@ pub fn hello(squad_name: &str, link: Option<&str>) -> String {
     )
 }
 
+/// `**Name** joined Squad.`, and a line of welcome under it.
 #[must_use]
 pub fn joined(character: &str, squad_name: &str, link: Option<&str>) -> String {
+    let flavour = pick(JOINED, &[character]);
     format!(
-        "**{}** joined {}.",
+        "**{}** joined {}.\n-# {flavour}",
         escape(character),
         squad(squad_name, link)
     )
 }
 
+/// `**Name** reached level N · Squad`, and a line of flavour under it: one for the milestone
+/// when the level is one, otherwise one for the class or anyone.
 #[must_use]
-pub fn levelled(character: &str, level: u64, squad_name: &str, link: Option<&str>) -> String {
+pub fn levelled(
+    character: &str,
+    level: u64,
+    class: Option<&str>,
+    squad_name: &str,
+    link: Option<&str>,
+) -> String {
+    let flavour = level_flavour(character, level, class);
     format!(
-        "**{}** reached level {level} · {}",
+        "**{}** reached level {level} · {}\n-# {flavour}",
         escape(character),
         squad(squad_name, link)
     )
+}
+
+/// The same character reaching the same level always gets the same line, so a message is
+/// reproducible, but different characters and levels get a mix.
+fn level_flavour(character: &str, level: u64, class: Option<&str>) -> &'static str {
+    let level_text = level.to_string();
+    let seed = [character, level_text.as_str()];
+    if let Some(line) = class.and_then(|class| class_milestone(class, level)) {
+        return line;
+    }
+    if let Some(lines) = milestone(level) {
+        return pick(lines, &seed);
+    }
+    let class_lines = class.map_or(&[][..], class_lines);
+    let pool: Vec<&'static str> = class_lines.iter().chain(LEVELLED).copied().collect();
+    pick(&pool, &seed)
+}
+
+/// One of `lines`, chosen by hashing `seed` (FNV-1a), so no randomness is needed.
+fn pick(lines: &[&'static str], seed: &[&str]) -> &'static str {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for part in seed {
+        for byte in part.bytes().chain([0]) {
+            hash ^= u64::from(byte);
+            hash = hash.wrapping_mul(0x0100_0000_01b3);
+        }
+    }
+    let len = u64::try_from(lines.len()).unwrap_or(u64::MAX);
+    lines[usize::try_from(hash % len).unwrap_or(0)]
+}
+
+const JOINED: &[&str] = &[
+    "Fresh recruit spotted. Someone show them where the mailbox is.",
+    "The squad grows. Group quests just got easier.",
+    "Welcome aboard! Mind the murlocs.",
+    "Another adventurer answers the call.",
+    "LFM no more: one more joins the party.",
+    "Grab a hearthstone and pull up a campfire.",
+    "Rumour has it they brought snacks. And bandages.",
+    "The inn has another regular.",
+];
+
+const LEVELLED: &[&str] = &[
+    "Ding! Somewhere, a chat channel fills up with grats.",
+    "The quest log is lighter. The bags are heavier.",
+    "Rested XP, well spent.",
+    "The class trainer will see you now. Bring gold.",
+    "Grey mobs tremble. Green mobs nervously reconsider.",
+    "Corpse runs survived: several. Levels gained: one more.",
+    "Off to find out why that one quest is still red.",
+    "One step closer to the next bag. Or the next mount.",
+    "Nobody tell the flight master, but it was mostly walking.",
+    "Somewhere a vendor is already eyeing the grey items.",
+];
+
+/// Lines for the levels everyone remembers.
+fn milestone(level: u64) -> Option<&'static [&'static str]> {
+    Some(match level {
+        10 => &[
+            "Talent points unlocked. Time to agonise over the first one.",
+            "Double digits! The first talent point is burning a hole in the pocket.",
+        ],
+        20 => &[
+            "Level 20. Dungeons are calling, and so is the repair bill.",
+            "Twenty levels in. The world map suddenly looks a lot bigger.",
+        ],
+        30 => &[
+            "Halfway to the top. The hard part is the other half.",
+            "Thirty! Scarlet Monastery has opened its doors. Mind the zealots.",
+        ],
+        40 => &[
+            "Level 40: mount time, if the gold is there. It never is.",
+            "Forty! Riding lessons await, and so does a lighter purse.",
+        ],
+        50 => &[
+            "Fifty. Blackrock Mountain is looming on the horizon.",
+            "Ten more to go. The endgame can smell them coming.",
+        ],
+        60 => &[
+            "Max level! Welcome to the endgame. Raid starts at eight, don't be late.",
+            "Sixty! No more experience bars, only loot tables now.",
+            "The journey is complete. Now the real grind begins.",
+        ],
+        _ => return None,
+    })
+}
+
+/// Milestones that only some classes get, from the trainers and class quests of the era.
+fn class_milestone(class: &str, level: u64) -> Option<&'static str> {
+    Some(match (class, level) {
+        ("Hunter", 10) => "A pet of their own at last. Go tame something with teeth.",
+        ("Warrior", 10) => "Defensive Stance is on the horizon. Shields up.",
+        ("Warlock", 10) => "The Voidwalker answers. Someone else gets to take the hits now.",
+        ("Druid", 10) => "Bear Form awakens. Hibernation is not an option.",
+        ("Druid", 20) => "Cat Form unlocked. Prowl responsibly.",
+        ("Shaman", 20) => "Ghost Wolf! Walking is for other people now.",
+        ("Warlock", 20) => "The Succubus has arrived. Nobody ask.",
+        ("Druid", 30) => "Travel Form. The road just got a lot shorter.",
+        ("Warrior", 30) => "Berserker Stance unlocked. Indoor voices no longer apply.",
+        ("Warlock", 30) => "A Felhunter joins the household. The mages are nervous.",
+        ("Paladin", 40) => "A Warhorse, summoned out of thin air. No stable fees.",
+        ("Warlock", 40) => "Felsteed summoned. Walking is officially over.",
+        _ => return None,
+    })
+}
+
+/// Lines any character of a class can get, at any level that isn't a milestone.
+fn class_lines(class: &str) -> &'static [&'static str] {
+    match class {
+        "Warrior" => &[
+            "Rage generated, enemies thoroughly charged.",
+            "Still no healer, still standing.",
+            "Bandages remain a warrior's best friend.",
+        ],
+        "Paladin" => &[
+            "Seal, judge, repeat.",
+            "Blessed be the level. Now buff everyone.",
+            "No bubble-hearth was needed this time.",
+        ],
+        "Hunter" => &[
+            "The pet did most of the work. The hunter takes the credit.",
+            "Arrows restocked? Arrows restocked.",
+            "Feed the pet. Seriously, feed the pet.",
+        ],
+        "Rogue" => &[
+            "Nobody saw it happen.",
+            "Pockets were picked on the way up.",
+            "Sap, sneak, ding.",
+        ],
+        "Priest" => &[
+            "Healed through it all, including the party's poor decisions.",
+            "Power Word. Ding.",
+            "The wand was doing a lot of the heavy lifting.",
+        ],
+        "Shaman" => &[
+            "The totems are proud.",
+            "The elements approve.",
+            "Windfury would have been faster. It was.",
+        ],
+        "Mage" => &[
+            "Conjured a whole level out of thin air.",
+            "Free water for everyone. Form an orderly line.",
+            "Frost Nova, step back, ding.",
+        ],
+        "Warlock" => &[
+            "Soul shards in the bag, a new level in the pocket.",
+            "The demon is unimpressed. The warlock is not.",
+            "Life Tap, drink, repeat.",
+        ],
+        "Druid" => &[
+            "Bear, cat, or seal? Yes.",
+            "Shapeshifted straight into a new level.",
+            "Nature provides.",
+        ],
+        _ => &[],
+    }
 }
 
 #[cfg(test)]
@@ -275,13 +442,17 @@ mod tests {
     #[test]
     fn messages() {
         let link = Some("https://zesquad.example/s/abc");
-        assert_eq!(
-            joined("Aldric Thornwood", "Thursday *raiders*", link),
-            "**Aldric Thornwood** joined [Thursday \\*raiders\\*](<https://zesquad.example/s/abc>)."
+        let message = joined("Aldric Thornwood", "Thursday *raiders*", link);
+        assert!(
+            message.starts_with(
+                "**Aldric Thornwood** joined [Thursday \\*raiders\\*](<https://zesquad.example/s/abc>).\n-# "
+            ),
+            "{message}"
         );
-        assert_eq!(
-            levelled("Aldric Thornwood", 27, "Raiders", None),
-            "**Aldric Thornwood** reached level 27 · Raiders"
+        let message = levelled("Aldric Thornwood", 27, Some("Rogue"), "Raiders", None);
+        assert!(
+            message.starts_with("**Aldric Thornwood** reached level 27 · Raiders\n-# "),
+            "{message}"
         );
         assert!(hello("Raiders", None).contains("Raiders"));
         // A name can't close the link early or start a new one.
@@ -289,6 +460,66 @@ mod tests {
             squad("a](<https://evil.example>) [b", link),
             "[a\\]\\(\\<https\\://evil.example\\>\\) \\[b](<https://zesquad.example/s/abc>)"
         );
+    }
+
+    fn flavour(message: &str) -> &str {
+        message.split_once("\n-# ").unwrap().1
+    }
+
+    #[test]
+    fn milestones_and_classes_get_their_own_lines() {
+        let message = levelled("Brena Ashvale", 10, Some("Hunter"), "Raiders", None);
+        assert_eq!(
+            flavour(&message),
+            "A pet of their own at last. Go tame something with teeth."
+        );
+        // A class without a milestone at that level gets the general one.
+        let message = levelled("Brena Ashvale", 60, Some("Rogue"), "Raiders", None);
+        assert!(milestone(60).unwrap().contains(&flavour(&message)));
+        // An unknown class, or none, still gets a line.
+        for class in [None, Some("Monk")] {
+            let message = levelled("Brena Ashvale", 27, class, "Raiders", None);
+            assert!(LEVELLED.contains(&flavour(&message)), "{message}");
+        }
+        // The same event always reads the same, but there's variety across characters.
+        assert_eq!(
+            levelled("Brena Ashvale", 27, Some("Mage"), "Raiders", None),
+            levelled("Brena Ashvale", 27, Some("Mage"), "Raiders", None)
+        );
+        let lines: std::collections::HashSet<_> = (2..60)
+            .map(|level| {
+                flavour(&levelled("Brena Ashvale", level, Some("Mage"), "R", None)).to_owned()
+            })
+            .collect();
+        assert!(lines.len() > 5, "{lines:?}");
+        assert!(
+            lines
+                .iter()
+                .any(|line| class_lines("Mage").contains(&line.as_str()))
+        );
+    }
+
+    #[test]
+    fn flavour_is_plain_text() {
+        let classes = [
+            "Warrior", "Paladin", "Hunter", "Rogue", "Priest", "Shaman", "Mage", "Warlock", "Druid",
+        ];
+        let mut all: Vec<&str> = JOINED.iter().chain(LEVELLED).copied().collect();
+        for level in 1..=60 {
+            all.extend(milestone(level).unwrap_or_default());
+            all.extend(classes.iter().filter_map(|c| class_milestone(c, level)));
+        }
+        all.extend(classes.iter().flat_map(|c| class_lines(c)));
+        for class in classes {
+            assert!(!class_lines(class).is_empty(), "{class}");
+        }
+        for line in all {
+            assert!(!line.is_empty() && !line.contains('\n'), "{line:?}");
+            assert!(
+                !line.contains(['*', '_', '~', '`', '|', '>', '#', '[', ']', '<', '@', '\\']),
+                "{line}"
+            );
+        }
     }
 
     proptest! {
