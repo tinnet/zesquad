@@ -2,6 +2,12 @@
 
 What changed in each zesquad release. Versions are dates (CalVer).
 
+## 2026.11.25.7
+
+### Performance
+
+- **web**: Speed up the auction overview and tidy today's code ([77221d1](https://github.com/tinnet/zesquad/commit/77221d14cd45f11ff2e0b668d59a53ca1aab762f))
+
 ## 2026.11.25.6
 
 ### Features
