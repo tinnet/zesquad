@@ -2,6 +2,12 @@
 
 What changed in each zesquad release. Versions are dates (CalVer).
 
+## 2026.11.25
+
+### Features
+
+- **web**: Replace the Z favicon with a squad of three figures ([3cdf42e](https://github.com/tinnet/zesquad/commit/3cdf42e99d9b521d5336958ce53ddbbe802c0075))
+
 ## 2026.11.24
 
 ### Features
