@@ -2,6 +2,12 @@
 
 What changed in each zesquad release. Versions are dates (CalVer).
 
+## 2026.11.25.3
+
+### Features
+
+- **web**: Show item icons on the auction house page ([ffa0f09](https://github.com/tinnet/zesquad/commit/ffa0f09ffe1ad7e862ca52eb8de0ece3581f0329))
+
 ## 2026.11.25.2
 
 ### Features
