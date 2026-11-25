@@ -2,6 +2,12 @@
 
 What changed in each zesquad release. Versions are dates (CalVer).
 
+## 2026.11.25.4
+
+### Features
+
+- **web**: Show what a vendor pays under each auction item ([e38a5d6](https://github.com/tinnet/zesquad/commit/e38a5d65470a828c942c79c540198c0f8775dcbf))
+
 ## 2026.11.25.3
 
 ### Features
