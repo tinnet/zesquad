@@ -2,6 +2,12 @@
 
 What changed in each zesquad release. Versions are dates (CalVer).
 
+## 2026.11.25.8
+
+### Features
+
+- **web**: Fold how auction prices are collected away by default ([5f7e601](https://github.com/tinnet/zesquad/commit/5f7e601bcc5911f0f42eba53bd186034f70eef69))
+
 ## 2026.11.25.7
 
 ### Performance
