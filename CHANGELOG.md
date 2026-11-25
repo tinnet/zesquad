@@ -2,6 +2,12 @@
 
 What changed in each zesquad release. Versions are dates (CalVer).
 
+## 2026.11.25.5
+
+### Fixes
+
+- **web**: Drop empty coins and fit the auction table on the page ([5102cd6](https://github.com/tinnet/zesquad/commit/5102cd633ba889fb1fed41591786a7927b3909cb))
+
 ## 2026.11.25.4
 
 ### Features
