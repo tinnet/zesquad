@@ -19,6 +19,7 @@ use zesquad_core::armory::Profile;
 use zesquad_core::auctions::{self, Money};
 use zesquad_core::discord::Webhook;
 use zesquad_core::guild::{self, Slug, Sort as GuildSort};
+use zesquad_core::items;
 use zesquad_core::recent::Recent;
 use zesquad_core::refresh::Status;
 use zesquad_core::roster::{self as order, Sort};
@@ -1879,6 +1880,10 @@ async fn refresh(
 struct AuctionsPage {
     nav: Nav,
     enabled: bool,
+    /// What was searched for, tidied; `None` shows the leathers.
+    search: Option<String>,
+    /// More items matched than are shown.
+    more: bool,
     houses: Vec<HouseView>,
     regions: Vec<RegionPrices>,
     items: db::ItemCounts,
@@ -1898,12 +1903,27 @@ struct HouseView {
     last_items: i64,
 }
 
-/// Leather prices in one region's houses: a row per leather, a cell per house.
+/// Items' prices in one region's houses: a row per item, a cell per house.
 struct RegionPrices {
     region: Region,
     houses: Vec<auctions::House>,
-    rows: Vec<(&'static str, Vec<Option<PriceCell>>)>,
+    rows: Vec<PriceRow>,
 }
+
+struct PriceRow {
+    name: String,
+    /// For the `q-<quality>` class; empty when unknown.
+    quality: String,
+    cells: Vec<Option<PriceCell>>,
+}
+
+#[derive(Deserialize)]
+struct AuctionsQuery {
+    q: Option<String>,
+}
+
+/// Search results shown at most.
+const SEARCH_RESULTS: u32 = 20;
 
 struct PriceCell {
     /// The latest snapshot's median.
@@ -1922,10 +1942,32 @@ const SPARK_WIDTH: f64 = 96.0;
 const SPARK_HEIGHT: f64 = 24.0;
 const SPARK_PAD: f64 = 3.0;
 
-async fn auctions_page(State(state): State<AppState>, nav: Nav) -> Result<AuctionsPage> {
+async fn auctions_page(
+    State(state): State<AppState>,
+    nav: Nav,
+    Query(query): Query<AuctionsQuery>,
+) -> Result<AuctionsPage> {
     let now = db::now();
     let since = now - PRICE_DAYS * auctions::DAY;
-    let leather: Vec<u32> = auctions::LEATHER.iter().map(|&(id, _)| id).collect();
+    let search = query.q.as_deref().and_then(items::search);
+    let (shown, more) = match &search {
+        Some(search) => {
+            let (found, more) = db::search_items(&state.db, search, SEARCH_RESULTS).await?;
+            let shown = found
+                .into_iter()
+                .map(|f| (f.id, f.name, items::quality_class(&f.quality)))
+                .collect();
+            (shown, more)
+        }
+        None => (
+            auctions::LEATHER
+                .iter()
+                .map(|&(id, name)| (id, name.to_owned(), "common".to_owned()))
+                .collect::<Vec<_>>(),
+            false,
+        ),
+    };
+    let ids: Vec<u32> = shown.iter().map(|(id, ..)| *id).collect();
     let mut houses = Vec::new();
     let mut regions: Vec<RegionPrices> = Vec::new();
     for house in auctions::followed() {
@@ -1941,15 +1983,19 @@ async fn auctions_page(State(state): State<AppState>, nav: Nav) -> Result<Auctio
             last_items: status.last_items,
         });
 
-        let ranges = db::price_ranges(&state.db, house.region, house.id, &leather, since).await?;
-        let series = db::price_series(&state.db, house.region, house.id, &leather, since).await?;
+        let ranges = db::price_ranges(&state.db, house.region, house.id, &ids, since).await?;
+        let series = db::price_series(&state.db, house.region, house.id, &ids, since).await?;
         if regions.last().is_none_or(|r| r.region != house.region) {
             regions.push(RegionPrices {
                 region: house.region,
                 houses: Vec::new(),
-                rows: auctions::LEATHER
+                rows: shown
                     .iter()
-                    .map(|&(_, name)| (name, Vec::new()))
+                    .map(|(_, name, quality)| PriceRow {
+                        name: name.clone(),
+                        quality: quality.clone(),
+                        cells: Vec::new(),
+                    })
                     .collect(),
             });
         }
@@ -1957,13 +2003,13 @@ async fn auctions_page(State(state): State<AppState>, nav: Nav) -> Result<Auctio
             continue;
         };
         region.houses.push(house);
-        for (row, &(item, _)) in region.rows.iter_mut().zip(&auctions::LEATHER) {
+        for (row, &item) in region.rows.iter_mut().zip(&ids) {
             let points: Vec<(i64, u64)> = series
                 .iter()
                 .filter(|p| p.item == item)
                 .map(|p| (p.at, p.median))
                 .collect();
-            row.1.push(
+            row.cells.push(
                 ranges
                     .iter()
                     .find(|r| r.item == item)
@@ -1987,6 +2033,8 @@ async fn auctions_page(State(state): State<AppState>, nav: Nav) -> Result<Auctio
     Ok(AuctionsPage {
         nav,
         enabled: state.auctions_enabled,
+        search,
+        more,
         houses,
         regions,
         items: db::item_counts(&state.db).await?,

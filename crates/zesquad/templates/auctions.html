@@ -18,9 +18,30 @@
 <p class="hint">Price collection is off. Set <code>ZESQUAD_AUCTIONS=true</code> (with the Battle.net credentials) to start it; what was collected before is shown below.</p>
 {%- endif %}
 
+<form method="get" action="/auctions" class="add row" role="search"
+  hx-get="/auctions" hx-select="#prices" hx-target="#prices" hx-swap="outerHTML" hx-push-url="true"
+  hx-trigger="input changed delay:300ms from:find input[name=q], submit">
+  <label class="grow">
+    <span class="visually-hidden">Search items</span>
+    <input type="search" name="q" value="{% if let Some(q) = search %}{{ q }}{% endif %}" placeholder="Search items by name" autocomplete="off">
+  </label>
+  <button type="submit">Search</button>
+</form>
+
+<section id="prices">
+{%- if let Some(q) = search %}
+<h2>Items matching “{{ q }}”</h2>
+{%- if regions.is_empty() || regions[0].rows.is_empty() %}
+<p class="empty">No item seen at the auction houses has a name like that. Names are still being looked up, so a few may be missing.</p>
+{%- else %}
+<p class="hint">Price per unit now, how it moved over the last 7 days, and its lowest and highest in that time.{% if more %} Only the first {{ regions[0].rows.len() }} matches are shown; type more to narrow it down.{% endif %}</p>
+{%- endif %}
+{%- else %}
 <h2>Leather</h2>
 <p class="hint">Price per unit now, how it moved over the last 7 days, and its lowest and highest in that time. Hover a line for the average.</p>
+{%- endif %}
 {%- for r in regions %}
+{%- if !r.rows.is_empty() %}
 <h3>{{ r.region.name() }}</h3>
 <div class="table-wrap">
 <table class="data prices">
@@ -28,10 +49,10 @@
     <tr><th>Item</th>{% for house in r.houses %}<th class="num faction-{{ house.faction.name()|lower }}">{{ house.label() }}</th>{% endfor %}</tr>
   </thead>
   <tbody>
-    {%- for (name, cells) in r.rows %}
+    {%- for row in r.rows %}
     <tr>
-      <th scope="row">{{ name }}</th>
-      {%- for cell in cells %}
+      <th scope="row"{% if !row.quality.is_empty() %} class="q-{{ row.quality }}"{% endif %}>{{ row.name }}</th>
+      {%- for cell in row.cells %}
       {%- if let Some(c) = cell %}
       <td class="num" title="{{ c.summary }}">
         {% call coins(c.now) %}{% endcall %}
@@ -52,7 +73,9 @@
   </tbody>
 </table>
 </div>
+{%- endif %}
 {%- endfor %}
+</section>
 
 <h2>Collecting</h2>
 {%- if enabled %}

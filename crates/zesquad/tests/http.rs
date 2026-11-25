@@ -2412,6 +2412,66 @@ async fn items_seen_at_auction_get_their_details() {
 }
 
 #[tokio::test]
+async fn items_can_be_searched_by_name_on_the_auction_page() {
+    let app = app_with_auctions(true, None, true).await;
+    app.wait_for("/auctions", "Item details: 5 of 6 known")
+        .await;
+    let row_names = |page: &str| -> Vec<String> {
+        page.split(r#"<th scope="row""#)
+            .skip(1)
+            .map(|r| r[r.find('>').unwrap() + 1..r.find("</th>").unwrap()].to_owned())
+            .collect()
+    };
+
+    // Without a search the leathers show; the box is there to search with.
+    let (_, page) = app.get("/auctions").await;
+    assert!(page.contains("<h2>Leather</h2>"));
+    assert!(page.contains(r#"name="q" value="""#));
+
+    // Any case, anywhere in the name; names starting with it first, then shorter ones. Each
+    // region has a table.
+    let (status, page) = app.get("/auctions?q=%20%20ITEM%20").await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(page.contains("Items matching “ITEM”"), "{page}");
+    assert!(page.contains(r#"name="q" value="ITEM""#));
+    let found = [
+        "Made-up Item 2589",
+        "Made-up Item 2592",
+        "Made-up Item 4306",
+        "Made-up Item 11208",
+    ];
+    assert_eq!(row_names(&page), [found, found].concat());
+
+    // Prices and quality show like the leathers'.
+    let (_, page) = app.get("/auctions?q=light").await;
+    assert_eq!(row_names(&page), ["Light Leather", "Light Leather"]);
+    assert!(page.contains(r#"<th scope="row" class="q-common">Light Leather</th>"#));
+    assert!(page.contains(r#"<span class="coin copper">45<span"#));
+
+    // htmx gets the page and swaps in the prices.
+    let page = app
+        .http
+        .get(format!("{}/auctions?q=light", app.base))
+        .header("HX-Request", "true")
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(page.contains(r#"<section id="prices">"#));
+
+    // Nothing found, wildcards taken literally, and an empty search is no search.
+    for q in ["zzz", "%25", "_"] {
+        let (_, page) = app.get(&format!("/auctions?q={q}")).await;
+        assert!(page.contains("No item seen at the auction houses"), "{q}");
+        assert!(row_names(&page).is_empty(), "{q}");
+    }
+    let (_, page) = app.get("/auctions?q=%20").await;
+    assert!(page.contains("<h2>Leather</h2>"));
+}
+
+#[tokio::test]
 async fn battle_net_is_left_alone_for_as_long_as_a_429_asks() {
     use zesquad::auctions::AuctionSync;
     use zesquad::db;

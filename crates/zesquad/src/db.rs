@@ -2296,3 +2296,40 @@ pub async fn item_name(db: &SqlitePool, id: u32) -> anyhow::Result<Option<String
         .await?;
     Ok(row.and_then(|(name,)| name))
 }
+
+/// An item found by name.
+#[derive(Debug, Clone, PartialEq, Eq, sqlx::FromRow)]
+pub struct FoundItem {
+    pub id: u32,
+    pub name: String,
+    pub quality: String,
+}
+
+/// Items whose name contains `search` (as tidied by `zesquad_core::items::search`), any case:
+/// names starting with it first, then shorter names, then by name. At most `limit`, and
+/// whether there were more.
+///
+/// # Errors
+///
+/// On database errors.
+pub async fn search_items(
+    db: &SqlitePool,
+    search: &str,
+    limit: u32,
+) -> anyhow::Result<(Vec<FoundItem>, bool)> {
+    use zesquad_core::items::{contains_pattern, prefix_pattern};
+    let mut found: Vec<FoundItem> = sqlx::query_as(
+        "SELECT id, name, COALESCE(quality, '') AS quality FROM items
+         WHERE name LIKE ? ESCAPE '\\'
+         ORDER BY name LIKE ? ESCAPE '\\' DESC, length(name), name, id
+         LIMIT ?",
+    )
+    .bind(contains_pattern(search))
+    .bind(prefix_pattern(search))
+    .bind(limit + 1)
+    .fetch_all(db)
+    .await?;
+    let more = found.len() > limit as usize;
+    found.truncate(limit as usize);
+    Ok((found, more))
+}

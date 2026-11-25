@@ -118,6 +118,53 @@ pub fn parse(json: &str) -> Result<Item, ItemError> {
     })
 }
 
+/// Longest search kept, in characters; item names are shorter.
+pub const SEARCH_MAX: usize = 60;
+
+/// What someone typed to search items by name, tidied: spaces trimmed and runs of them made
+/// one, at most [`SEARCH_MAX`] characters. `None` when nothing's left.
+#[must_use]
+pub fn search(typed: &str) -> Option<String> {
+    let tidy: String = typed
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .chars()
+        .take(SEARCH_MAX)
+        .collect();
+    let tidy = tidy.trim_end().to_owned();
+    (!tidy.is_empty()).then_some(tidy)
+}
+
+/// A SQL `LIKE` pattern (with `ESCAPE '\\'`) matching names that contain `search` literally.
+#[must_use]
+pub fn contains_pattern(search: &str) -> String {
+    format!("%{}%", escape_like(search))
+}
+
+/// A SQL `LIKE` pattern (with `ESCAPE '\\'`) matching names that start with `search`.
+#[must_use]
+pub fn prefix_pattern(search: &str) -> String {
+    format!("{}%", escape_like(search))
+}
+
+fn escape_like(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        if matches!(c, '%' | '_' | '\\') {
+            out.push('\\');
+        }
+        out.push(c);
+    }
+    out
+}
+
+/// Lower case, for the `q-<quality>` CSS classes.
+#[must_use]
+pub fn quality_class(quality: &str) -> String {
+    quality.to_ascii_lowercase()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -170,7 +217,29 @@ mod tests {
         assert_eq!(Source::ALL[0], Source::Forever, "Forever's own first");
     }
 
+    #[test]
+    fn searches_are_tidied() {
+        assert_eq!(search("  light   leather "), Some("light leather".into()));
+        assert_eq!(search(" \t "), None);
+        assert_eq!(search(&"x".repeat(100)).unwrap().len(), SEARCH_MAX);
+    }
+
+    #[test]
+    fn like_patterns_match_literally() {
+        assert_eq!(contains_pattern("leather"), "%leather%");
+        assert_eq!(prefix_pattern("50%_off\\"), "50\\%\\_off\\\\%");
+    }
+
     proptest! {
+        #[test]
+        fn tidy_searches_are_short_and_trimmed(s in ".*") {
+            if let Some(t) = search(&s) {
+                prop_assert!(t.chars().count() <= SEARCH_MAX);
+                prop_assert_eq!(t.trim(), t.as_str());
+                prop_assert!(!t.contains("  "));
+            }
+        }
+
         #[test]
         fn never_panics(s in ".*") {
             let _ = parse(&s);
