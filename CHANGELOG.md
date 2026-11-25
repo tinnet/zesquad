@@ -2,6 +2,12 @@
 
 What changed in each zesquad release. Versions are dates (CalVer).
 
+## 2026.11.25.6
+
+### Features
+
+- **web**: Show a market overview on the auction house page ([1341420](https://github.com/tinnet/zesquad/commit/1341420c091bb23a956253674f04e904e8b6b7e0))
+
 ## 2026.11.25.5
 
 ### Fixes
