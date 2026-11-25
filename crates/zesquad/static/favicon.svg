@@ -1,8 +1,15 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
   <style>
-    rect { fill: #8a5a00; } path { stroke: #ffffff; }
-    @media (prefers-color-scheme: dark) { rect { fill: #e0a63a; } path { stroke: #1d1b16; } }
+    rect { fill: #8a5a00; } .p { fill: #ffffff; stroke: #8a5a00; }
+    @media (prefers-color-scheme: dark) { rect { fill: #e0a63a; } .p { fill: #1d1b16; stroke: #e0a63a; } }
   </style>
   <rect width="32" height="32" rx="7"/>
-  <path d="M9 9.5h14L9 22.5h14" fill="none" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- three heads and shoulders: a squad -->
+  <g class="p" stroke-width="0">
+    <circle cx="9" cy="12" r="3.25"/><path d="M3 24.5a6 6 0 0 1 12 0z"/>
+    <circle cx="23" cy="12" r="3.25"/><path d="M17 24.5a6 6 0 0 1 12 0z"/>
+  </g>
+  <g class="p" stroke-width="1.75">
+    <circle cx="16" cy="13" r="4.5"/><path d="M8 27a8 8 0 0 1 16 0z"/>
+  </g>
 </svg>
