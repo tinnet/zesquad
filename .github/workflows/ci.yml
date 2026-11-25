@@ -16,7 +16,7 @@ jobs:
       - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
-      - uses: jdx/mise-action@v5.2.7 # rust, just from mise.toml
+      - uses: jdx/mise-action@v5.2.9 # rust, just from mise.toml
       - run: just ci
 
   # Every action is pinned to a commit in actions.lock; fail if a workflow uses one that isn't.
@@ -47,7 +47,7 @@ jobs:
           fetch-depth: 0 # shadow-rs reads the tags for the version
           persist-credentials: false
       - run: sudo apt-get install -y --no-install-recommends musl-tools
-      - uses: jdx/mise-action@v5.2.7
+      - uses: jdx/mise-action@v5.2.9
         with:
           install_args: rust
       - run: cargo build --release --locked --target ${{ matrix.target }} -p zesquad

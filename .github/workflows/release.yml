@@ -26,7 +26,7 @@ jobs:
           fetch-depth: 0 # shadow-rs reads the tag for the version
           persist-credentials: false
       - run: sudo apt-get install -y --no-install-recommends musl-tools
-      - uses: jdx/mise-action@v5.2.7
+      - uses: jdx/mise-action@v5.2.9
         with:
           install_args: rust
       - run: cargo build --release --locked --target ${{ matrix.target }} -p zesquad
@@ -60,7 +60,7 @@ jobs:
         with:
           fetch-depth: 0 # the history since the previous tag, for the notes
           persist-credentials: false
-      - uses: jdx/mise-action@v5.2.7
+      - uses: jdx/mise-action@v5.2.9
         with:
           install_args: git-cliff
       - name: Release notes
