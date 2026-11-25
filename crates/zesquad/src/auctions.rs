@@ -48,7 +48,10 @@ impl AuctionSync {
                 }
             }
             if let Err(e) = self.learn_items().await {
-                tracing::warn!("storing item details or icons failed: {e:#}");
+                tracing::warn!("storing item details failed: {e:#}");
+            }
+            if let Err(e) = self.learn_icons().await {
+                tracing::warn!("storing item icons failed: {e:#}");
             }
             if let Some(archive) = &self.archive {
                 match archive.upload().await {
@@ -64,8 +67,7 @@ impl AuctionSync {
     /// Asks Battle.net about the items due (see [`db::items_due`]): Forever's item data first,
     /// then Classic's. Stops at the first failure, which is likely to hit the rest too. A 429
     /// isn't the item's fault, so it isn't stored: the round just stops, and the client sends
-    /// nothing until the `Retry-After` has passed. Then does the same for icons. Fails only on
-    /// database errors.
+    /// nothing until the `Retry-After` has passed. Fails only on database errors.
     ///
     /// # Errors
     ///
@@ -82,21 +84,15 @@ impl AuctionSync {
         let (mut found, mut missing) = (0, 0);
         for id in due {
             match self.item(id).await {
-                Ok(Some((json, source))) => match items::parse(&json) {
-                    Ok(item) => {
-                        found += 1;
-                        let fetch = db::ItemFetch::Found {
-                            item: &item,
-                            source,
-                            json: &json,
-                        };
-                        db::store_item(&self.db, id, now, fetch).await?;
-                    }
-                    Err(e) => {
-                        let error = format!("{e}");
-                        db::store_item(&self.db, id, now, db::ItemFetch::Failed(&error)).await?;
-                    }
-                },
+                Ok(Some((item, json, source))) => {
+                    found += 1;
+                    let fetch = db::ItemFetch::Found {
+                        item: &item,
+                        source,
+                        json: &json,
+                    };
+                    db::store_item(&self.db, id, now, fetch).await?;
+                }
                 Ok(None) => {
                     missing += 1;
                     db::store_item(&self.db, id, now, db::ItemFetch::Missing).await?;
@@ -116,11 +112,16 @@ impl AuctionSync {
         if found + missing > 0 {
             tracing::info!(found, missing, "item details looked up");
         }
-        self.learn_icons(now).await
+        Ok(())
     }
 
     /// Asks Battle.net for the icons due (see [`db::icons_due`]), like [`Self::learn_items`].
-    async fn learn_icons(&self, now: i64) -> anyhow::Result<()> {
+    ///
+    /// # Errors
+    ///
+    /// On database errors.
+    pub async fn learn_icons(&self) -> anyhow::Result<()> {
+        let now = db::now();
         let due = db::icons_due(
             &self.db,
             now - ASK_MISSING_AGAIN,
@@ -131,7 +132,7 @@ impl AuctionSync {
         let (mut found, mut missing) = (0, 0);
         for id in due {
             let fetch = match self.client.item_media(items::REGION, id).await {
-                Ok(Lookup::Found(json)) => match items::icon(&json.to_string()) {
+                Ok(Lookup::Found(json)) => match items::icon(&json) {
                     Ok(Some(icon)) => Some(icon),
                     Ok(None) => None,
                     Err(e) => {
@@ -166,11 +167,17 @@ impl AuctionSync {
         Ok(())
     }
 
-    /// An item's document and where it was found; `None` when no item data has it.
-    async fn item(&self, id: u32) -> anyhow::Result<Option<(String, Source)>> {
+    /// An item, its document and where it was found; `None` when no item data has a usable
+    /// one. A document we can't read (one without a name, say) counts as not there, so the next
+    /// source is asked.
+    async fn item(&self, id: u32) -> anyhow::Result<Option<(items::Item, String, Source)>> {
         for source in Source::ALL {
             if let Lookup::Found(json) = self.client.item(items::REGION, id, source).await? {
-                return Ok(Some((json.to_string(), source)));
+                let json = json.to_string();
+                match items::parse(&json) {
+                    Ok(item) => return Ok(Some((item, json, source))),
+                    Err(e) => tracing::debug!(item = id, source = source.as_str(), "unusable: {e}"),
+                }
             }
         }
         Ok(None)

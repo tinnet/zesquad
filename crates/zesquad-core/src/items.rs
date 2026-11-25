@@ -48,9 +48,7 @@ pub struct Item {
     /// `POOR`, `COMMON`, `UNCOMMON`, `RARE`, `EPIC`, ...; empty when missing.
     pub quality: String,
     pub class_id: Option<u32>,
-    pub class_name: Option<String>,
     pub subclass_id: Option<u32>,
-    pub subclass_name: Option<String>,
     /// Copper a vendor pays for one, as the tooltip says; `None` when it can't be sold.
     pub sell_price: Option<u64>,
 }
@@ -71,9 +69,9 @@ struct Doc {
     #[serde(default)]
     quality: Option<Typed>,
     #[serde(default)]
-    item_class: Option<Named>,
+    item_class: Option<Class>,
     #[serde(default)]
-    item_subclass: Option<Named>,
+    item_subclass: Option<Class>,
     #[serde(default)]
     sell_price: Option<u64>,
     #[serde(default)]
@@ -100,11 +98,9 @@ struct Typed {
 }
 
 #[derive(Deserialize)]
-struct Named {
+struct Class {
     #[serde(default)]
     id: Option<u32>,
-    #[serde(default)]
-    name: Option<String>,
 }
 
 /// What a vendor pays: the tooltip's price, which is what the game shows. Forever repriced
@@ -129,16 +125,14 @@ pub fn parse(json: &str) -> Result<Item, ItemError> {
         .map(|n| n.trim().to_owned())
         .filter(|n| !n.is_empty())
         .ok_or(ItemError::NoName)?;
-    let (class_id, class_name) = doc.item_class.map_or((None, None), |c| (c.id, c.name));
-    let (subclass_id, subclass_name) = doc.item_subclass.map_or((None, None), |c| (c.id, c.name));
+    let class_id = doc.item_class.and_then(|c| c.id);
+    let subclass_id = doc.item_subclass.and_then(|c| c.id);
     Ok(Item {
         id: doc.id,
         name,
         quality: doc.quality.map_or_else(String::new, |q| q.kind),
         class_id,
-        class_name,
         subclass_id,
-        subclass_name,
         sell_price: sell_price(doc.preview_item.and_then(|p| p.sell_price), doc.sell_price),
     })
 }
@@ -167,8 +161,8 @@ struct Asset {
 /// # Errors
 ///
 /// When it isn't JSON in the expected shape.
-pub fn icon(media_json: &str) -> Result<Option<u32>, serde_json::Error> {
-    let media: Media = serde_json::from_str(media_json)?;
+pub fn icon(media: &serde_json::Value) -> Result<Option<u32>, serde_json::Error> {
+    let media = Media::deserialize(media)?;
     Ok(media
         .assets
         .into_iter()
@@ -190,17 +184,12 @@ pub fn icon_url(icon: Option<u32>, size: u32) -> String {
 /// Longest search kept, in characters; item names are shorter.
 pub const SEARCH_MAX: usize = 60;
 
-/// What someone typed to search items by name, tidied: spaces trimmed and runs of them made
-/// one, at most [`SEARCH_MAX`] characters. `None` when nothing's left.
+/// What someone typed to search items by name, tidied like names (spaces trimmed and runs of
+/// them made one, control characters dropped), at most [`SEARCH_MAX`] characters. `None` when
+/// nothing's left.
 #[must_use]
 pub fn search(typed: &str) -> Option<String> {
-    let tidy: String = typed
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
-        .chars()
-        .take(SEARCH_MAX)
-        .collect();
+    let tidy: String = crate::text::tidy(typed).chars().take(SEARCH_MAX).collect();
     let tidy = tidy.trim_end().to_owned();
     (!tidy.is_empty()).then_some(tidy)
 }
@@ -257,9 +246,7 @@ mod tests {
                 name: "Light Leather".into(),
                 quality: "COMMON".into(),
                 class_id: Some(7),
-                class_name: Some("Trade Goods".into()),
                 subclass_id: Some(6),
-                subclass_name: Some("Leather".into()),
                 sell_price: Some(15),
             }
         );
@@ -313,6 +300,7 @@ mod tests {
 
     #[test]
     fn reads_an_icon() {
+        let icon = |json: &str| icon(&serde_json::from_str(json).unwrap());
         assert_eq!(icon(&fixture("item-media")).unwrap(), Some(134_252));
         assert_eq!(icon(r#"{"assets": []}"#).unwrap(), None);
         assert_eq!(icon("{}").unwrap(), None);

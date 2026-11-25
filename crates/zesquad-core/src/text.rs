@@ -17,7 +17,7 @@ pub enum TextError {
 
 /// Trims and collapses runs of whitespace, and drops control characters, so that names that
 /// look the same are the same.
-fn tidy(s: &str) -> String {
+pub(crate) fn tidy(s: &str) -> String {
     s.split(|c: char| c.is_whitespace() || c.is_control())
         .filter(|w| !w.is_empty())
         .collect::<Vec<_>>()

@@ -6,9 +6,7 @@
     copying. -#}
 {%- macro coins(m) -%}
 <span class="money">
-{%- if m.shows_gold() %}<span class="coin gold">{{ m.gold }}<span class="visually-hidden">g</span></span>{% endif -%}
-{%- if m.shows_silver() %}{% if m.shows_gold() %} {% endif %}<span class="coin silver">{{ m.silver }}<span class="visually-hidden">s</span></span>{% endif -%}
-{%- if m.shows_copper() %}{% if m.shows_gold() || m.shows_silver() %} {% endif %}<span class="coin copper">{{ m.copper }}<span class="visually-hidden">c</span></span>{% endif -%}
+{%- for (n, coin, letter) in m.coins() %}{% if !loop.first %} {% endif %}<span class="coin {{ coin }}">{{ n }}<span class="visually-hidden">{{ letter }}</span></span>{% endfor -%}
 </span>
 {%- endmacro -%}
 
@@ -52,7 +50,7 @@
   <p class="empty">{{ l.empty }}</p>
   {%- else %}
   <div class="table-wrap">
-  <table class="data overview">
+  <table class="data market">
     <thead>
       <tr><th>Item</th>{% for h in l.heads %}<th class="num">{{ h }}</th>{% endfor %}</tr>
     </thead>

@@ -42,17 +42,10 @@ pub struct Move {
 }
 
 impl Move {
-    /// How many times the price it is now.
-    #[must_use]
-    pub fn ratio(&self) -> f64 {
-        ratio(self.now, self.before)
-    }
-
-    /// The money the move involves: the price change times the units on sale. What moves are
-    /// ranked by.
+    /// The money the move involves (see [`weight`]). What moves are ranked by.
     #[must_use]
     pub fn weight(&self) -> u64 {
-        self.now.abs_diff(self.before).saturating_mul(self.quantity)
+        weight(self.before, self.now, self.quantity)
     }
 }
 
@@ -113,18 +106,21 @@ impl Gap {
         ratio(self.alliance.max(self.horde), self.alliance.min(self.horde))
     }
 
-    /// The money the gap involves: the price difference times the units on sale. What gaps
-    /// are ranked by.
+    /// The money the gap involves (see [`weight`]). What gaps are ranked by.
     #[must_use]
     pub fn weight(&self) -> u64 {
-        self.alliance
-            .abs_diff(self.horde)
-            .saturating_mul(self.quantity)
+        weight(self.alliance, self.horde, self.quantity)
     }
 }
 
-/// Items on sale on both factions' houses of `pool` with enough auctions on each, by
-/// [`Gap::weight`], most first.
+/// The money a price difference involves: the difference times the units on sale.
+#[must_use]
+pub fn weight(a: u64, b: u64, quantity: u64) -> u64 {
+    a.abs_diff(b).saturating_mul(quantity)
+}
+
+/// Items on sale on both factions' houses of `pool` with enough auctions on each, in no
+/// particular order (see [`top_gaps`]).
 #[must_use]
 pub fn gaps(pool: usize, alliance: &[ItemPrices], horde: &[ItemPrices]) -> Vec<Gap> {
     let horde: BTreeMap<u32, &ItemPrices> = horde
@@ -132,7 +128,7 @@ pub fn gaps(pool: usize, alliance: &[ItemPrices], horde: &[ItemPrices]) -> Vec<G
         .filter(|p| p.auctions >= MIN_AUCTIONS && p.median_price > 0)
         .map(|p| (p.item, p))
         .collect();
-    let gaps = alliance
+    alliance
         .iter()
         .filter(|p| p.auctions >= MIN_AUCTIONS && p.median_price > 0)
         .filter_map(|a| {
@@ -145,8 +141,7 @@ pub fn gaps(pool: usize, alliance: &[ItemPrices], horde: &[ItemPrices]) -> Vec<G
                 quantity: a.quantity.min(h.quantity),
             })
         })
-        .collect();
-    best_per_item(gaps, |g| g.item, Gap::weight)
+        .collect()
 }
 
 /// The `n` biggest gaps by [`Gap::weight`] from several pools, one per item, biggest first.
@@ -176,15 +171,15 @@ impl Bargain {
     }
 }
 
-/// Items in `house` whose cheapest listing is below what a vendor pays (`vendor`), most profit
-/// per unit first.
+/// Items in `house` whose cheapest listing is below what a vendor pays (`vendor`), in no
+/// particular order (see [`top_bargains`]).
 #[must_use]
 pub fn under_vendor(
     house: usize,
     prices: &[ItemPrices],
     vendor: impl Fn(u32) -> Option<u64>,
 ) -> Vec<Bargain> {
-    let mut found: Vec<Bargain> = prices
+    prices
         .iter()
         .filter_map(|p| {
             let v = vendor(p.item)?;
@@ -195,20 +190,16 @@ pub fn under_vendor(
                 vendor: v,
             })
         })
-        .collect();
-    found.sort_by(|a, b| b.profit().cmp(&a.profit()).then(a.item.cmp(&b.item)));
-    found
+        .collect()
 }
 
 /// The `n` best bargains from several houses, one per item (its most profitable), most profit
 /// first.
 #[must_use]
-pub fn top_bargains(mut all: Vec<Bargain>, n: usize) -> Vec<Bargain> {
-    all.sort_by(|a, b| b.profit().cmp(&a.profit()).then(a.item.cmp(&b.item)));
-    let mut seen = std::collections::BTreeSet::new();
-    all.retain(|b| seen.insert(b.item));
-    all.truncate(n);
-    all
+pub fn top_bargains(all: Vec<Bargain>, n: usize) -> Vec<Bargain> {
+    let mut top = best_per_item(all, |b| b.item, Bargain::profit);
+    top.truncate(n);
+    top
 }
 
 /// One item's market across a region's houses.
@@ -420,12 +411,12 @@ mod tests {
             quote(3, 900, 10),
             quote(4, 100, 9),
         ];
-        let found: Vec<(u32, u64, u64)> = gaps(1, &alliance, &horde)
+        let found: Vec<(u32, u64, u64)> = top_gaps(gaps(1, &alliance, &horde), 5)
             .iter()
             .map(|g| (g.item, g.alliance, g.horde))
             .collect();
         assert_eq!(found, [(4, 500, 100), (1, 100, 300), (2, 100, 110)]);
-        assert!((gaps(1, &alliance, &horde)[0].ratio() - 5.0).abs() < 1e-9);
+        assert!((top_gaps(gaps(1, &alliance, &horde), 1)[0].ratio() - 5.0).abs() < 1e-9);
     }
 
     #[test]
@@ -442,7 +433,7 @@ mod tests {
             3 => Some(50),    // cheapest 50: no profit
             _ => None,
         };
-        let found: Vec<(u32, u64)> = under_vendor(2, &prices, vendor)
+        let found: Vec<(u32, u64)> = top_bargains(under_vendor(2, &prices, vendor), 5)
             .iter()
             .map(|b| (b.item, b.profit()))
             .collect();

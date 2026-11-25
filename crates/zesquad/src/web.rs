@@ -1997,12 +1997,7 @@ async fn auctions_page(
                         name: f.name.clone(),
                         quality: items::quality_class(&f.quality),
                         icon: items::icon_url(f.icon, ICON_SIZE),
-                        vendor: f
-                            .json
-                            .as_deref()
-                            .and_then(|json| items::parse(json).ok())
-                            .and_then(|item| item.sell_price)
-                            .map(Money::from_copper),
+                        vendor: f.vendor().map(Money::from_copper),
                         cells: Vec::new(),
                     })
                     .collect(),
@@ -2056,6 +2051,8 @@ async fn auctions_page(
 
 /// Rows each overview list shows.
 const OVERVIEW_ROWS: usize = 8;
+/// The pools whose factions' prices are compared; a gap's `pool` indexes this.
+const POOLS: [auctions::Pool; 2] = [auctions::Pool::Pvp, auctions::Pool::Pve];
 
 /// What's going on in one region's houses, when nothing was searched.
 struct Overview {
@@ -2100,10 +2097,14 @@ struct Figure {
 
 impl Figure {
     fn money(copper: u64) -> Self {
+        Self::coins(Money::from_copper(copper), "")
+    }
+
+    fn coins(money: Money, class: &'static str) -> Self {
         Self {
-            money: Some(Money::from_copper(copper)),
+            money: Some(money),
             text: String::new(),
-            class: "",
+            class,
         }
     }
 
@@ -2167,28 +2168,33 @@ impl Ranked {
 /// price and the biggest markets. Reads the latest snapshots and two days of daily prices,
 /// about 60k rows, a few tens of milliseconds.
 async fn rank_market(db: &SqlitePool, region: Region) -> anyhow::Result<Ranked> {
-    use zesquad_core::auctions::{Faction, ItemPrices, Pool};
+    use zesquad_core::auctions::{Faction, ItemPrices};
 
     let houses: Vec<auctions::House> = auctions::followed()
         .filter(|h| h.region == region)
         .collect();
     let vendor = db::vendor_prices(db).await?;
     let mut latest: Vec<Vec<ItemPrices>> = Vec::new();
-    let mut moves = Vec::new();
-    let mut last_day = None;
-    for (i, house) in houses.iter().enumerate() {
+    let mut days = Vec::new();
+    for house in &houses {
         let prices = db::latest_auctions(db, region, house.id).await?;
         latest.push(prices.map_or_else(Vec::new, |(_, p)| p));
-        if let Some(day) = db::condensed_through(db, region, house.id).await? {
+        days.push(db::condensed_through(db, region, house.id).await?);
+    }
+    // Moves are from the region's last finished day; a house that's behind (its fetches failing,
+    // say) is left out rather than mixing in an older day.
+    let last_day = days.iter().copied().max().flatten();
+    let mut moves = Vec::new();
+    for (i, house) in houses.iter().enumerate() {
+        if let Some(day) = last_day.filter(|&d| days[i] == Some(d)) {
             let now = db::day_prices(db, region, house.id, day).await?;
             let before = db::day_prices(db, region, house.id, day - 1).await?;
             moves.extend(market::moves(i, &before, &now));
-            last_day = last_day.max(Some(day));
         }
     }
     let (rising, falling) = market::rising_and_falling(moves, OVERVIEW_ROWS);
     let mut gaps = Vec::new();
-    for (p, pool) in [Pool::Pvp, Pool::Pve].into_iter().enumerate() {
+    for (p, pool) in POOLS.into_iter().enumerate() {
         let side = |faction| {
             houses
                 .iter()
@@ -2277,7 +2283,6 @@ fn overview_lists(r: &Ranked, known: &HashMap<u32, db::FoundItem>) -> Vec<Overvi
          change times the units on sale."
     );
     let no_days = "Nothing yet: this needs two whole days of prices.";
-    let pools = ["PvP", "PvE"];
     vec![
         OverviewList {
             title: "Rising",
@@ -2311,7 +2316,7 @@ fn overview_lists(r: &Ranked, known: &HashMap<u32, db::FoundItem>) -> Vec<Overvi
                     item_row(
                         known,
                         g.item,
-                        (format!("{} houses", pools[g.pool]), ""),
+                        (format!("{} houses", POOLS[g.pool].name()), ""),
                         figures,
                     )
                 })
@@ -2326,8 +2331,7 @@ fn overview_lists(r: &Ranked, known: &HashMap<u32, db::FoundItem>) -> Vec<Overvi
                 .bargains
                 .iter()
                 .map(|b| {
-                    let mut profit = Figure::money(b.profit());
-                    profit.class = "up";
+                    let profit = Figure::coins(Money::from_copper(b.profit()), "up");
                     let figures = vec![Figure::money(b.price), Figure::money(b.vendor), profit];
                     item_row(known, b.item, r.house(b.house), figures)
                 })
@@ -2342,11 +2346,7 @@ fn overview_lists(r: &Ranked, known: &HashMap<u32, db::FoundItem>) -> Vec<Overvi
                 .biggest
                 .iter()
                 .map(|m| {
-                    let worth = Figure {
-                        money: Some(Money::brief(m.value)),
-                        text: String::new(),
-                        class: "",
-                    };
+                    let worth = Figure::coins(Money::brief(m.value), "");
                     let units = Figure::text(m.quantity.to_string(), "");
                     item_row(known, m.item, (String::new(), ""), vec![units, worth])
                 })

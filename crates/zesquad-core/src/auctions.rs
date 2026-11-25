@@ -121,24 +121,24 @@ impl Money {
         }
     }
 
-    /// Whether gold is shown: when there's any. Empty coins are left out, so `2s`, not `2s 0c`.
+    /// The coins shown, largest first: each amount with its coin's name and letter. Empty
+    /// coins are left out (`2s`, not `2s 0c`), copper next to gold in brief, and nothing at
+    /// all is `0c`. The page and [`money`] both show these.
     #[must_use]
-    pub fn shows_gold(self) -> bool {
-        self.gold > 0
-    }
-
-    /// Whether silver is shown: when there's any.
-    #[must_use]
-    pub fn shows_silver(self) -> bool {
-        self.silver > 0
-    }
-
-    /// Whether copper is shown: when there's any, or nothing at all (`0c`); never next to gold
-    /// in brief.
-    #[must_use]
-    pub fn shows_copper(self) -> bool {
-        let nothing = self.gold == 0 && self.silver == 0 && self.copper == 0;
-        (self.copper > 0 || nothing) && !(self.brief && self.gold > 0)
+    pub fn coins(self) -> Vec<(u64, &'static str, &'static str)> {
+        let shown: Vec<_> = [
+            (self.gold, "gold", "g"),
+            (self.silver, "silver", "s"),
+            (self.copper, "copper", "c"),
+        ]
+        .into_iter()
+        .filter(|&(n, coin, _)| n > 0 && !(coin == "copper" && self.brief && self.gold > 0))
+        .collect();
+        if shown.is_empty() {
+            vec![(0, "copper", "c")]
+        } else {
+            shown
+        }
     }
 }
 
@@ -146,18 +146,12 @@ impl Money {
 /// `2s`, `400g`, `1g 3c`), `0c` for nothing.
 #[must_use]
 pub fn money(copper: u64) -> String {
-    let m = Money::from_copper(copper);
-    let mut parts = Vec::new();
-    if m.shows_gold() {
-        parts.push(format!("{}g", m.gold));
-    }
-    if m.shows_silver() {
-        parts.push(format!("{}s", m.silver));
-    }
-    if m.shows_copper() {
-        parts.push(format!("{}c", m.copper));
-    }
-    parts.join(" ")
+    Money::from_copper(copper)
+        .coins()
+        .iter()
+        .map(|(n, _, letter)| format!("{n}{letter}"))
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// One item's prices in one snapshot of a house, in copper per unit.
@@ -314,26 +308,14 @@ pub fn day_label(day: i64) -> String {
     const MONTHS: [&str; 12] = [
         "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
     ];
-    let (_, month, date) = civil_from_days(day);
+    let date = crate::archive::Utc::from_unix(day * DAY);
+    let index = |n: i64| usize::try_from(n).unwrap_or(0);
     format!(
-        "{} {date} {}",
-        WEEKDAYS[usize::try_from(day.rem_euclid(7)).unwrap_or(0)],
-        MONTHS[usize::try_from(month - 1).unwrap_or(0)]
+        "{} {} {}",
+        WEEKDAYS[index(day.rem_euclid(7))],
+        date.day,
+        MONTHS[index(i64::from(date.month) - 1)]
     )
-}
-
-/// Year, month (1-12) and day of the month of a day since the epoch, in the proleptic
-/// Gregorian calendar (Howard Hinnant's `civil_from_days`).
-fn civil_from_days(z: i64) -> (i64, i64, i64) {
-    let z = z + 719_468;
-    let era = z.div_euclid(146_097);
-    let doe = z.rem_euclid(146_097);
-    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let d = doy - (153 * mp + 2) / 5 + 1;
-    let m = if mp < 10 { mp + 3 } else { mp - 9 };
-    (yoe + era * 400 + i64::from(m <= 2), m, d)
 }
 
 #[cfg(test)]
@@ -471,19 +453,24 @@ mod tests {
             prop_assert!(!text.is_empty());
             for brief in [false, true] {
                 let m = if brief { Money::brief(copper) } else { Money::from_copper(copper) };
-                prop_assert!(m.shows_gold() || m.shows_silver() || m.shows_copper(), "something shows");
+                prop_assert!(!m.coins().is_empty(), "something shows");
             }
         }
     }
 
     #[test]
     fn brief_money_rounds_to_the_silver_from_a_gold_up() {
-        let show = |m: Money| (m.gold, m.silver, m.shows_copper());
-        assert_eq!(show(Money::brief(9_999)), (0, 99, true));
-        assert_eq!(show(Money::brief(17_249)), (1, 72, false));
-        assert_eq!(show(Money::brief(17_250)), (1, 73, false));
-        assert_eq!(show(Money::brief(19_990)), (2, 0, false));
-        assert!(!Money::brief(19_990).shows_silver(), "2g, not 2g 0s");
+        let show = |m: Money| {
+            m.coins()
+                .iter()
+                .map(|(n, _, letter)| format!("{n}{letter}"))
+                .collect::<Vec<_>>()
+                .join(" ")
+        };
+        assert_eq!(show(Money::brief(9_999)), "99s 99c");
+        assert_eq!(show(Money::brief(17_249)), "1g 72s");
+        assert_eq!(show(Money::brief(17_250)), "1g 73s");
+        assert_eq!(show(Money::brief(19_990)), "2g", "not 2g 0s");
     }
 
     #[test]
@@ -497,8 +484,7 @@ mod tests {
         assert_eq!(day_label(0), "Thu 1 Jan");
         assert_eq!(day_label(20_782), "Wed 25 Nov", "2026-11-25");
         assert_eq!(day_label(19_782), "Thu 29 Feb", "2024-02-29");
-        assert_eq!(civil_from_days(20_782), (2026, 11, 25));
-        assert_eq!(civil_from_days(-1), (1969, 12, 31));
+        assert_eq!(day_label(-1), "Wed 31 Dec");
     }
 
     #[test]

@@ -53,6 +53,14 @@ struct Fake {
     media_requests: Arc<AtomicUsize>,
 }
 
+/// Whether a request to the fake Battle.net carries the app's token.
+fn authorised(headers: &HeaderMap) -> bool {
+    headers
+        .get(header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        == Some(&format!("Bearer {TOKEN}"))
+}
+
 /// A webhook id the fake Discord says is gone (404), like a deleted webhook.
 const DELETED_WEBHOOK: &str = "404404404404404404";
 
@@ -217,11 +225,7 @@ fn fake_character(
     segments: &[&str],
 ) -> Response {
     fake.lookups.fetch_add(1, Ordering::SeqCst);
-    let authorised = headers
-        .get(header::AUTHORIZATION)
-        .and_then(|v| v.to_str().ok())
-        == Some(&format!("Bearer {TOKEN}"));
-    if !authorised {
+    if !authorised(headers) {
         return StatusCode::UNAUTHORIZED.into_response();
     }
     if fake.down.load(Ordering::SeqCst) {
@@ -275,11 +279,7 @@ async fn fake_auctions(
     Query(q): Query<std::collections::HashMap<String, String>>,
     Path((ruleset, rest)): Path<(u32, String)>,
 ) -> Response {
-    let authorised = headers
-        .get(header::AUTHORIZATION)
-        .and_then(|v| v.to_str().ok())
-        == Some(&format!("Bearer {TOKEN}"));
-    if !authorised {
+    if !authorised(&headers) {
         return StatusCode::UNAUTHORIZED.into_response();
     }
     let region = match q.get("namespace").map(String::as_str) {
@@ -339,19 +339,16 @@ async fn fake_auctions(
         .into_response()
 }
 
-/// Forever's item data has the fixture auctions' items but two: 2589 is only in Classic's, and
-/// 19019 in neither. 2318 is the real document (see zesquad-core/fixtures).
+/// Forever's item data has the fixture auctions' items but two: 2589 is only in Classic's (Forever
+/// has a document for it, but one without a name), and 19019 in neither. 2318 is the real
+/// document (see zesquad-core/fixtures).
 async fn fake_item(
     State(fake): State<Fake>,
     headers: HeaderMap,
     Query(q): Query<std::collections::HashMap<String, String>>,
     Path(id): Path<u32>,
 ) -> Response {
-    let authorised = headers
-        .get(header::AUTHORIZATION)
-        .and_then(|v| v.to_str().ok())
-        == Some(&format!("Bearer {TOKEN}"));
-    if !authorised {
+    if !authorised(&headers) {
         return StatusCode::UNAUTHORIZED.into_response();
     }
     let namespace = q.get("namespace").cloned().unwrap_or_default();
@@ -364,6 +361,7 @@ async fn fake_item(
     }
     let body = match (namespace.as_str(), id) {
         ("static-forever-eu", 2318) => fixture("item"),
+        ("static-forever-eu", 2589) => serde_json::json!({"id": 2589}).to_string(),
         ("static-forever-eu", 2592 | 4306 | 11208) | ("static-classic1x-eu", 2589) => {
             serde_json::json!({
                 "id": id,
@@ -398,11 +396,7 @@ async fn fake_item_media(
     Query(q): Query<std::collections::HashMap<String, String>>,
     Path(id): Path<u32>,
 ) -> Response {
-    let authorised = headers
-        .get(header::AUTHORIZATION)
-        .and_then(|v| v.to_str().ok())
-        == Some(&format!("Bearer {TOKEN}"));
-    if !authorised {
+    if !authorised(&headers) {
         return StatusCode::UNAUTHORIZED.into_response();
     }
     fake.media_requests.fetch_add(1, Ordering::SeqCst);
@@ -479,11 +473,7 @@ async fn fake_guild(
     Path(rest): Path<String>,
 ) -> Response {
     fake.guild_lookups.fetch_add(1, Ordering::SeqCst);
-    if headers
-        .get(header::AUTHORIZATION)
-        .and_then(|v| v.to_str().ok())
-        != Some(&format!("Bearer {TOKEN}"))
-    {
+    if !authorised(&headers) {
         return StatusCode::UNAUTHORIZED.into_response();
     }
     let in_eu = q.get("namespace").map(String::as_str) == Some("profile-forever-eu");
@@ -2506,19 +2496,6 @@ async fn items_can_be_searched_by_name_on_the_auction_page() {
     assert_eq!(row_names(&page), [found, found].concat());
     // Under each name what a vendor pays: the tooltip's price (4g 20s 88c, though the top-level
     // price is 0), and nothing for an item that can't be sold.
-    let text = |html: &str| {
-        let mut out = String::new();
-        let mut in_tag = false;
-        for c in html.chars() {
-            match c {
-                '<' => in_tag = true,
-                '>' => in_tag = false,
-                c if !in_tag => out.push(c),
-                _ => {}
-            }
-        }
-        out
-    };
     let vendor: Vec<String> = rows(&page)[..4]
         .iter()
         .map(|cell| {
@@ -2683,6 +2660,30 @@ async fn seed_overview(db: &sqlx::SqlitePool) {
     db::condense_auctions(db, Region::Eu, 113, now, 7)
         .await
         .unwrap();
+    // EU Alliance PvE is a day behind: 4306 moved a lot there, but on an older day, so it
+    // mustn't show among the last day's moves.
+    let behind = today.div_euclid(DAY) - 2;
+    for (day, median) in [(behind - 1, 10), (behind, 9_000)] {
+        sqlx::query(
+            "INSERT OR REPLACE INTO auction_daily
+             (region, house, day, item, min_price, median_price, max_price, quantity, snapshots)
+             VALUES ('eu', 111, ?, 4306, ?, ?, ?, 50, 24)",
+        )
+        .bind(day)
+        .bind(median)
+        .bind(median)
+        .bind(median)
+        .execute(db)
+        .await
+        .unwrap();
+    }
+    sqlx::query(
+        "UPDATE auction_houses SET condensed_through = ? WHERE region = 'eu' AND house = 111",
+    )
+    .bind(behind)
+    .execute(db)
+    .await
+    .unwrap();
     for (house, median) in [(111, 10), (114, 50)] {
         let snapshot = Snapshot {
             items: vec![price(2589, median, 60, 6)],
@@ -2758,6 +2759,7 @@ async fn battle_net_is_left_alone_for_as_long_as_a_429_asks() {
     // A 429 ends the round after one request, and the item isn't marked as failed.
     fake.items_limited.store(true, Ordering::SeqCst);
     sync.learn_items().await.unwrap();
+    sync.learn_icons().await.unwrap();
     assert_eq!(item_requests(), 1);
     assert_eq!(media_requests(), 0, "icons wait too");
     assert_eq!(db::item_counts(&db).await.unwrap().failed, 0);
@@ -2765,6 +2767,7 @@ async fn battle_net_is_left_alone_for_as_long_as_a_429_asks() {
     // Until the Retry-After has passed nothing at all is sent, dumps included.
     fake.items_limited.store(false, Ordering::SeqCst);
     sync.learn_items().await.unwrap();
+    sync.learn_icons().await.unwrap();
     assert_eq!(item_requests(), 1, "no item lookups while paused");
     assert_eq!(media_requests(), 0, "no icon lookups while paused");
     let dumps = dump_requests();
@@ -2777,6 +2780,7 @@ async fn battle_net_is_left_alone_for_as_long_as_a_429_asks() {
     // Then lookups carry on where they stopped.
     tokio::time::sleep(Duration::from_millis(1_100)).await;
     sync.learn_items().await.unwrap();
+    sync.learn_icons().await.unwrap();
     let counts = db::item_counts(&db).await.unwrap();
     assert_eq!((counts.forever, counts.classic, counts.missing), (4, 1, 1));
     assert_eq!(media_requests(), 6, "each item's icon, once");
