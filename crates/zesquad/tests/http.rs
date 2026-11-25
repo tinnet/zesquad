@@ -47,6 +47,8 @@ struct Fake {
     guild_lookups: Arc<AtomicUsize>,
     /// Item lookups, as `namespace/id`.
     item_requests: Arc<std::sync::Mutex<Vec<String>>>,
+    /// Item lookups answer 429 with `Retry-After: 1`.
+    items_limited: Arc<AtomicBool>,
 }
 
 /// A webhook id the fake Discord says is gone (404), like a deleted webhook.
@@ -355,6 +357,9 @@ async fn fake_item(
         .lock()
         .unwrap()
         .push(format!("{namespace}/{id}"));
+    if fake.items_limited.load(Ordering::SeqCst) {
+        return (StatusCode::TOO_MANY_REQUESTS, [(header::RETRY_AFTER, "1")]).into_response();
+    }
     let body = match (namespace.as_str(), id) {
         ("static-forever-eu", 2318) => fixture("item"),
         ("static-forever-eu", 2592 | 4306 | 11208) | ("static-classic1x-eu", 2589) => {
@@ -2404,6 +2409,62 @@ async fn items_seen_at_auction_get_their_details() {
             "static-forever-eu/4306",
         ]
     );
+}
+
+#[tokio::test]
+async fn battle_net_is_left_alone_for_as_long_as_a_429_asks() {
+    use zesquad::auctions::AuctionSync;
+    use zesquad::db;
+    use zesquad_core::auctions::followed;
+
+    let (fake_url, fake) = start_fake().await;
+    let dir = tempfile::tempdir().unwrap();
+    let db = db::open(&dir.path().join("zesquad.db"), Region::Eu)
+        .await
+        .unwrap();
+    let config = zesquad::armory::Config::new(
+        CLIENT_ID.into(),
+        CLIENT_SECRET.into(),
+        Some(&fake_url),
+        &format!("{fake_url}/token"),
+    )
+    .unwrap();
+    let sync = AuctionSync {
+        db: db.clone(),
+        client: Arc::new(zesquad::armory::Client::new(config).unwrap()),
+        archive: None,
+    };
+    let eu = |id| {
+        followed()
+            .find(|h| h.region == Region::Eu && h.id == id)
+            .unwrap()
+    };
+    sync.update(eu(110), 1_000).await.unwrap();
+    let item_requests = || fake.item_requests.lock().unwrap().len();
+    let dump_requests = || fake.auction_requests.lock().unwrap().len();
+
+    // A 429 ends the round after one request, and the item isn't marked as failed.
+    fake.items_limited.store(true, Ordering::SeqCst);
+    sync.learn_items().await.unwrap();
+    assert_eq!(item_requests(), 1);
+    assert_eq!(db::item_counts(&db).await.unwrap().failed, 0);
+
+    // Until the Retry-After has passed nothing at all is sent, dumps included.
+    fake.items_limited.store(false, Ordering::SeqCst);
+    sync.learn_items().await.unwrap();
+    assert_eq!(item_requests(), 1, "no item lookups while paused");
+    let dumps = dump_requests();
+    sync.update(eu(113), 2_000).await.unwrap();
+    assert_eq!(dump_requests(), dumps, "no dumps while paused");
+    let status = db::house_status(&db, Region::Eu, 113).await.unwrap();
+    assert!(status.error.unwrap().contains("429"));
+    assert_eq!(db::item_counts(&db).await.unwrap().forever, 0);
+
+    // Then lookups carry on where they stopped.
+    tokio::time::sleep(Duration::from_millis(1_100)).await;
+    sync.learn_items().await.unwrap();
+    let counts = db::item_counts(&db).await.unwrap();
+    assert_eq!((counts.forever, counts.classic, counts.missing), (4, 1, 1));
 }
 
 #[tokio::test]

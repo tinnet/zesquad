@@ -126,6 +126,11 @@ keeps the name, quality and class for searching beside the whole document. An it
 asked about again after a week, a failed ask after an hour; a round stops at its first failure.
 The roughly 7,600 items seen take about an hour. `/auctions` says how far it has got.
 
+When Battle.net answers 429, the client sends nothing more, for any page or task, until the
+`Retry-After` has passed (10 seconds when it doesn't say, at most an hour; `zesquad_core::retry`):
+the quota is per client. A round of item lookups that hits it just stops, without marking the item
+as failed.
+
 A failed fetch is logged and stored in `auction_houses.error`, and tried again on the next
 check; the house's snapshots stay.
 

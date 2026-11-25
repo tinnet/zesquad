@@ -2,7 +2,7 @@
 //! WoW: Forever's realmless form, and auction house dumps, in any region. See
 //! `docs/battlenet-api.md`.
 
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use anyhow::{Context as _, bail};
 use reqwest::{StatusCode, Url, header};
@@ -14,6 +14,7 @@ use zesquad_core::armory::Endpoint;
 use zesquad_core::auctions::RULESET;
 use zesquad_core::guild::{self, Slug};
 use zesquad_core::items::Source;
+use zesquad_core::retry;
 
 /// Battle.net's OAuth token endpoint, for every region.
 pub const TOKEN_URL: &str = "https://oauth.battle.net/token";
@@ -84,10 +85,33 @@ pub enum Lookup {
     NotFound,
 }
 
+/// Battle.net answered 429 Too Many Requests: nothing is sent to it before `until`, the
+/// time its `Retry-After` asked for.
+#[derive(Debug)]
+pub struct RateLimited {
+    pub until: Instant,
+}
+
+impl std::fmt::Display for RateLimited {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let wait = self.until.saturating_duration_since(Instant::now());
+        write!(
+            f,
+            "Battle.net asked us to slow down (429); waiting {}s",
+            wait.as_secs().max(1)
+        )
+    }
+}
+
+impl std::error::Error for RateLimited {}
+
 pub struct Client {
     http: reqwest::Client,
     config: Config,
     token: Mutex<Option<Token>>,
+    /// After a 429, when Battle.net may be asked again. The quota is per client, so this
+    /// holds every request back, not only the one that was refused.
+    paused_until: std::sync::Mutex<Option<Instant>>,
 }
 
 struct Token {
@@ -121,6 +145,7 @@ impl Client {
             http,
             config,
             token: Mutex::new(None),
+            paused_until: std::sync::Mutex::new(None),
         })
     }
 
@@ -260,7 +285,35 @@ impl Client {
         Ok((reply.status, reply.body))
     }
 
+    /// Fails with [`RateLimited`] while a 429's `Retry-After` hasn't passed.
+    fn check_paused(&self) -> Result<(), RateLimited> {
+        let mut paused = self
+            .paused_until
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        match *paused {
+            Some(until) if until > Instant::now() => Err(RateLimited { until }),
+            _ => {
+                *paused = None;
+                Ok(())
+            }
+        }
+    }
+
+    /// Holds requests back for as long as a 429's `Retry-After` asks.
+    fn pause(&self, retry_after: Option<&str>) -> RateLimited {
+        let until = Instant::now() + retry::retry_after(retry_after, SystemTime::now());
+        let mut paused = self
+            .paused_until
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let until = paused.map_or(until, |p| p.max(until));
+        *paused = Some(until);
+        RateLimited { until }
+    }
+
     /// One retry with a fresh token on 401, in case Battle.net revoked the cached one early.
+    /// Sends nothing while paused after a 429 (see [`RateLimited`]).
     async fn get(
         &self,
         region: Region,
@@ -279,6 +332,7 @@ impl Client {
             .append_pair("locale", region.locale());
         let mut retried = false;
         loop {
+            self.check_paused()?;
             let token = self.token().await?;
             let mut request = self
                 .http
@@ -290,6 +344,21 @@ impl Client {
             }
             let response = request.send().await?;
             let status = response.status();
+            if status == StatusCode::TOO_MANY_REQUESTS {
+                let retry_after = response
+                    .headers()
+                    .get(header::RETRY_AFTER)
+                    .and_then(|v| v.to_str().ok());
+                let limited = self.pause(retry_after);
+                tracing::warn!(
+                    wait_secs = limited
+                        .until
+                        .saturating_duration_since(Instant::now())
+                        .as_secs(),
+                    "Battle.net answered 429; holding requests back"
+                );
+                return Err(limited.into());
+            }
             if status != StatusCode::UNAUTHORIZED {
                 let last_modified = response
                     .headers()

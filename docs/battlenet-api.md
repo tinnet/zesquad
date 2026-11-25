@@ -258,6 +258,7 @@ Tried with our client on the EU host, 2026-11-25:
 
 - 36,000 requests per hour per client, 100 per second. Going over the per-second limit gives 429
   for the rest of that second; going over the hourly quota slows responses. [getting-started]
+  Whether a 429 carries `Retry-After` isn't documented or seen yet; zesquad honours it if so.
 - 404 means unknown character **or** a character that hasn't logged out since its data was
   published; the API doesn't tell them apart.
 

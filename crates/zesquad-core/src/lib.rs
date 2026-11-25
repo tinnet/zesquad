@@ -16,6 +16,7 @@ pub mod recent;
 pub mod redirect;
 pub mod refresh;
 pub mod region;
+pub mod retry;
 pub mod roster;
 pub mod sparkline;
 pub mod squad_id;

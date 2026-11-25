@@ -11,7 +11,7 @@ use zesquad_core::auctions::{self, House};
 use zesquad_core::items::{self, Source};
 
 use crate::archive::Archive;
-use crate::armory::{Client, Dump, Lookup};
+use crate::armory::{Client, Dump, Lookup, RateLimited};
 use crate::db;
 
 /// How often the loop looks for houses to check.
@@ -60,8 +60,9 @@ impl AuctionSync {
     }
 
     /// Asks Battle.net about the items due (see [`db::items_due`]): Forever's item data first,
-    /// then Classic's. Stops at the first failure, which is likely to hit the rest too. Fails
-    /// only on database errors.
+    /// then Classic's. Stops at the first failure, which is likely to hit the rest too. A 429
+    /// isn't the item's fault, so it isn't stored: the round just stops, and the client sends
+    /// nothing until the `Retry-After` has passed. Fails only on database errors.
     ///
     /// # Errors
     ///
@@ -96,6 +97,10 @@ impl AuctionSync {
                 Ok(None) => {
                     missing += 1;
                     db::store_item(&self.db, id, now, db::ItemFetch::Missing).await?;
+                }
+                Err(e) if e.downcast_ref::<RateLimited>().is_some() => {
+                    tracing::debug!(item = id, "item lookups paused: {e}");
+                    break;
                 }
                 Err(e) => {
                     let error = format!("{e:#}");
