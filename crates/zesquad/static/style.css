@@ -202,6 +202,8 @@ fieldset.plain { border: 0; margin: 0; padding: 0; }
 
 details summary { cursor: pointer; color: var(--muted); font-size: .9rem; }
 details h3 { font-size: .95rem; margin: .75rem 0 .25rem; }
+.collecting { margin: 2.5rem 0 1rem; }
+.collecting .error { font-size: inherit; }
 .plain { margin: 0; padding-left: 1.1rem; }
 .gear { border-collapse: collapse; font-size: .9rem; }
 .gear th { text-align: left; font-weight: 500; color: var(--muted); padding-right: 1rem; }

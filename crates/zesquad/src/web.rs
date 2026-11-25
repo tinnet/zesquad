@@ -1889,6 +1889,8 @@ struct AuctionsPage {
     /// More items matched than are shown.
     more: bool,
     houses: Vec<HouseView>,
+    /// Houses whose last check failed, said even with the collecting details folded away.
+    failing: usize,
     regions: Vec<RegionPrices>,
     items: db::ItemCounts,
     /// The price lines' width and height.
@@ -2040,6 +2042,7 @@ async fn auctions_page(
         search,
         overview,
         more,
+        failing: houses.iter().filter(|h| h.error.is_some()).count(),
         houses,
         regions,
         items: db::item_counts(&state.db).await?,
@@ -2276,10 +2279,10 @@ fn overview_lists(r: &Ranked, known: &HashMap<u32, db::FoundItem>) -> Vec<Overvi
     };
     let days = r.last_day.map_or_else(String::new, |day| {
         let label = auctions::day_label;
-        format!(" {} against {}, UTC", label(day), label(day - 1))
+        format!(": {} against {}, UTC", label(day), label(day - 1))
     });
     let moves_hint = format!(
-        "The typical price over a whole day:{days}. Biggest first by the money involved, the \
+        "The typical price over a whole day{days}. Biggest first by the money involved, the \
          change times the units on sale."
     );
     let no_days = "Nothing yet: this needs two whole days of prices.";

@@ -2414,6 +2414,13 @@ async fn auction_prices_are_followed_in_eu_and_us() {
         assert!(page.contains(shown), "missing {shown:?} in {page}");
     }
     assert!(!page.contains("collection is off"));
+
+    // How collecting goes is folded away, but says when a house is failing (US 111 is down).
+    assert!(
+        page.contains(r#"<details class="collecting">"#),
+        "closed by default"
+    );
+    assert!(page.contains(r#"<span class="error">· 1 house failing</span></summary>"#));
 }
 
 #[tokio::test]
@@ -2603,6 +2610,10 @@ async fn the_auction_overview_shows_moves_gaps_bargains_and_big_markets() {
     assert!(page.contains(r#"class="chip on" aria-current="page">Americas</a>"#));
     let us = overview_lists(&page);
     assert!(page.contains("Nothing yet: this needs two whole days of prices."));
+    assert!(
+        page.contains("The typical price over a whole day. Biggest first"),
+        "no day named"
+    );
     assert!(us[0].1.is_empty() && us[1].1.is_empty());
     assert!(squash(&us[3].1).starts_with("Made-up Item 2592Alliance PvP"));
 

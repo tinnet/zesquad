@@ -138,8 +138,9 @@ first), ranked in `zesquad_core::market`, eight items a list, each linking to it
   (`items.sell_price`), by profit per unit.
 - **Biggest markets**: units on sale times the median, summed over the region's houses.
 
-It reads the region's latest snapshots and two days of `auction_daily`, about 60k rows. Then
-how collecting is going for each house.
+It reads the region's latest snapshots and two days of `auction_daily`, about 60k rows. At the
+bottom, folded away by default as it's internals, is how collecting is going for each house and
+how far item details have got; its summary says when a house is failing.
 
 The same task fills in `items`, the details of every item seen (a row is added for each new item
 when a snapshot is stored). Each round it asks Battle.net about 120 of them, Forever's item data

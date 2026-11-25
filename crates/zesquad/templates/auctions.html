@@ -111,7 +111,10 @@
 {%- endfor %}
 </section>
 
-<h2>Collecting</h2>
+{#- How collecting goes is for the curious, so it's folded away; a failing house still shows. -#}
+<details class="collecting">
+<summary>How prices are collected
+  {%- if failing > 0 %} <span class="error">· {{ failing }} house{% if failing != 1 %}s{% endif %} failing</span>{% endif %}</summary>
 {%- if enabled %}
 <p class="hint">Prices are collected from Battle.net about hourly. Snapshots are kept for a week, then only daily prices.</p>
 {%- endif %}
@@ -138,4 +141,5 @@
 </div>
 <p class="hint">Item details: {{ items.forever + items.classic }} of {{ items.seen }} known ({{ items.forever }} from Forever's item data, {{ items.classic }} from Classic's), {{ items.missing }} in neither, {{ items.icons }} with icons
 {%- if items.failed > 0 %}, {{ items.failed }} not looked up yet after an error{% endif %}.</p>
+</details>
 {% endblock %}
