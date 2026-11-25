@@ -131,36 +131,43 @@ impl Money {
         }
     }
 
-    /// Whether copper is shown: always, except next to gold in brief.
-    #[must_use]
-    pub fn shows_copper(self) -> bool {
-        !(self.brief && self.gold > 0)
-    }
-
-    /// Whether gold is shown: the game leaves out empty larger units.
+    /// Whether gold is shown: when there's any. Empty coins are left out, so `2s`, not `2s 0c`.
     #[must_use]
     pub fn shows_gold(self) -> bool {
         self.gold > 0
     }
 
-    /// Whether silver is shown: when there's any, or any gold.
+    /// Whether silver is shown: when there's any.
     #[must_use]
     pub fn shows_silver(self) -> bool {
-        self.gold > 0 || self.silver > 0
+        self.silver > 0
+    }
+
+    /// Whether copper is shown: when there's any, or nothing at all (`0c`); never next to gold
+    /// in brief.
+    #[must_use]
+    pub fn shows_copper(self) -> bool {
+        let nothing = self.gold == 0 && self.silver == 0 && self.copper == 0;
+        (self.copper > 0 || nothing) && !(self.brief && self.gold > 0)
     }
 }
 
-/// Copper as the game shows it: `1g 2s 3c`, leaving out empty larger units (`45c`, `2s 0c`).
+/// Copper as text, with the coins the page shows: `1g 2s 3c`, empty coins left out (`45c`,
+/// `2s`, `400g`, `1g 3c`), `0c` for nothing.
 #[must_use]
 pub fn money(copper: u64) -> String {
     let m = Money::from_copper(copper);
+    let mut parts = Vec::new();
     if m.shows_gold() {
-        format!("{}g {}s {}c", m.gold, m.silver, m.copper)
-    } else if m.shows_silver() {
-        format!("{}s {}c", m.silver, m.copper)
-    } else {
-        format!("{}c", m.copper)
+        parts.push(format!("{}g", m.gold));
     }
+    if m.shows_silver() {
+        parts.push(format!("{}s", m.silver));
+    }
+    if m.shows_copper() {
+        parts.push(format!("{}c", m.copper));
+    }
+    parts.join(" ")
 }
 
 /// One item's prices in one snapshot of a house, in copper per unit.
@@ -422,10 +429,12 @@ mod tests {
     fn money_reads_like_the_game() {
         assert_eq!(money(0), "0c");
         assert_eq!(money(45), "45c");
-        assert_eq!(money(200), "2s 0c");
+        assert_eq!(money(200), "2s");
         assert_eq!(money(1_234), "12s 34c");
-        assert_eq!(money(4_000_000), "400g 0s 0c");
+        assert_eq!(money(4_000_000), "400g");
         assert_eq!(money(10_203), "1g 2s 3c");
+        assert_eq!(money(10_003), "1g 3c");
+        assert_eq!(money(10_200), "1g 2s");
     }
 
     proptest! {
@@ -434,6 +443,17 @@ mod tests {
             let m = Money::from_copper(copper);
             prop_assert!(m.silver < 100 && m.copper < 100);
             prop_assert_eq!(m.gold * 10_000 + m.silver * 100 + m.copper, copper);
+        }
+
+        #[test]
+        fn money_shows_no_empty_coins(copper in 0u64..10_000_000_000) {
+            let text = money(copper);
+            prop_assert!(copper == 0 || !text.split(' ').any(|part| part.starts_with('0')), "{}", text);
+            prop_assert!(!text.is_empty());
+            for brief in [false, true] {
+                let m = if brief { Money::brief(copper) } else { Money::from_copper(copper) };
+                prop_assert!(m.shows_gold() || m.shows_silver() || m.shows_copper(), "something shows");
+            }
         }
     }
 
@@ -444,6 +464,7 @@ mod tests {
         assert_eq!(show(Money::brief(17_249)), (1, 72, false));
         assert_eq!(show(Money::brief(17_250)), (1, 73, false));
         assert_eq!(show(Money::brief(19_990)), (2, 0, false));
+        assert!(!Money::brief(19_990).shows_silver(), "2g, not 2g 0s");
     }
 
     #[test]

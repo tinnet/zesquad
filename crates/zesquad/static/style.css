@@ -264,16 +264,22 @@ a.guild:hover { color: var(--text); }
 
 /* Item icons, framed in their quality's colour like the game's; the frame goes around the
    18 pixels, not into them. */
-.item-icon { box-sizing: content-box; vertical-align: -5px; margin-right: .4rem; border: 1px solid currentColor; border-radius: 3px; }
+.item-icon { box-sizing: content-box; flex: none; border: 1px solid currentColor; border-radius: 3px; }
+/* An item: its icon, then its name with small print under it, which wrap beside the icon. */
+.item { display: flex; gap: .4rem; align-items: flex-start; }
+.item-text { min-width: 0; }
+/* Long names wrap, so four houses' prices fit beside them. */
+.prices tbody th { white-space: normal; min-width: 10rem; max-width: 15rem; }
+.prices tbody th .sub { font-weight: 400; white-space: nowrap; }
 /* Item quality: --q is the colour, so rules that colour row headers can't hide it. */
 .q-poor { --q: var(--q-poor); } .q-common { --q: var(--q-common); } .q-uncommon { --q: var(--q-uncommon); }
 .q-rare { --q: var(--q-rare); } .q-epic { --q: var(--q-epic); } .q-legendary { --q: var(--q-legendary); }
 [class^="q-"], .data tbody th[class^="q-"] { color: var(--q); }
-/* A line under an item's name, lined up with the name rather than the icon. */
-.data .item-sub { padding-left: calc(20px + .4rem); font-weight: 400; }
 
 @media (max-width: 30rem) {
   .actions { justify-content: flex-start; }
+  /* The item names stick while the prices scroll; keep them narrow. */
+  .prices tbody th { min-width: 7rem; max-width: 9rem; }
   .squad-name { font-size: 1.25rem; }
   /* Phones: tighter cards, a smaller portrait so the text gets the width, and buttons that
      are easier to hit with a thumb. */

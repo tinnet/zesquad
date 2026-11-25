@@ -372,8 +372,8 @@ async fn fake_item(
                 "item_class": {"id": 7, "name": "Trade Goods"},
                 "item_subclass": {"id": 5, "name": "Cloth"},
                 // Like Forever's repriced items: the tooltip has the real price. 4306 can't be
-                // sold.
-                "sell_price": match id { 2592 | 4306 => 0, _ => 3 },
+                // sold; 11208 sells for 2g 3c, with no silver.
+                "sell_price": match id { 2592 | 4306 => 0, 11208 => 20_003, _ => 3 },
                 "preview_item": if id == 2592 {
                     serde_json::json!({"sell_price": {"value": 42_088}})
                 } else {
@@ -2480,7 +2480,7 @@ async fn items_can_be_searched_by_name_on_the_auction_page() {
         rows(page)
             .iter()
             .map(|cell| {
-                let name = &cell[cell.find(r#"loading="lazy">"#).unwrap() + 15..];
+                let name = &cell[cell.find(r#"class="item-text">"#).unwrap() + 18..];
                 name[..name.find('<').unwrap_or(name.len())].to_owned()
             })
             .collect()
@@ -2530,7 +2530,10 @@ async fn items_can_be_searched_by_name_on_the_auction_page() {
                 .map_or_else(String::new, |i| text(&cell[i..]))
         })
         .collect();
-    assert_eq!(vendor, ["vendor 3c", "vendor 4g 20s 88c", "", "vendor 3c"]);
+    assert_eq!(
+        vendor,
+        ["vendor 3c", "vendor 4g 20s 88c", "", "vendor 2g 3c"]
+    );
     // Each with its icon, or the game's question mark when it has none.
     for icon in [134_400, 1001, 1002, 1003] {
         let url = format!("forever-eu/icons/36/{icon}.jpg");
@@ -2541,7 +2544,7 @@ async fn items_can_be_searched_by_name_on_the_auction_page() {
     let (_, page) = app.get("/auctions?q=light").await;
     assert_eq!(row_names(&page), ["Light Leather", "Light Leather"]);
     assert!(page.contains(
-        r#"<th scope="row" class="q-common"><img class="item-icon" src="https://render.worldofwarcraft.com/forever-eu/icons/36/134252.jpg" width="18" height="18" alt="" loading="lazy">Light Leather<span class="sub item-sub">vendor <span class="money"><span class="coin copper">15<span class="visually-hidden">c</span></span></span></span></th>"#
+        r#"<th scope="row" class="q-common"><span class="item"><img class="item-icon" src="https://render.worldofwarcraft.com/forever-eu/icons/36/134252.jpg" width="18" height="18" alt="" loading="lazy"><span class="item-text">Light Leather<span class="sub">vendor <span class="money"><span class="coin copper">15<span class="visually-hidden">c</span></span></span></span></span></span></th>"#
     ));
     assert!(page.contains(r#"<span class="coin copper">45<span"#));
 

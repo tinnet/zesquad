@@ -1,14 +1,14 @@
 {% extends "base.html" %}
 {% block title %}Auction house · zesquad{% endblock %}
 
-{#- Money as the game shows it: coins after each number, empty larger units left out (and
-    copper next to gold in brief). The
-    letters are for screen readers and copying. -#}
+{#- Money as the game shows it: coins after each number, empty coins left out (and copper
+    next to gold in brief), so 2s rather than 2s 0c. The letters are for screen readers and
+    copying. -#}
 {%- macro coins(m) -%}
 <span class="money">
 {%- if m.shows_gold() %}<span class="coin gold">{{ m.gold }}<span class="visually-hidden">g</span></span>{% endif -%}
 {%- if m.shows_silver() %}{% if m.shows_gold() %} {% endif %}<span class="coin silver">{{ m.silver }}<span class="visually-hidden">s</span></span>{% endif -%}
-{%- if m.shows_copper() %}{% if m.shows_silver() %} {% endif %}<span class="coin copper">{{ m.copper }}<span class="visually-hidden">c</span></span>{% endif -%}
+{%- if m.shows_copper() %}{% if m.shows_gold() || m.shows_silver() %} {% endif %}<span class="coin copper">{{ m.copper }}<span class="visually-hidden">c</span></span>{% endif -%}
 </span>
 {%- endmacro -%}
 
@@ -51,8 +51,8 @@
   <tbody>
     {%- for row in r.rows %}
     <tr>
-      <th scope="row"{% if !row.quality.is_empty() %} class="q-{{ row.quality }}"{% endif %}><img class="item-icon" src="{{ row.icon }}" width="18" height="18" alt="" loading="lazy">{{ row.name }}
-        {%- if let Some(v) = row.vendor %}<span class="sub item-sub">vendor {% call coins(v) %}{% endcall %}</span>{% endif %}</th>
+      <th scope="row"{% if !row.quality.is_empty() %} class="q-{{ row.quality }}"{% endif %}><span class="item"><img class="item-icon" src="{{ row.icon }}" width="18" height="18" alt="" loading="lazy"><span class="item-text">{{ row.name }}
+        {%- if let Some(v) = row.vendor %}<span class="sub">vendor {% call coins(v) %}{% endcall %}</span>{% endif %}</span></span></th>
       {%- for cell in row.cells %}
       {%- if let Some(c) = cell %}
       <td class="num" title="{{ c.summary }}">
