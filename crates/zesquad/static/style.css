@@ -262,9 +262,13 @@ details h3 { font-size: .95rem; margin: .75rem 0 .25rem; }
 a.guild { color: inherit; }
 a.guild:hover { color: var(--text); }
 
-/* Item quality */
-.q-poor { color: var(--q-poor); } .q-common { color: var(--q-common); } .q-uncommon { color: var(--q-uncommon); }
-.q-rare { color: var(--q-rare); } .q-epic { color: var(--q-epic); } .q-legendary { color: var(--q-legendary); }
+/* Item icons, framed in their quality's colour like the game's; the frame goes around the
+   18 pixels, not into them. */
+.item-icon { box-sizing: content-box; vertical-align: -5px; margin-right: .4rem; border: 1px solid currentColor; border-radius: 3px; }
+/* Item quality: --q is the colour, so rules that colour row headers can't hide it. */
+.q-poor { --q: var(--q-poor); } .q-common { --q: var(--q-common); } .q-uncommon { --q: var(--q-uncommon); }
+.q-rare { --q: var(--q-rare); } .q-epic { --q: var(--q-epic); } .q-legendary { --q: var(--q-legendary); }
+[class^="q-"], .data tbody th[class^="q-"] { color: var(--q); }
 
 @media (max-width: 30rem) {
   .actions { justify-content: flex-start; }

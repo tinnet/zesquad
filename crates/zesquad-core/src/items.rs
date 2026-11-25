@@ -118,6 +118,50 @@ pub fn parse(json: &str) -> Result<Item, ItemError> {
     })
 }
 
+/// The game's own icon for an unknown item, a red question mark (`INV_Misc_QuestionMark`), for
+/// items without one.
+pub const UNKNOWN_ICON: u32 = 134_400;
+
+#[derive(Deserialize)]
+struct Media {
+    #[serde(default)]
+    assets: Vec<Asset>,
+}
+
+#[derive(Deserialize)]
+struct Asset {
+    #[serde(default)]
+    key: String,
+    #[serde(default)]
+    file_data_id: Option<u32>,
+}
+
+/// The icon's file id from an item's media document (`/data/wow/media/item/{id}`); `None`
+/// when it has none.
+///
+/// # Errors
+///
+/// When it isn't JSON in the expected shape.
+pub fn icon(media_json: &str) -> Result<Option<u32>, serde_json::Error> {
+    let media: Media = serde_json::from_str(media_json)?;
+    Ok(media
+        .assets
+        .into_iter()
+        .find(|a| a.key == "icon")
+        .and_then(|a| a.file_data_id))
+}
+
+/// Where Blizzard serves an icon, `size` pixels square (18, 36 or 56); the unknown item's
+/// question mark for `None`. Forever's media names icons by file id.
+#[must_use]
+pub fn icon_url(icon: Option<u32>, size: u32) -> String {
+    format!(
+        "https://render.worldofwarcraft.com/forever-{}/icons/{size}/{}.jpg",
+        REGION.as_str(),
+        icon.unwrap_or(UNKNOWN_ICON)
+    )
+}
+
 /// Longest search kept, in characters; item names are shorter.
 pub const SEARCH_MAX: usize = 60;
 
@@ -215,6 +259,30 @@ mod tests {
         assert_eq!(Source::Forever.namespace(Region::Eu), "static-forever-eu");
         assert_eq!(Source::Classic.namespace(Region::Us), "static-classic1x-us");
         assert_eq!(Source::ALL[0], Source::Forever, "Forever's own first");
+    }
+
+    #[test]
+    fn reads_an_icon() {
+        assert_eq!(icon(&fixture("item-media")).unwrap(), Some(134_252));
+        assert_eq!(icon(r#"{"assets": []}"#).unwrap(), None);
+        assert_eq!(icon("{}").unwrap(), None);
+        assert_eq!(
+            icon(r#"{"assets": [{"key": "zoom", "file_data_id": 1}]}"#).unwrap(),
+            None
+        );
+        assert!(icon(r#""icon""#).is_err());
+    }
+
+    #[test]
+    fn icons_are_served_by_blizzard() {
+        assert_eq!(
+            icon_url(Some(134_252), 36),
+            "https://render.worldofwarcraft.com/forever-eu/icons/36/134252.jpg"
+        );
+        assert_eq!(
+            icon_url(None, 18),
+            "https://render.worldofwarcraft.com/forever-eu/icons/18/134400.jpg"
+        );
     }
 
     #[test]

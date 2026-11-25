@@ -21,9 +21,11 @@ const TICK: Duration = Duration::from_mins(1);
 const CHECK_EVERY: i64 = 15 * 60;
 /// Whole days of snapshots kept; older days are only kept condensed.
 const KEEP_DAYS: i64 = 7;
-/// Items asked about per round, at most two requests each: the first 7,600 or so take about
-/// an hour, well within Battle.net's 36,000 requests an hour.
+/// Items asked about per round, at most two requests each, and icons, one each: the first
+/// 7,600 or so take about an hour, at most 21,600 requests, within Battle.net's 36,000 an hour.
 const ITEMS_PER_ROUND: u32 = 120;
+/// Icons asked for per round, one request each (see [`ITEMS_PER_ROUND`]).
+const ICONS_PER_ROUND: u32 = 120;
 /// How long before asking again about an item no item data had: Forever's grows with patches.
 const ASK_MISSING_AGAIN: i64 = 7 * 24 * 60 * 60;
 /// And about one whose ask failed.
@@ -46,7 +48,7 @@ impl AuctionSync {
                 }
             }
             if let Err(e) = self.learn_items().await {
-                tracing::warn!("storing item details failed: {e:#}");
+                tracing::warn!("storing item details or icons failed: {e:#}");
             }
             if let Some(archive) = &self.archive {
                 match archive.upload().await {
@@ -62,7 +64,8 @@ impl AuctionSync {
     /// Asks Battle.net about the items due (see [`db::items_due`]): Forever's item data first,
     /// then Classic's. Stops at the first failure, which is likely to hit the rest too. A 429
     /// isn't the item's fault, so it isn't stored: the round just stops, and the client sends
-    /// nothing until the `Retry-After` has passed. Fails only on database errors.
+    /// nothing until the `Retry-After` has passed. Then does the same for icons. Fails only on
+    /// database errors.
     ///
     /// # Errors
     ///
@@ -112,6 +115,53 @@ impl AuctionSync {
         }
         if found + missing > 0 {
             tracing::info!(found, missing, "item details looked up");
+        }
+        self.learn_icons(now).await
+    }
+
+    /// Asks Battle.net for the icons due (see [`db::icons_due`]), like [`Self::learn_items`].
+    async fn learn_icons(&self, now: i64) -> anyhow::Result<()> {
+        let due = db::icons_due(
+            &self.db,
+            now - ASK_MISSING_AGAIN,
+            now - ASK_FAILED_AGAIN,
+            ICONS_PER_ROUND,
+        )
+        .await?;
+        let (mut found, mut missing) = (0, 0);
+        for id in due {
+            let fetch = match self.client.item_media(items::REGION, id).await {
+                Ok(Lookup::Found(json)) => match items::icon(&json.to_string()) {
+                    Ok(Some(icon)) => Some(icon),
+                    Ok(None) => None,
+                    Err(e) => {
+                        let error = format!("media in an unexpected shape: {e}");
+                        db::store_icon(&self.db, id, now, db::IconFetch::Failed(&error)).await?;
+                        continue;
+                    }
+                },
+                Ok(Lookup::NotFound) => None,
+                Err(e) if e.downcast_ref::<RateLimited>().is_some() => {
+                    tracing::debug!(item = id, "icon lookups paused: {e}");
+                    break;
+                }
+                Err(e) => {
+                    let error = format!("{e:#}");
+                    tracing::warn!(item = id, "icon lookup failed: {error}");
+                    db::store_icon(&self.db, id, now, db::IconFetch::Failed(&error)).await?;
+                    break;
+                }
+            };
+            if let Some(icon) = fetch {
+                found += 1;
+                db::store_icon(&self.db, id, now, db::IconFetch::Found(icon)).await?;
+            } else {
+                missing += 1;
+                db::store_icon(&self.db, id, now, db::IconFetch::Missing).await?;
+            }
+        }
+        if found + missing > 0 {
+            tracing::info!(found, missing, "item icons looked up");
         }
         Ok(())
     }

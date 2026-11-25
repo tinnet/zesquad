@@ -209,6 +209,22 @@ impl Client {
         .await
     }
 
+    /// Looks up an item's media (its icon) in Forever's static data.
+    ///
+    /// # Errors
+    ///
+    /// On network errors, bad credentials, rate limiting or unexpected statuses.
+    pub async fn item_media(&self, region: Region, id: u32) -> anyhow::Result<Lookup> {
+        let id = id.to_string();
+        self.lookup(
+            region,
+            &["data", "wow", "media", "item", &id],
+            &Source::Forever.namespace(region),
+            &format!("item {id}'s media"),
+        )
+        .await
+    }
+
     /// A JSON document from a namespace: found, or a 404.
     async fn lookup(
         &self,

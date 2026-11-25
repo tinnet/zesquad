@@ -250,6 +250,12 @@ Tried with our client on the EU host, 2026-11-25:
   over 280,000) were in no namespace, retail's `static-eu` included.
 - `/data/wow/media/item/{id}` gives the icon: `assets [{key: "icon", value, file_data_id}]`,
   with URLs like `https://render.worldofwarcraft.com/forever-eu/icons/56/{file_data_id}.jpg`.
+  Forever's media has icons for items its item data lacks (9950 and 264077 answered, though
+  9950's item 404s). Classic Era's media names icons by file name instead
+  (`.../classic1x-eu/icons/56/inv_misc_leatherscrap_03.jpg`).
+- The render host serves icons at 18, 36 and 56 pixels (0.9-1.7 KB JPEGs; `large` is 403),
+  with `Access-Control-Allow-Origin: *`; an unknown file id is 403. 134400 is the game's red
+  question mark (`INV_Misc_QuestionMark`). Tried 2026-11-25.
 - `/data/wow/search/item` answers 404 in `static-forever-eu` and `static-classic-eu`, so items
   are looked up one by one.
 - A Forever namespace of another region answers 403 on the EU host (`static-forever-us`).

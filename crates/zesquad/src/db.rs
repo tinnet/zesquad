@@ -2247,6 +2247,76 @@ pub async fn store_item(
     Ok(())
 }
 
+/// Items whose icon to ask Battle.net about next, at most `limit`: never asked first, then
+/// those without one before `missing_before`, then failed asks before `failed_before`.
+///
+/// # Errors
+///
+/// On database errors.
+pub async fn icons_due(
+    db: &SqlitePool,
+    missing_before: i64,
+    failed_before: i64,
+    limit: u32,
+) -> anyhow::Result<Vec<u32>> {
+    let rows: Vec<(u32,)> = sqlx::query_as(
+        "SELECT id FROM items
+         WHERE icon_fetched_at IS NULL
+            OR (icon IS NULL AND icon_error IS NULL AND icon_fetched_at < ?)
+            OR (icon IS NULL AND icon_error IS NOT NULL AND icon_fetched_at < ?)
+         ORDER BY icon_fetched_at, id
+         LIMIT ?",
+    )
+    .bind(missing_before)
+    .bind(failed_before)
+    .bind(limit)
+    .fetch_all(db)
+    .await?;
+    Ok(rows.into_iter().map(|(id,)| id).collect())
+}
+
+/// What asking for an item's icon came to.
+pub enum IconFetch<'a> {
+    Found(u32),
+    /// The item has no icon, or Battle.net has no media for it.
+    Missing,
+    Failed(&'a str),
+}
+
+/// Stores what asking for an item's icon came to. A failure keeps an icon found before.
+///
+/// # Errors
+///
+/// On database errors.
+pub async fn store_icon(
+    db: &SqlitePool,
+    id: u32,
+    at: i64,
+    fetch: IconFetch<'_>,
+) -> anyhow::Result<()> {
+    let query = match fetch {
+        IconFetch::Found(icon) => sqlx::query(
+            "UPDATE items SET icon = ?, icon_fetched_at = ?, icon_error = NULL WHERE id = ?",
+        )
+        .bind(icon)
+        .bind(at)
+        .bind(id),
+        IconFetch::Missing => sqlx::query(
+            "UPDATE items SET icon = NULL, icon_fetched_at = ?, icon_error = NULL WHERE id = ?",
+        )
+        .bind(at)
+        .bind(id),
+        IconFetch::Failed(error) => {
+            sqlx::query("UPDATE items SET icon_fetched_at = ?, icon_error = ? WHERE id = ?")
+                .bind(at)
+                .bind(error)
+                .bind(id)
+        }
+    };
+    query.execute(db).await?;
+    Ok(())
+}
+
 /// How far the item details have got.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct ItemCounts {
@@ -2259,28 +2329,33 @@ pub struct ItemCounts {
     pub missing: i64,
     /// Whose last ask failed.
     pub failed: i64,
+    /// With an icon.
+    pub icons: i64,
 }
 
 /// # Errors
 ///
 /// On database errors.
 pub async fn item_counts(db: &SqlitePool) -> anyhow::Result<ItemCounts> {
-    let (seen, forever, classic, missing, failed): (i64, i64, i64, i64, i64) = sqlx::query_as(
-        "SELECT COUNT(*),
+    let (seen, forever, classic, missing, failed, icons): (i64, i64, i64, i64, i64, i64) =
+        sqlx::query_as(
+            "SELECT COUNT(*),
                 COALESCE(SUM(source = 'forever'), 0),
                 COALESCE(SUM(source = 'classic'), 0),
                 COALESCE(SUM(fetched_at IS NOT NULL AND name IS NULL AND error IS NULL), 0),
-                COALESCE(SUM(name IS NULL AND error IS NOT NULL), 0)
+                COALESCE(SUM(name IS NULL AND error IS NOT NULL), 0),
+                COUNT(icon)
          FROM items",
-    )
-    .fetch_one(db)
-    .await?;
+        )
+        .fetch_one(db)
+        .await?;
     Ok(ItemCounts {
         seen,
         forever,
         classic,
         missing,
         failed,
+        icons,
     })
 }
 
@@ -2303,6 +2378,7 @@ pub struct FoundItem {
     pub id: u32,
     pub name: String,
     pub quality: String,
+    pub icon: Option<u32>,
 }
 
 /// Items whose name contains `search` (as tidied by `zesquad_core::items::search`), any case:
@@ -2319,7 +2395,7 @@ pub async fn search_items(
 ) -> anyhow::Result<(Vec<FoundItem>, bool)> {
     use zesquad_core::items::{contains_pattern, prefix_pattern};
     let mut found: Vec<FoundItem> = sqlx::query_as(
-        "SELECT id, name, COALESCE(quality, '') AS quality FROM items
+        "SELECT id, name, COALESCE(quality, '') AS quality, icon FROM items
          WHERE name LIKE ? ESCAPE '\\'
          ORDER BY name LIKE ? ESCAPE '\\' DESC, length(name), name, id
          LIMIT ?",
@@ -2332,4 +2408,19 @@ pub async fn search_items(
     let more = found.len() > limit as usize;
     found.truncate(limit as usize);
     Ok((found, more))
+}
+
+/// The known items among `ids`, in no particular order.
+///
+/// # Errors
+///
+/// On database errors.
+pub async fn items_by_id(db: &SqlitePool, ids: &[u32]) -> anyhow::Result<Vec<FoundItem>> {
+    Ok(sqlx::query_as(
+        "SELECT id, name, COALESCE(quality, '') AS quality, icon FROM items
+         WHERE id IN (SELECT value FROM json_each(?)) AND name IS NOT NULL",
+    )
+    .bind(serde_json::to_string(ids)?)
+    .fetch_all(db)
+    .await?)
 }

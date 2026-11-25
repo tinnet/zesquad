@@ -49,6 +49,8 @@ struct Fake {
     item_requests: Arc<std::sync::Mutex<Vec<String>>>,
     /// Item lookups answer 429 with `Retry-After: 1`.
     items_limited: Arc<AtomicBool>,
+    /// Item media requests.
+    media_requests: Arc<AtomicUsize>,
 }
 
 /// A webhook id the fake Discord says is gone (404), like a deleted webhook.
@@ -381,6 +383,50 @@ async fn fake_item(
     ([(header::CONTENT_TYPE, "application/json")], body).into_response()
 }
 
+/// Forever's media has icons for the fixture auctions' items, 19019 included (like the real
+/// one, it has media for items its item data lacks), but not 2589. 2318's is the real document.
+async fn fake_item_media(
+    State(fake): State<Fake>,
+    headers: HeaderMap,
+    Query(q): Query<std::collections::HashMap<String, String>>,
+    Path(id): Path<u32>,
+) -> Response {
+    let authorised = headers
+        .get(header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        == Some(&format!("Bearer {TOKEN}"));
+    if !authorised {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    fake.media_requests.fetch_add(1, Ordering::SeqCst);
+    if q.get("namespace").map(String::as_str) != Some("static-forever-eu") {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    let icon = match id {
+        2318 => {
+            return (
+                [(header::CONTENT_TYPE, "application/json")],
+                fixture("item-media"),
+            )
+                .into_response();
+        }
+        2592 => 1001,
+        4306 => 1002,
+        11208 => 1003,
+        19019 => 1004,
+        _ => return StatusCode::NOT_FOUND.into_response(),
+    };
+    let body = serde_json::json!({
+        "assets": [{"key": "icon", "value": format!("https://render.example/{icon}.jpg"), "file_data_id": icon}],
+        "id": id
+    });
+    (
+        [(header::CONTENT_TYPE, "application/json")],
+        body.to_string(),
+    )
+        .into_response()
+}
+
 async fn start_fake() -> (String, Fake) {
     let fake = Fake::default();
     let app = Router::new()
@@ -393,6 +439,7 @@ async fn start_fake() -> (String, Fake) {
             get(fake_auctions),
         )
         .route("/data/wow/item/{id}", get(fake_item))
+        .route("/data/wow/media/item/{id}", get(fake_item_media))
         .route("/bucket/{*path}", put(fake_archive))
         .route("/api/webhooks/{id}/{token}", post(fake_discord))
         .with_state(fake.clone());
@@ -2377,8 +2424,7 @@ async fn items_seen_at_auction_get_their_details() {
     use zesquad::db;
 
     let app = app_with_auctions(true, None, true).await;
-    let summary =
-        "Item details: 5 of 6 known (4 from Forever's item data, 1 from Classic's), 1 in neither.";
+    let summary = "Item details: 5 of 6 known (4 from Forever's item data, 1 from Classic's), 1 in neither, 5 with icons.";
     app.wait_for("/auctions", summary).await;
 
     let db = app.db().await;
@@ -2414,12 +2460,15 @@ async fn items_seen_at_auction_get_their_details() {
 #[tokio::test]
 async fn items_can_be_searched_by_name_on_the_auction_page() {
     let app = app_with_auctions(true, None, true).await;
-    app.wait_for("/auctions", "Item details: 5 of 6 known")
+    app.wait_for("/auctions", "1 in neither, 5 with icons.")
         .await;
     let row_names = |page: &str| -> Vec<String> {
         page.split(r#"<th scope="row""#)
             .skip(1)
-            .map(|r| r[r.find('>').unwrap() + 1..r.find("</th>").unwrap()].to_owned())
+            .map(|r| {
+                let cell = &r[..r.find("</th>").unwrap()];
+                cell[cell.rfind('>').unwrap() + 1..].to_owned()
+            })
             .collect()
     };
 
@@ -2427,6 +2476,10 @@ async fn items_can_be_searched_by_name_on_the_auction_page() {
     let (_, page) = app.get("/auctions").await;
     assert!(page.contains("<h2>Leather</h2>"));
     assert!(page.contains(r#"name="q" value="""#));
+    assert!(
+        page.contains("forever-eu/icons/36/134252.jpg"),
+        "Light Leather's icon"
+    );
 
     // Any case, anywhere in the name; names starting with it first, then shorter ones. Each
     // region has a table.
@@ -2441,11 +2494,18 @@ async fn items_can_be_searched_by_name_on_the_auction_page() {
         "Made-up Item 11208",
     ];
     assert_eq!(row_names(&page), [found, found].concat());
+    // Each with its icon, or the game's question mark when it has none.
+    for icon in [134_400, 1001, 1002, 1003] {
+        let url = format!("forever-eu/icons/36/{icon}.jpg");
+        assert!(page.contains(&url), "{url}");
+    }
 
     // Prices and quality show like the leathers'.
     let (_, page) = app.get("/auctions?q=light").await;
     assert_eq!(row_names(&page), ["Light Leather", "Light Leather"]);
-    assert!(page.contains(r#"<th scope="row" class="q-common">Light Leather</th>"#));
+    assert!(page.contains(
+        r#"<th scope="row" class="q-common"><img class="item-icon" src="https://render.worldofwarcraft.com/forever-eu/icons/36/134252.jpg" width="18" height="18" alt="" loading="lazy">Light Leather</th>"#
+    ));
     assert!(page.contains(r#"<span class="coin copper">45<span"#));
 
     // htmx gets the page and swaps in the prices.
@@ -2502,17 +2562,20 @@ async fn battle_net_is_left_alone_for_as_long_as_a_429_asks() {
     sync.update(eu(110), 1_000).await.unwrap();
     let item_requests = || fake.item_requests.lock().unwrap().len();
     let dump_requests = || fake.auction_requests.lock().unwrap().len();
+    let media_requests = || fake.media_requests.load(Ordering::SeqCst);
 
     // A 429 ends the round after one request, and the item isn't marked as failed.
     fake.items_limited.store(true, Ordering::SeqCst);
     sync.learn_items().await.unwrap();
     assert_eq!(item_requests(), 1);
+    assert_eq!(media_requests(), 0, "icons wait too");
     assert_eq!(db::item_counts(&db).await.unwrap().failed, 0);
 
     // Until the Retry-After has passed nothing at all is sent, dumps included.
     fake.items_limited.store(false, Ordering::SeqCst);
     sync.learn_items().await.unwrap();
     assert_eq!(item_requests(), 1, "no item lookups while paused");
+    assert_eq!(media_requests(), 0, "no icon lookups while paused");
     let dumps = dump_requests();
     sync.update(eu(113), 2_000).await.unwrap();
     assert_eq!(dump_requests(), dumps, "no dumps while paused");
@@ -2525,6 +2588,8 @@ async fn battle_net_is_left_alone_for_as_long_as_a_429_asks() {
     sync.learn_items().await.unwrap();
     let counts = db::item_counts(&db).await.unwrap();
     assert_eq!((counts.forever, counts.classic, counts.missing), (4, 1, 1));
+    assert_eq!(media_requests(), 6, "each item's icon, once");
+    assert_eq!(counts.icons, 5);
 }
 
 #[tokio::test]

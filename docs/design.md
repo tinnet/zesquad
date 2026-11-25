@@ -127,7 +127,10 @@ when a snapshot is stored). Each round it asks Battle.net about 120 of them, For
 first and Classic Era's when Forever's doesn't have it (see Items in `docs/battlenet-api.md`), and
 keeps the name, quality and class for searching beside the whole document. An item neither has is
 asked about again after a week, a failed ask after an hour; a round stops at its first failure.
-The roughly 7,600 items seen take about an hour. `/auctions` says how far it has got.
+Icons are looked up apart from the details, also 120 a round, from Forever's item media only
+(it has icons for items Forever's item data lacks); only the icon's file id is kept. Pages link
+Blizzard's render host for the image, at 36 pixels shown at 18, and the game's question mark for
+items without one. The roughly 7,600 items seen take about an hour. `/auctions` says how far it has got.
 
 When Battle.net answers 429, the client sends nothing more, for any page or task, until the
 `Retry-After` has passed (10 seconds when it doesn't say, at most an hour; `zesquad_core::retry`):

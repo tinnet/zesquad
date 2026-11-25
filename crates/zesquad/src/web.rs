@@ -1914,6 +1914,8 @@ struct PriceRow {
     name: String,
     /// For the `q-<quality>` class; empty when unknown.
     quality: String,
+    /// Its icon's URL; the unknown item's when it has none.
+    icon: String,
     cells: Vec<Option<PriceCell>>,
 }
 
@@ -1924,6 +1926,8 @@ struct AuctionsQuery {
 
 /// Search results shown at most.
 const SEARCH_RESULTS: u32 = 20;
+/// Icons are shown at 18 pixels; this size is twice that, sharp on high-density screens.
+const ICON_SIZE: u32 = 36;
 
 struct PriceCell {
     /// The latest snapshot's median.
@@ -1942,6 +1946,35 @@ const SPARK_WIDTH: f64 = 96.0;
 const SPARK_HEIGHT: f64 = 24.0;
 const SPARK_PAD: f64 = 3.0;
 
+/// The items the price table shows: up to [`SEARCH_RESULTS`] matching `search`, and whether
+/// there were more; without a search, the leathers, as Battle.net names them once asked.
+async fn shown_items(
+    db: &SqlitePool,
+    search: Option<&str>,
+) -> anyhow::Result<(Vec<db::FoundItem>, bool)> {
+    if let Some(search) = search {
+        return db::search_items(db, search, SEARCH_RESULTS).await;
+    }
+    let ids: Vec<u32> = auctions::LEATHER.iter().map(|&(id, _)| id).collect();
+    let known = db::items_by_id(db, &ids).await?;
+    let leather = auctions::LEATHER
+        .iter()
+        .map(|&(id, name)| {
+            known
+                .iter()
+                .find(|k| k.id == id)
+                .cloned()
+                .unwrap_or(db::FoundItem {
+                    id,
+                    name: name.to_owned(),
+                    quality: "COMMON".to_owned(),
+                    icon: None,
+                })
+        })
+        .collect();
+    Ok((leather, false))
+}
+
 async fn auctions_page(
     State(state): State<AppState>,
     nav: Nav,
@@ -1950,24 +1983,8 @@ async fn auctions_page(
     let now = db::now();
     let since = now - PRICE_DAYS * auctions::DAY;
     let search = query.q.as_deref().and_then(items::search);
-    let (shown, more) = match &search {
-        Some(search) => {
-            let (found, more) = db::search_items(&state.db, search, SEARCH_RESULTS).await?;
-            let shown = found
-                .into_iter()
-                .map(|f| (f.id, f.name, items::quality_class(&f.quality)))
-                .collect();
-            (shown, more)
-        }
-        None => (
-            auctions::LEATHER
-                .iter()
-                .map(|&(id, name)| (id, name.to_owned(), "common".to_owned()))
-                .collect::<Vec<_>>(),
-            false,
-        ),
-    };
-    let ids: Vec<u32> = shown.iter().map(|(id, ..)| *id).collect();
+    let (found, more) = shown_items(&state.db, search.as_deref()).await?;
+    let ids: Vec<u32> = found.iter().map(|f| f.id).collect();
     let mut houses = Vec::new();
     let mut regions: Vec<RegionPrices> = Vec::new();
     for house in auctions::followed() {
@@ -1989,11 +2006,12 @@ async fn auctions_page(
             regions.push(RegionPrices {
                 region: house.region,
                 houses: Vec::new(),
-                rows: shown
+                rows: found
                     .iter()
-                    .map(|(_, name, quality)| PriceRow {
-                        name: name.clone(),
-                        quality: quality.clone(),
+                    .map(|f| PriceRow {
+                        name: f.name.clone(),
+                        quality: items::quality_class(&f.quality),
+                        icon: items::icon_url(f.icon, ICON_SIZE),
                         cells: Vec::new(),
                     })
                     .collect(),
