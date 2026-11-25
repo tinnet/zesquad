@@ -11,6 +11,7 @@ pub mod guild;
 pub mod items;
 pub mod limit;
 pub mod link;
+pub mod market;
 pub mod name;
 pub mod recent;
 pub mod redirect;

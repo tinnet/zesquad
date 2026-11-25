@@ -9,6 +9,7 @@
   --accent: #8a5a00;
   --accent-text: #ffffff;
   --danger: #a3262a;
+  --up: #1a7f37;
   --alliance: #1f4f9a;
   --horde: #9a1f1f;
   /* Class colours, darkened where the game's own would vanish on a light background. */
@@ -30,6 +31,7 @@
     --accent: #e0a63a;
     --accent-text: #1d1b16;
     --danger: #ff6b6b;
+    --up: #4ac26b;
     --alliance: #6c9cf0;
     --horde: #f07a6c;
     --warrior: #c69b6d; --paladin: #f48cba; --hunter: #aad372; --rogue: #fff468; --priest: #ffffff;
@@ -275,6 +277,21 @@ a.guild:hover { color: var(--text); }
 .q-poor { --q: var(--q-poor); } .q-common { --q: var(--q-common); } .q-uncommon { --q: var(--q-uncommon); }
 .q-rare { --q: var(--q-rare); } .q-epic { --q: var(--q-epic); } .q-legendary { --q: var(--q-legendary); }
 [class^="q-"], .data tbody th[class^="q-"] { color: var(--q); }
+
+/* Market overview: small lists side by side, one column on a phone. */
+.overview-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(25rem, 100%), 1fr)); gap: .5rem 1.5rem; }
+.overview-list { min-width: 0; }
+.overview-list h3 { margin: 1rem 0 .1rem; }
+.overview-list .hint { margin: 0 0 .5rem; font-size: .8rem; }
+.overview-list .table-wrap { margin: 0; }
+.data.overview { font-size: .85rem; }
+.data.overview th, .data.overview td { padding: .35rem .5rem; }
+.data.overview tbody th { white-space: normal; }
+.data.overview tbody th .sub { font-weight: 400; white-space: nowrap; }
+.data.overview th a { color: inherit; text-decoration: none; }
+.data.overview th a:hover { text-decoration: underline; }
+.data td.up { color: var(--up); font-weight: 600; }
+.data td.down { color: var(--danger); font-weight: 600; }
 
 @media (max-width: 30rem) {
   .actions { justify-content: flex-start; }

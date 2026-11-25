@@ -88,16 +88,6 @@ pub fn followed() -> impl Iterator<Item = House> {
     })
 }
 
-/// Leather, from the lightest; item ids as in Classic. Item names aren't fetched yet, so they're
-/// written here.
-pub const LEATHER: [(u32, &str); 5] = [
-    (2318, "Light Leather"),
-    (2319, "Medium Leather"),
-    (4234, "Heavy Leather"),
-    (4304, "Thick Leather"),
-    (8170, "Rugged Leather"),
-];
-
 /// An amount of copper split into the coins the game shows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Money {
@@ -317,6 +307,35 @@ pub fn day(at: i64) -> i64 {
 /// Seconds in a day.
 pub const DAY: i64 = 86_400;
 
+/// A day (days since the epoch, UTC) for people: `Tue 24 Nov`.
+#[must_use]
+pub fn day_label(day: i64) -> String {
+    const WEEKDAYS: [&str; 7] = ["Thu", "Fri", "Sat", "Sun", "Mon", "Tue", "Wed"];
+    const MONTHS: [&str; 12] = [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ];
+    let (_, month, date) = civil_from_days(day);
+    format!(
+        "{} {date} {}",
+        WEEKDAYS[usize::try_from(day.rem_euclid(7)).unwrap_or(0)],
+        MONTHS[usize::try_from(month - 1).unwrap_or(0)]
+    )
+}
+
+/// Year, month (1-12) and day of the month of a day since the epoch, in the proleptic
+/// Gregorian calendar (Howard Hinnant's `civil_from_days`).
+fn civil_from_days(z: i64) -> (i64, i64, i64) {
+    let z = z + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    (yoe + era * 400 + i64::from(m <= 2), m, d)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -471,6 +490,15 @@ mod tests {
     fn houses_have_labels() {
         let house = followed().next().unwrap();
         assert_eq!((house.id, house.label().as_str()), (110, "Alliance PvP"));
+    }
+
+    #[test]
+    fn days_read_like_dates() {
+        assert_eq!(day_label(0), "Thu 1 Jan");
+        assert_eq!(day_label(20_782), "Wed 25 Nov", "2026-11-25");
+        assert_eq!(day_label(19_782), "Thu 29 Feb", "2024-02-29");
+        assert_eq!(civil_from_days(20_782), (2026, 11, 25));
+        assert_eq!(civil_from_days(-1), (1969, 12, 31));
     }
 
     #[test]

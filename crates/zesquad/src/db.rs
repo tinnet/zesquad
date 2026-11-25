@@ -2212,12 +2212,13 @@ pub async fn store_item(
 ) -> anyhow::Result<()> {
     let query = match fetch {
         ItemFetch::Found { item, source, json } => sqlx::query(
-            "INSERT INTO items (id, fetched_at, source, name, quality, class_id, subclass_id, json, error)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)
+            "INSERT INTO items
+                (id, fetched_at, source, name, quality, class_id, subclass_id, sell_price, json, error)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
              ON CONFLICT (id) DO UPDATE SET fetched_at = excluded.fetched_at,
                 source = excluded.source, name = excluded.name, quality = excluded.quality,
                 class_id = excluded.class_id, subclass_id = excluded.subclass_id,
-                json = excluded.json, error = NULL",
+                sell_price = excluded.sell_price, json = excluded.json, error = NULL",
         )
         .bind(id)
         .bind(at)
@@ -2226,12 +2227,13 @@ pub async fn store_item(
         .bind(&item.quality)
         .bind(item.class_id)
         .bind(item.subclass_id)
+        .bind(item.sell_price.map(int))
         .bind(json),
         ItemFetch::Missing => sqlx::query(
             "INSERT INTO items (id, fetched_at) VALUES (?, ?)
              ON CONFLICT (id) DO UPDATE SET fetched_at = excluded.fetched_at,
                 source = NULL, name = NULL, quality = NULL, class_id = NULL,
-                subclass_id = NULL, json = NULL, error = NULL",
+                subclass_id = NULL, sell_price = NULL, json = NULL, error = NULL",
         )
         .bind(id)
         .bind(at),
@@ -2425,4 +2427,72 @@ pub async fn items_by_id(db: &SqlitePool, ids: &[u32]) -> anyhow::Result<Vec<Fou
     .bind(serde_json::to_string(ids)?)
     .fetch_all(db)
     .await?)
+}
+
+// ---- auction overview ----
+
+/// What a vendor pays for each item that can be sold, by item.
+///
+/// # Errors
+///
+/// On database errors.
+pub async fn vendor_prices(db: &SqlitePool) -> anyhow::Result<HashMap<u32, u64>> {
+    let rows: Vec<(u32, i64)> =
+        sqlx::query_as("SELECT id, sell_price FROM items WHERE sell_price > 0")
+            .fetch_all(db)
+            .await?;
+    Ok(rows.into_iter().map(|(id, p)| (id, uint(p))).collect())
+}
+
+/// The last finished day condensed for a house (days since the epoch, UTC), if any.
+///
+/// # Errors
+///
+/// On database errors.
+pub async fn condensed_through(
+    db: &SqlitePool,
+    region: Region,
+    house: u32,
+) -> anyhow::Result<Option<i64>> {
+    let row: Option<(Option<i64>,)> = sqlx::query_as(
+        "SELECT condensed_through FROM auction_houses WHERE region = ? AND house = ?",
+    )
+    .bind(region.as_str())
+    .bind(house)
+    .fetch_optional(db)
+    .await?;
+    Ok(row.and_then(|(day,)| day))
+}
+
+/// A house's typical price of every item on a finished day.
+///
+/// # Errors
+///
+/// On database errors.
+pub async fn day_prices(
+    db: &SqlitePool,
+    region: Region,
+    house: u32,
+    day: i64,
+) -> anyhow::Result<Vec<zesquad_core::market::DayPrice>> {
+    let rows: Vec<(u32, i64, i64, i64)> = sqlx::query_as(
+        "SELECT item, median_price, quantity, snapshots FROM auction_daily
+         WHERE region = ? AND house = ? AND day = ?",
+    )
+    .bind(region.as_str())
+    .bind(house)
+    .bind(day)
+    .fetch_all(db)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(
+            |(item, median, quantity, snapshots)| zesquad_core::market::DayPrice {
+                item,
+                median: uint(median),
+                quantity: uint(quantity),
+                snapshots: uint(snapshots),
+            },
+        )
+        .collect())
 }

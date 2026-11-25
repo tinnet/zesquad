@@ -1,6 +1,7 @@
 //! Pages and form handlers. Every form works as a plain POST with a redirect; with htmx the
 //! squad page swaps just the roster instead of reloading.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use askama::Template;
@@ -20,6 +21,7 @@ use zesquad_core::auctions::{self, Money};
 use zesquad_core::discord::Webhook;
 use zesquad_core::guild::{self, Slug, Sort as GuildSort};
 use zesquad_core::items;
+use zesquad_core::market;
 use zesquad_core::recent::Recent;
 use zesquad_core::refresh::Status;
 use zesquad_core::roster::{self as order, Sort};
@@ -1880,8 +1882,10 @@ async fn refresh(
 struct AuctionsPage {
     nav: Nav,
     enabled: bool,
-    /// What was searched for, tidied; `None` shows the leathers.
+    /// What was searched for, tidied; `None` shows the overview.
     search: Option<String>,
+    /// The market overview, when nothing was searched.
+    overview: Option<Overview>,
     /// More items matched than are shown.
     more: bool,
     houses: Vec<HouseView>,
@@ -1924,6 +1928,8 @@ struct PriceRow {
 #[derive(Deserialize)]
 struct AuctionsQuery {
     q: Option<String>,
+    /// The overview's region; the default region when missing or unknown.
+    region: Option<String>,
 }
 
 /// Search results shown at most.
@@ -1941,42 +1947,12 @@ struct PriceCell {
     line: Option<Sparkline>,
 }
 
-/// How far back the leather prices go.
+/// How far back the price lines go.
 const PRICE_DAYS: i64 = 7;
 /// The price lines' size in pixels, and how far their ends stay from the edges.
 const SPARK_WIDTH: f64 = 96.0;
 const SPARK_HEIGHT: f64 = 24.0;
 const SPARK_PAD: f64 = 3.0;
-
-/// The items the price table shows: up to [`SEARCH_RESULTS`] matching `search`, and whether
-/// there were more; without a search, the leathers, as Battle.net names them once asked.
-async fn shown_items(
-    db: &SqlitePool,
-    search: Option<&str>,
-) -> anyhow::Result<(Vec<db::FoundItem>, bool)> {
-    if let Some(search) = search {
-        return db::search_items(db, search, SEARCH_RESULTS).await;
-    }
-    let ids: Vec<u32> = auctions::LEATHER.iter().map(|&(id, _)| id).collect();
-    let known = db::items_by_id(db, &ids).await?;
-    let leather = auctions::LEATHER
-        .iter()
-        .map(|&(id, name)| {
-            known
-                .iter()
-                .find(|k| k.id == id)
-                .cloned()
-                .unwrap_or(db::FoundItem {
-                    id,
-                    name: name.to_owned(),
-                    quality: "COMMON".to_owned(),
-                    icon: None,
-                    json: None,
-                })
-        })
-        .collect();
-    Ok((leather, false))
-}
 
 async fn auctions_page(
     State(state): State<AppState>,
@@ -1986,7 +1962,13 @@ async fn auctions_page(
     let now = db::now();
     let since = now - PRICE_DAYS * auctions::DAY;
     let search = query.q.as_deref().and_then(items::search);
-    let (found, more) = shown_items(&state.db, search.as_deref()).await?;
+    let (found, more, overview) = if let Some(search) = &search {
+        let (found, more) = db::search_items(&state.db, search, SEARCH_RESULTS).await?;
+        (found, more, None)
+    } else {
+        let region = overview_region(query.region.as_deref(), state.default_region);
+        (Vec::new(), false, Some(overview(&state.db, region).await?))
+    };
     let ids: Vec<u32> = found.iter().map(|f| f.id).collect();
     let mut houses = Vec::new();
     let mut regions: Vec<RegionPrices> = Vec::new();
@@ -2061,12 +2043,316 @@ async fn auctions_page(
         nav,
         enabled: state.auctions_enabled,
         search,
+        overview,
         more,
         houses,
         regions,
         items: db::item_counts(&state.db).await?,
         spark: (SPARK_WIDTH, SPARK_HEIGHT),
     })
+}
+
+// ---- auction overview ----
+
+/// Rows each overview list shows.
+const OVERVIEW_ROWS: usize = 8;
+
+/// What's going on in one region's houses, when nothing was searched.
+struct Overview {
+    region: Region,
+    /// The regions to switch between.
+    regions: [Region; 2],
+    lists: Vec<OverviewList>,
+}
+
+struct OverviewList {
+    title: &'static str,
+    hint: String,
+    /// Said when the list is empty.
+    empty: &'static str,
+    /// The figure columns' headers.
+    heads: Vec<&'static str>,
+    rows: Vec<OverviewRow>,
+}
+
+struct OverviewRow {
+    name: String,
+    /// For the `q-<quality>` class; empty when unknown.
+    quality: String,
+    icon: String,
+    /// Searches for the item.
+    link: Option<String>,
+    /// Under the name: where (a house, a pool), or empty.
+    place: String,
+    /// Colours `place` (`faction-alliance`), or empty.
+    place_class: &'static str,
+    /// One per header.
+    figures: Vec<Figure>,
+}
+
+/// A number in an overview row: money, or text such as a change.
+struct Figure {
+    money: Option<Money>,
+    text: String,
+    /// `up`, `down`, or empty.
+    class: &'static str,
+}
+
+impl Figure {
+    fn money(copper: u64) -> Self {
+        Self {
+            money: Some(Money::from_copper(copper)),
+            text: String::new(),
+            class: "",
+        }
+    }
+
+    fn text(text: String, class: &'static str) -> Self {
+        Self {
+            money: None,
+            text,
+            class,
+        }
+    }
+}
+
+/// The region the overview shows: the one asked for if it's followed, else the default one if
+/// that is, else the first followed.
+fn overview_region(asked: Option<&str>, default: Region) -> Region {
+    let followed = |r: &Region| auctions::REGIONS.contains(r);
+    asked
+        .and_then(|r| r.parse::<Region>().ok())
+        .filter(followed)
+        .or(Some(default).filter(followed))
+        .unwrap_or(auctions::REGIONS[0])
+}
+
+/// The rankings behind the overview of one region.
+struct Ranked {
+    houses: Vec<auctions::House>,
+    /// The last finished day the moves are from.
+    last_day: Option<i64>,
+    rising: Vec<market::Move>,
+    falling: Vec<market::Move>,
+    gaps: Vec<market::Gap>,
+    bargains: Vec<market::Bargain>,
+    biggest: Vec<market::Market>,
+}
+
+impl Ranked {
+    /// Every item ranked, for looking their names up.
+    fn items(&self) -> Vec<u32> {
+        self.rising
+            .iter()
+            .chain(&self.falling)
+            .map(|m| m.item)
+            .chain(self.gaps.iter().map(|g| g.item))
+            .chain(self.bargains.iter().map(|b| b.item))
+            .chain(self.biggest.iter().map(|m| m.item))
+            .collect()
+    }
+
+    /// A house's label and the class colouring it.
+    fn house(&self, i: usize) -> (String, &'static str) {
+        let house = self.houses[i];
+        let class = match house.faction {
+            auctions::Faction::Alliance => "faction-alliance",
+            auctions::Faction::Horde => "faction-horde",
+        };
+        (house.label(), class)
+    }
+}
+
+/// Ranks `region`'s houses: the last day's movers, faction gaps, listings under the vendor
+/// price and the biggest markets. Reads the latest snapshots and two days of daily prices,
+/// about 60k rows, a few tens of milliseconds.
+async fn rank_market(db: &SqlitePool, region: Region) -> anyhow::Result<Ranked> {
+    use zesquad_core::auctions::{Faction, ItemPrices, Pool};
+
+    let houses: Vec<auctions::House> = auctions::followed()
+        .filter(|h| h.region == region)
+        .collect();
+    let vendor = db::vendor_prices(db).await?;
+    let mut latest: Vec<Vec<ItemPrices>> = Vec::new();
+    let mut moves = Vec::new();
+    let mut last_day = None;
+    for (i, house) in houses.iter().enumerate() {
+        let prices = db::latest_auctions(db, region, house.id).await?;
+        latest.push(prices.map_or_else(Vec::new, |(_, p)| p));
+        if let Some(day) = db::condensed_through(db, region, house.id).await? {
+            let now = db::day_prices(db, region, house.id, day).await?;
+            let before = db::day_prices(db, region, house.id, day - 1).await?;
+            moves.extend(market::moves(i, &before, &now));
+            last_day = last_day.max(Some(day));
+        }
+    }
+    let (rising, falling) = market::rising_and_falling(moves, OVERVIEW_ROWS);
+    let mut gaps = Vec::new();
+    for (p, pool) in [Pool::Pvp, Pool::Pve].into_iter().enumerate() {
+        let side = |faction| {
+            houses
+                .iter()
+                .position(|h| h.pool == pool && h.faction == faction)
+        };
+        if let (Some(a), Some(h)) = (side(Faction::Alliance), side(Faction::Horde)) {
+            gaps.extend(market::gaps(p, &latest[a], &latest[h]));
+        }
+    }
+    let bargains = latest
+        .iter()
+        .enumerate()
+        .flat_map(|(i, prices)| market::under_vendor(i, prices, |id| vendor.get(&id).copied()))
+        .collect();
+    let all: Vec<&[ItemPrices]> = latest.iter().map(Vec::as_slice).collect();
+    Ok(Ranked {
+        biggest: market::biggest(&all, OVERVIEW_ROWS),
+        houses,
+        last_day,
+        rising,
+        falling,
+        gaps: market::top_gaps(gaps, OVERVIEW_ROWS),
+        bargains: market::top_bargains(bargains, OVERVIEW_ROWS),
+    })
+}
+
+/// The overview of `region`'s houses, with the items' names.
+async fn overview(db: &SqlitePool, region: Region) -> anyhow::Result<Overview> {
+    let ranked = rank_market(db, region).await?;
+    let known: HashMap<u32, db::FoundItem> = db::items_by_id(db, &ranked.items())
+        .await?
+        .into_iter()
+        .map(|f| (f.id, f))
+        .collect();
+    Ok(Overview {
+        region,
+        regions: auctions::REGIONS,
+        lists: overview_lists(&ranked, &known),
+    })
+}
+
+/// A row for `item`, with `place` under its name coloured by `place_class`.
+fn item_row(
+    known: &HashMap<u32, db::FoundItem>,
+    item: u32,
+    (place, place_class): (String, &'static str),
+    figures: Vec<Figure>,
+) -> OverviewRow {
+    let found = known.get(&item);
+    OverviewRow {
+        name: found.map_or_else(|| format!("Item {item}"), |f| f.name.clone()),
+        quality: found.map_or_else(String::new, |f| items::quality_class(&f.quality)),
+        icon: items::icon_url(found.and_then(|f| f.icon), ICON_SIZE),
+        link: found.map(|f| format!("/auctions?q={}", urlencode(&f.name))),
+        place,
+        place_class,
+        figures,
+    }
+}
+
+const GAPS_HINT: &str = "The same item now on both factions' houses of a pool, biggest first \
+    by the difference times the units on sale. A neutral auction house can carry it across.";
+const BIGGEST_HINT: &str =
+    "What's on sale now in all four houses, by its worth at the median price.";
+
+fn overview_lists(r: &Ranked, known: &HashMap<u32, db::FoundItem>) -> Vec<OverviewList> {
+    let move_row = |m: &market::Move| {
+        let way = if m.now > m.before { "up" } else { "down" };
+        item_row(
+            known,
+            m.item,
+            r.house(m.house),
+            vec![
+                Figure::money(m.before),
+                Figure::money(m.now),
+                Figure::text(market::change(m.before, m.now), way),
+            ],
+        )
+    };
+    let days = r.last_day.map_or_else(String::new, |day| {
+        let label = auctions::day_label;
+        format!(" {} against {}, UTC", label(day), label(day - 1))
+    });
+    let moves_hint = format!(
+        "The typical price over a whole day:{days}. Biggest first by the money involved, the \
+         change times the units on sale."
+    );
+    let no_days = "Nothing yet: this needs two whole days of prices.";
+    let pools = ["PvP", "PvE"];
+    vec![
+        OverviewList {
+            title: "Rising",
+            hint: moves_hint.clone(),
+            empty: no_days,
+            heads: vec!["Day before", "Last day", "Change"],
+            rows: r.rising.iter().map(move_row).collect(),
+        },
+        OverviewList {
+            title: "Falling",
+            hint: moves_hint,
+            empty: no_days,
+            heads: vec!["Day before", "Last day", "Change"],
+            rows: r.falling.iter().map(move_row).collect(),
+        },
+        OverviewList {
+            title: "Faction gaps",
+            hint: GAPS_HINT.to_owned(),
+            empty: "No item is on sale on both sides with enough auctions.",
+            heads: vec!["Alliance", "Horde", "Gap"],
+            rows: r
+                .gaps
+                .iter()
+                .map(|g| {
+                    let ratio = format!("×{}", market::times(g.ratio()));
+                    let figures = vec![
+                        Figure::money(g.alliance),
+                        Figure::money(g.horde),
+                        Figure::text(ratio, ""),
+                    ];
+                    item_row(
+                        known,
+                        g.item,
+                        (format!("{} houses", pools[g.pool]), ""),
+                        figures,
+                    )
+                })
+                .collect(),
+        },
+        OverviewList {
+            title: "Under the vendor price",
+            hint: "Listings now that cost less than a vendor pays for them.".to_owned(),
+            empty: "Nothing is listed below what a vendor pays right now.",
+            heads: vec!["Cheapest", "Vendor pays", "Profit"],
+            rows: r
+                .bargains
+                .iter()
+                .map(|b| {
+                    let mut profit = Figure::money(b.profit());
+                    profit.class = "up";
+                    let figures = vec![Figure::money(b.price), Figure::money(b.vendor), profit];
+                    item_row(known, b.item, r.house(b.house), figures)
+                })
+                .collect(),
+        },
+        OverviewList {
+            title: "Biggest markets",
+            hint: BIGGEST_HINT.to_owned(),
+            empty: "No prices yet.",
+            heads: vec!["Units", "Worth"],
+            rows: r
+                .biggest
+                .iter()
+                .map(|m| {
+                    let worth = Figure {
+                        money: Some(Money::brief(m.value)),
+                        text: String::new(),
+                        class: "",
+                    };
+                    let units = Figure::text(m.quantity.to_string(), "");
+                    item_row(known, m.item, (String::new(), ""), vec![units, worth])
+                })
+                .collect(),
+        },
+    ]
 }
 
 // ---- guilds ----

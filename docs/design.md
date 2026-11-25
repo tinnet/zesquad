@@ -113,15 +113,33 @@ Fetching and reading a house's two dumps takes about a second.
 few items' prices by looking each one up in each snapshot by key (about 170 snapshots a week),
 instead of scanning the week's millions of rows.
 
-`/auctions`, linked in the header, shows, as a first use of the data, five leathers' median
-price in each house now, a line of it over the last seven days (an SVG path drawn on the
-server, `zesquad_core::sparkline`, so no script), its lowest and highest, and the average on
-hover; then how collecting is going for each house. Money is shown with coins like the game.
-The leathers are still named in `zesquad_core::auctions::LEATHER`. A search box above them (a plain GET form,
-`?q=`, that htmx swaps in as you type, like the guild roster's) shows the same for up to 20 items
-whose name contains what was typed, from `items`: names starting with it first, then shorter
-ones. Under each name is what a vendor pays, read from the item's stored document
-when the page is shown (the tooltip's price; see Items in `docs/battlenet-api.md`).
+`/auctions`, linked in the header, has a search box (a plain GET form, `?q=`, that htmx swaps
+in as you type, like the guild roster's). A search shows up to 20 items whose name contains what
+was typed, from `items` (names starting with it first, then shorter ones), each with its median
+price in each house now, a line of it over the last seven days (an SVG path drawn on the server,
+`zesquad_core::sparkline`, so no script), its lowest and highest, and the average on hover. Under
+each name is what a vendor pays (the tooltip's price; see Items in `docs/battlenet-api.md`).
+Money is shown with coins like the game, empty coins left out.
+
+Without a search the page shows a market overview of one region (`?region=`, the default region
+first), ranked in `zesquad_core::market`, eight items a list, each linking to its search:
+
+- **Rising** and **Falling**: the last finished day's typical price (the median of its hourly
+  medians, from `auction_daily`) against the day before, per house, an item's biggest move once.
+  Both days need 20 units on sale and 12 snapshots; single snapshots were too noisy to rank.
+- **Faction gaps**: an item's median now on the Alliance and Horde houses of the same pool, each
+  with at least five auctions.
+
+  Moves and gaps are ranked by the money they involve, the price difference times the units on
+  sale (the fewer of the two), not by how many times dearer. Forever's markets are thin and
+  jumpy (a stack of herbs at 2c bought out became 4s overnight), and ranked by ratio the lists
+  were all penny items; by money they show Arcanite Bars and Mooncloth.
+- **Under the vendor price**: listings now cheaper than what a vendor pays
+  (`items.sell_price`), by profit per unit.
+- **Biggest markets**: units on sale times the median, summed over the region's houses.
+
+It reads the region's latest snapshots and two days of `auction_daily`, about 60k rows. Then
+how collecting is going for each house.
 
 The same task fills in `items`, the details of every item seen (a row is added for each new item
 when a snapshot is stored). Each round it asks Battle.net about 120 of them, Forever's item data

@@ -2403,22 +2403,22 @@ async fn auction_prices_are_followed_in_eu_and_us() {
         "both dumps of each house, once: {requests:?}"
     );
 
-    // The page shows the collecting and the leather prices.
+    // The page shows the collecting, and a search the prices.
     let (status, page) = app.get("/auctions").await;
     assert_eq!(status, StatusCode::OK);
+    for shown in ["house 110", "503 Service Unavailable"] {
+        assert!(page.contains(shown), "missing {shown:?} in {page}");
+    }
+    let page = app.wait_for("/auctions?q=light", "Light Leather").await;
     for shown in [
         "Europe",
         "Americas",
         "Alliance PvP",
         "Horde PvE",
-        "house 110",
-        "Light Leather",
-        "Rugged Leather",
         // 45 copper, shown with a coin, and a line of the one snapshot so far.
         "<span class=\"coin copper\">45<span class=\"visually-hidden\">c</span></span>",
         "<svg class=\"spark\"",
         "7 days: average 45c, lowest 45c, highest 45c, 1 snapshots",
-        "503 Service Unavailable",
         "no data",
     ] {
         assert!(page.contains(shown), "missing {shown:?} in {page}");
@@ -2486,14 +2486,10 @@ async fn items_can_be_searched_by_name_on_the_auction_page() {
             .collect()
     };
 
-    // Without a search the leathers show; the box is there to search with.
+    // Without a search the overview shows; the box is there to search with.
     let (_, page) = app.get("/auctions").await;
-    assert!(page.contains("<h2>Leather</h2>"));
+    assert!(page.contains("<h2>Market overview</h2>"));
     assert!(page.contains(r#"name="q" value="""#));
-    assert!(
-        page.contains("forever-eu/icons/36/134252.jpg"),
-        "Light Leather's icon"
-    );
 
     // Any case, anywhere in the name; names starting with it first, then shorter ones. Each
     // region has a table.
@@ -2568,7 +2564,162 @@ async fn items_can_be_searched_by_name_on_the_auction_page() {
         assert!(row_names(&page).is_empty(), "{q}");
     }
     let (_, page) = app.get("/auctions?q=%20").await;
-    assert!(page.contains("<h2>Leather</h2>"));
+    assert!(page.contains("<h2>Market overview</h2>"));
+}
+
+#[tokio::test]
+async fn the_auction_overview_shows_moves_gaps_bargains_and_big_markets() {
+    let app = app_with_auctions(true, None, true).await;
+    app.wait_for("/auctions", "1 in neither, 5 with icons.")
+        .await;
+    seed_overview(&app.db().await).await;
+
+    let (status, page) = app.get("/auctions").await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(page.contains("<h2>Market overview</h2>"));
+    assert!(
+        page.contains(r#"class="chip on" aria-current="page">Europe</a>"#),
+        "Europe by default"
+    );
+    let eu = overview_lists(&page);
+    let titles: Vec<&str> = eu.iter().map(|(t, _)| t.as_str()).collect();
+    assert_eq!(
+        titles,
+        [
+            "Rising",
+            "Falling",
+            "Faction gaps",
+            "Under the vendor price",
+            "Biggest markets"
+        ]
+    );
+    let squash = |s: &str| s.split_whitespace().collect::<Vec<_>>().join(" ");
+    let rows: Vec<String> = eu.iter().map(|(_, rows)| squash(rows)).collect();
+    assert_eq!(
+        rows[0], "Made-up Item 2589Horde PvP 1s 4s 50c ×4.5",
+        "rising"
+    );
+    assert_eq!(rows[1], "Light LeatherHorde PvP 50c 25c ÷2", "falling");
+    assert_eq!(
+        rows[2], "Made-up Item 2589PvE houses 10c 50c ×5",
+        "faction gaps"
+    );
+    // 2592 is listed at 40c and a vendor pays 4g 20s 88c for it (its tooltip's price); 11208
+    // at 14s 1c, and a vendor pays 2g 3c.
+    assert_eq!(
+        rows[3],
+        "Made-up Item 2592Alliance PvP 40c 4g 20s 88c 4g 20s 48c \
+         Made-up Item 11208Alliance PvP 14s 1c 2g 3c 1g 86s 2c",
+        "under the vendor price"
+    );
+    // 19019 has no name (no item data has it) but the most worth on sale: 2 at 400g.
+    assert!(
+        rows[4].starts_with("Item 19019 2 800g Made-up Item 2589 176"),
+        "biggest: {}",
+        rows[4]
+    );
+    // Names search for the item.
+    assert!(page.contains(r#"<a href="/auctions?q=Made-up%20Item%202589">"#));
+
+    // Americas has no whole days yet, but has bargains of its own.
+    let (_, page) = app.get("/auctions?region=us").await;
+    assert!(page.contains(r#"class="chip on" aria-current="page">Americas</a>"#));
+    let us = overview_lists(&page);
+    assert!(page.contains("Nothing yet: this needs two whole days of prices."));
+    assert!(us[0].1.is_empty() && us[1].1.is_empty());
+    assert!(squash(&us[3].1).starts_with("Made-up Item 2592Alliance PvP"));
+
+    // An unknown region is the default one.
+    let (status, page) = app.get("/auctions?region=kr").await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(page.contains(r#"class="chip on" aria-current="page">Europe</a>"#));
+}
+
+// For the overview: two whole days of hourly snapshots of EU Horde PvP, condensed as the sync
+// does (2589 goes from 1s to 4s 50c, Light Leather halves, 4306 jumps but has too little on
+// sale to count), and EU's PvE houses now, with 2589 five times dearer on the Horde side.
+async fn seed_overview(db: &sqlx::SqlitePool) {
+    use zesquad::db;
+    use zesquad_core::auctions::{DAY, ItemPrices, Snapshot};
+
+    let price = |item, median, quantity, auctions| ItemPrices {
+        item,
+        min_price: median,
+        median_price: median,
+        quantity,
+        auctions,
+    };
+    let now = zesquad::db::now();
+    let today = now.div_euclid(DAY) * DAY;
+    for (day, prices) in [
+        (
+            today - 2 * DAY,
+            [
+                price(2589, 100, 30, 6),
+                price(2318, 50, 40, 5),
+                price(4306, 10, 2, 1),
+            ],
+        ),
+        (
+            today - DAY,
+            [
+                price(2589, 450, 30, 6),
+                price(2318, 25, 40, 5),
+                price(4306, 900, 2, 1),
+            ],
+        ),
+    ] {
+        for hour in 0..12 {
+            let at = day + hour * 3_600;
+            let snapshot = Snapshot {
+                items: prices.to_vec(),
+                fingerprint: u64::try_from(at).unwrap(),
+            };
+            db::store_auctions(db, Region::Eu, 113, at, &snapshot)
+                .await
+                .unwrap();
+        }
+    }
+    db::condense_auctions(db, Region::Eu, 113, now, 7)
+        .await
+        .unwrap();
+    for (house, median) in [(111, 10), (114, 50)] {
+        let snapshot = Snapshot {
+            items: vec![price(2589, median, 60, 6)],
+            fingerprint: u64::from(house),
+        };
+        db::store_auctions(db, Region::Eu, house, now + 60, &snapshot)
+            .await
+            .unwrap();
+    }
+}
+
+/// Each overview list on a page, as its title and the text of its rows.
+fn overview_lists(page: &str) -> Vec<(String, String)> {
+    page.split(r#"<section class="overview-list">"#)
+        .skip(1)
+        .map(|s| {
+            let s = &s[..s.find("</section>").unwrap()];
+            let title = &s[s.find("<h3>").unwrap() + 4..s.find("</h3>").unwrap()];
+            let rows = s.find("<tbody>").map_or("", |i| &s[i..]);
+            (title.to_owned(), text(rows))
+        })
+        .collect()
+}
+
+/// The text of some HTML, without its tags.
+fn text(html: &str) -> String {
+    let mut out = String::new();
+    let mut in_tag = false;
+    for c in html.chars() {
+        match c {
+            '<' => in_tag = true,
+            '>' => in_tag = false,
+            c if !in_tag => out.push(c),
+            _ => {}
+        }
+    }
+    out
 }
 
 #[tokio::test]
