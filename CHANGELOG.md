@@ -2,6 +2,12 @@
 
 What changed in each zesquad release. Versions are dates (CalVer).
 
+## 2026.11.25.2
+
+### Features
+
+- **web**: Search items by name on the auction house page ([022d240](https://github.com/tinnet/zesquad/commit/022d240a44a734519d77053db95f073dff20ce86))
+
 ## 2026.11.25.1
 
 ### Features
