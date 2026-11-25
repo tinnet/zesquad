@@ -2,6 +2,16 @@
 
 What changed in each zesquad release. Versions are dates (CalVer).
 
+## 2026.11.25.1
+
+### Features
+
+- **armory**: Look up names and details of items seen at auction ([dc62932](https://github.com/tinnet/zesquad/commit/dc6293241eeacb6b3b058a79a5053b1b72160241))
+
+### Fixes
+
+- **armory**: Wait as long as Battle.net asks after a 429 ([cca2587](https://github.com/tinnet/zesquad/commit/cca25872f8efc55c159d3d52bdc2c5e2080c1dac))
+
 ## 2026.11.25
 
 ### Features
