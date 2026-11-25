@@ -231,6 +231,29 @@ Forever has no realms (see Verified), so auctions hang off **rulesets** instead,
 - The forum reports that 43% of the item ids on an EU Alliance house 404 on the item endpoint.
   Not verified.
 
+## Items
+
+Item details are in the static namespaces: `GET /data/wow/item/{id}`. Forever has its own,
+`static-forever-{region}` (build `static-1.60.1_70399-forever-eu` on 2026-11-25), but it lacks
+many Classic items, so zesquad falls back to Classic Era's `static-classic1x-{region}`.
+Tried with our client on the EU host, 2026-11-25:
+
+- An item answers `id`, `name`, `quality {type, name}`, `item_class {id, name}`,
+  `item_subclass {id, name}`, `inventory_type {type, name}`, `level`, `required_level`,
+  `sell_price` and `purchase_price` (copper), `is_stackable`, `is_equippable`, a `media` link
+  and a `preview_item` tooltip. `crates/zesquad-core/fixtures/item.json` is Light Leather (2318).
+- **About 7,600 items** were on sale in EU and US houses 110 and 113 together: 6,174 in the item
+  dumps and 1,426 commodities. 1,234 of them have ids over 100,000, items new with Forever.
+- **About 41% aren't in Forever's item data**: 62 of 150 random ids answered 404 (the forum
+  says 43%). [forum-works] Most are Classic world-drop gear, such as random-enchant greens.
+  22 of 25 of those were in `static-classic1x-eu` and `static-classic-eu`; the other 3 (ids
+  over 280,000) were in no namespace, retail's `static-eu` included.
+- `/data/wow/media/item/{id}` gives the icon: `assets [{key: "icon", value, file_data_id}]`,
+  with URLs like `https://render.worldofwarcraft.com/forever-eu/icons/56/{file_data_id}.jpg`.
+- `/data/wow/search/item` answers 404 in `static-forever-eu` and `static-classic-eu`, so items
+  are looked up one by one.
+- A Forever namespace of another region answers 403 on the EU host (`static-forever-us`).
+
 ## Limits and errors
 
 - 36,000 requests per hour per client, 100 per second. Going over the per-second limit gives 429

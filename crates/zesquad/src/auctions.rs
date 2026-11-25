@@ -1,5 +1,6 @@
 //! Keeps auction house prices: a snapshot of each followed house about hourly, condensed into
-//! daily prices. Runs beside the Armory sync, so a slow dump never holds up a character.
+//! daily prices, and the details (names) of the items seen there. Runs beside the Armory sync,
+//! so a slow dump never holds up a character.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -7,9 +8,10 @@ use std::time::Duration;
 use anyhow::Context as _;
 use sqlx::SqlitePool;
 use zesquad_core::auctions::{self, House};
+use zesquad_core::items::{self, Source};
 
 use crate::archive::Archive;
-use crate::armory::{Client, Dump};
+use crate::armory::{Client, Dump, Lookup};
 use crate::db;
 
 /// How often the loop looks for houses to check.
@@ -19,6 +21,13 @@ const TICK: Duration = Duration::from_mins(1);
 const CHECK_EVERY: i64 = 15 * 60;
 /// Whole days of snapshots kept; older days are only kept condensed.
 const KEEP_DAYS: i64 = 7;
+/// Items asked about per round, at most two requests each: the first 7,600 or so take about
+/// an hour, well within Battle.net's 36,000 requests an hour.
+const ITEMS_PER_ROUND: u32 = 120;
+/// How long before asking again about an item no item data had: Forever's grows with patches.
+const ASK_MISSING_AGAIN: i64 = 7 * 24 * 60 * 60;
+/// And about one whose ask failed.
+const ASK_FAILED_AGAIN: i64 = 60 * 60;
 
 pub struct AuctionSync {
     pub db: SqlitePool,
@@ -36,6 +45,9 @@ impl AuctionSync {
                     tracing::warn!(region = %house.region, house = house.id, "auction house check failed: {e:#}");
                 }
             }
+            if let Err(e) = self.learn_items().await {
+                tracing::warn!("storing item details failed: {e:#}");
+            }
             if let Some(archive) = &self.archive {
                 match archive.upload().await {
                     Ok(0) => {}
@@ -45,6 +57,68 @@ impl AuctionSync {
             }
             tokio::time::sleep(TICK).await;
         }
+    }
+
+    /// Asks Battle.net about the items due (see [`db::items_due`]): Forever's item data first,
+    /// then Classic's. Stops at the first failure, which is likely to hit the rest too. Fails
+    /// only on database errors.
+    ///
+    /// # Errors
+    ///
+    /// On database errors.
+    pub async fn learn_items(&self) -> anyhow::Result<()> {
+        let now = db::now();
+        let due = db::items_due(
+            &self.db,
+            now - ASK_MISSING_AGAIN,
+            now - ASK_FAILED_AGAIN,
+            ITEMS_PER_ROUND,
+        )
+        .await?;
+        let (mut found, mut missing) = (0, 0);
+        for id in due {
+            match self.item(id).await {
+                Ok(Some((json, source))) => match items::parse(&json) {
+                    Ok(item) => {
+                        found += 1;
+                        let fetch = db::ItemFetch::Found {
+                            item: &item,
+                            source,
+                            json: &json,
+                        };
+                        db::store_item(&self.db, id, now, fetch).await?;
+                    }
+                    Err(e) => {
+                        let error = format!("{e}");
+                        db::store_item(&self.db, id, now, db::ItemFetch::Failed(&error)).await?;
+                    }
+                },
+                Ok(None) => {
+                    missing += 1;
+                    db::store_item(&self.db, id, now, db::ItemFetch::Missing).await?;
+                }
+                Err(e) => {
+                    let error = format!("{e:#}");
+                    tracing::warn!(item = id, "item lookup failed: {error}");
+                    db::store_item(&self.db, id, now, db::ItemFetch::Failed(&error)).await?;
+                    break;
+                }
+            }
+        }
+        if found + missing > 0 {
+            tracing::info!(found, missing, "item details looked up");
+        }
+        Ok(())
+    }
+
+    /// An item's document and where it was found; `None` when no item data has it.
+    async fn item(&self, id: u32) -> anyhow::Result<Option<(String, Source)>> {
+        for source in Source::ALL {
+            if let Lookup::Found(json) = self.client.item(items::REGION, id, source).await? {
+                return Ok(Some((json.to_string(), source)));
+            }
+        }
+        Ok(None)
     }
 
     /// Fetches a house if it's due, then condenses and prunes its snapshots. Fails only on

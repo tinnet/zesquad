@@ -1,0 +1,40 @@
+{
+  "id": 2318,
+  "inventory_type": {
+    "name": "Non-equippable",
+    "type": "NON_EQUIP"
+  },
+  "is_equippable": false,
+  "is_stackable": true,
+  "item_class": {
+    "id": 7,
+    "key": {
+      "href": "https://eu.api.blizzard.com/data/wow/item-class/7?namespace=static-1.60.1_70399-forever-eu"
+    },
+    "name": "Trade Goods"
+  },
+  "item_subclass": {
+    "id": 6,
+    "key": {
+      "href": "https://eu.api.blizzard.com/data/wow/item-class/7/item-subclass/6?namespace=static-1.60.1_70399-forever-eu"
+    },
+    "name": "Leather"
+  },
+  "level": 10,
+  "max_count": 0,
+  "media": {
+    "id": 2318,
+    "key": {
+      "href": "https://eu.api.blizzard.com/data/wow/media/item/2318?namespace=static-1.60.1_70399-forever-eu"
+    }
+  },
+  "name": "Light Leather",
+  "purchase_price": 60,
+  "purchase_quantity": 1,
+  "quality": {
+    "name": "Common",
+    "type": "COMMON"
+  },
+  "required_level": 0,
+  "sell_price": 15
+}

@@ -117,7 +117,14 @@ instead of scanning the week's millions of rows.
 price in each house now, a line of it over the last seven days (an SVG path drawn on the
 server, `zesquad_core::sparkline`, so no script), its lowest and highest, and the average on
 hover; then how collecting is going for each house. Money is shown with coins like the game.
-Item names aren't fetched yet, so the leathers are named in `zesquad_core::auctions::LEATHER`.
+The leathers are still named in `zesquad_core::auctions::LEATHER`.
+
+The same task fills in `items`, the details of every item seen (a row is added for each new item
+when a snapshot is stored). Each round it asks Battle.net about 120 of them, Forever's item data
+first and Classic Era's when Forever's doesn't have it (see Items in `docs/battlenet-api.md`), and
+keeps the name, quality and class for searching beside the whole document. An item neither has is
+asked about again after a week, a failed ask after an hour; a round stops at its first failure.
+The roughly 7,600 items seen take about an hour. `/auctions` says how far it has got.
 
 A failed fetch is logged and stored in `auction_houses.error`, and tried again on the next
 check; the house's snapshots stay.

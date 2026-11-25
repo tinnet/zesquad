@@ -8,6 +8,7 @@ pub mod armory;
 pub mod auctions;
 pub mod discord;
 pub mod guild;
+pub mod items;
 pub mod limit;
 pub mod link;
 pub mod name;

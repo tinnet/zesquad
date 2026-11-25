@@ -1881,6 +1881,7 @@ struct AuctionsPage {
     enabled: bool,
     houses: Vec<HouseView>,
     regions: Vec<RegionPrices>,
+    items: db::ItemCounts,
     /// The price lines' width and height.
     spark: (f64, f64),
 }
@@ -1988,6 +1989,7 @@ async fn auctions_page(State(state): State<AppState>, nav: Nav) -> Result<Auctio
         enabled: state.auctions_enabled,
         houses,
         regions,
+        items: db::item_counts(&state.db).await?,
         spark: (SPARK_WIDTH, SPARK_HEIGHT),
     })
 }

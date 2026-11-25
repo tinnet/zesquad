@@ -13,6 +13,7 @@ use zesquad_core::Region;
 use zesquad_core::armory::Endpoint;
 use zesquad_core::auctions::RULESET;
 use zesquad_core::guild::{self, Slug};
+use zesquad_core::items::Source;
 
 /// Battle.net's OAuth token endpoint, for every region.
 pub const TOKEN_URL: &str = "https://oauth.battle.net/token";
@@ -136,7 +137,13 @@ impl Client {
     ) -> anyhow::Result<Lookup> {
         let mut segments = vec!["profile", "wow", "character", key];
         segments.extend_from_slice(endpoint.path());
-        self.lookup(region, &segments, endpoint.as_str()).await
+        self.lookup(
+            region,
+            &segments,
+            &region.profile_namespace(),
+            endpoint.as_str(),
+        )
+        .await
     }
 
     /// Looks up one document of a guild by its slug in its region.
@@ -152,24 +159,41 @@ impl Client {
     ) -> anyhow::Result<Lookup> {
         let mut segments = vec!["data", "wow", "guild", slug.as_str()];
         segments.extend_from_slice(endpoint.path());
-        self.lookup(region, &segments, endpoint.as_str()).await
+        self.lookup(
+            region,
+            &segments,
+            &region.profile_namespace(),
+            endpoint.as_str(),
+        )
+        .await
     }
 
-    /// A JSON document from the profile namespace: found, or a 404.
+    /// Looks up an item in one source's static item data.
+    ///
+    /// # Errors
+    ///
+    /// On network errors, bad credentials, rate limiting or unexpected statuses.
+    pub async fn item(&self, region: Region, id: u32, source: Source) -> anyhow::Result<Lookup> {
+        let id = id.to_string();
+        self.lookup(
+            region,
+            &["data", "wow", "item", &id],
+            &source.namespace(region),
+            &format!("item {id}"),
+        )
+        .await
+    }
+
+    /// A JSON document from a namespace: found, or a 404.
     async fn lookup(
         &self,
         region: Region,
         segments: &[&str],
+        namespace: &str,
         what: &str,
     ) -> anyhow::Result<Lookup> {
         let Reply { status, body, .. } = self
-            .get(
-                region,
-                segments,
-                &region.profile_namespace(),
-                LOOKUP_TIMEOUT,
-                None,
-            )
+            .get(region, segments, namespace, LOOKUP_TIMEOUT, None)
             .await?;
         match status {
             StatusCode::OK => Ok(Lookup::Found(

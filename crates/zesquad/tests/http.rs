@@ -45,6 +45,8 @@ struct Fake {
     discord: Arc<std::sync::Mutex<Vec<(String, serde_json::Value)>>>,
     /// Guild and roster requests.
     guild_lookups: Arc<AtomicUsize>,
+    /// Item lookups, as `namespace/id`.
+    item_requests: Arc<std::sync::Mutex<Vec<String>>>,
 }
 
 /// A webhook id the fake Discord says is gone (404), like a deleted webhook.
@@ -333,6 +335,47 @@ async fn fake_auctions(
         .into_response()
 }
 
+/// Forever's item data has the fixture auctions' items but two: 2589 is only in Classic's, and
+/// 19019 in neither. 2318 is the real document (see zesquad-core/fixtures).
+async fn fake_item(
+    State(fake): State<Fake>,
+    headers: HeaderMap,
+    Query(q): Query<std::collections::HashMap<String, String>>,
+    Path(id): Path<u32>,
+) -> Response {
+    let authorised = headers
+        .get(header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        == Some(&format!("Bearer {TOKEN}"));
+    if !authorised {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    let namespace = q.get("namespace").cloned().unwrap_or_default();
+    fake.item_requests
+        .lock()
+        .unwrap()
+        .push(format!("{namespace}/{id}"));
+    let body = match (namespace.as_str(), id) {
+        ("static-forever-eu", 2318) => fixture("item"),
+        ("static-forever-eu", 2592 | 4306 | 11208) | ("static-classic1x-eu", 2589) => {
+            serde_json::json!({
+                "id": id,
+                "name": format!("Made-up Item {id}"),
+                "quality": {"type": "COMMON", "name": "Common"},
+                "item_class": {"id": 7, "name": "Trade Goods"},
+                "item_subclass": {"id": 5, "name": "Cloth"},
+                "sell_price": 3
+            })
+            .to_string()
+        }
+        ("static-forever-eu" | "static-classic1x-eu", _) => {
+            return StatusCode::NOT_FOUND.into_response();
+        }
+        _ => return StatusCode::FORBIDDEN.into_response(),
+    };
+    ([(header::CONTENT_TYPE, "application/json")], body).into_response()
+}
+
 async fn start_fake() -> (String, Fake) {
     let fake = Fake::default();
     let app = Router::new()
@@ -344,6 +387,7 @@ async fn start_fake() -> (String, Fake) {
             "/data/wow/ruleset/{ruleset}/auctions/{*rest}",
             get(fake_auctions),
         )
+        .route("/data/wow/item/{id}", get(fake_item))
         .route("/bucket/{*path}", put(fake_archive))
         .route("/api/webhooks/{id}/{token}", post(fake_discord))
         .with_state(fake.clone());
@@ -2321,6 +2365,45 @@ async fn auction_prices_are_followed_in_eu_and_us() {
         assert!(page.contains(shown), "missing {shown:?} in {page}");
     }
     assert!(!page.contains("collection is off"));
+}
+
+#[tokio::test]
+async fn items_seen_at_auction_get_their_details() {
+    use zesquad::db;
+
+    let app = app_with_auctions(true, None, true).await;
+    let summary =
+        "Item details: 5 of 6 known (4 from Forever's item data, 1 from Classic's), 1 in neither.";
+    app.wait_for("/auctions", summary).await;
+
+    let db = app.db().await;
+    assert_eq!(
+        db::item_name(&db, 2318).await.unwrap().as_deref(),
+        Some("Light Leather")
+    );
+    assert_eq!(
+        db::item_name(&db, 2589).await.unwrap().as_deref(),
+        Some("Made-up Item 2589"),
+        "from Classic's item data"
+    );
+    assert_eq!(db::item_name(&db, 19019).await.unwrap(), None);
+
+    // Classic's is only asked when Forever's doesn't have it, and each item only once.
+    let mut requests = app.fake.item_requests.lock().unwrap().clone();
+    requests.sort();
+    assert_eq!(
+        requests,
+        [
+            "static-classic1x-eu/19019",
+            "static-classic1x-eu/2589",
+            "static-forever-eu/11208",
+            "static-forever-eu/19019",
+            "static-forever-eu/2318",
+            "static-forever-eu/2589",
+            "static-forever-eu/2592",
+            "static-forever-eu/4306",
+        ]
+    );
 }
 
 #[tokio::test]

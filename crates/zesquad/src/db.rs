@@ -1431,6 +1431,16 @@ pub async fn store_auctions(
         }
     }
     if changed {
+        // New items get a row, for the item sync to fill in (see `items_due`).
+        sqlx::query(
+            "INSERT OR IGNORE INTO items (id)
+             SELECT item FROM auction_snapshots WHERE region = ? AND house = ? AND at = ?",
+        )
+        .bind(region.as_str())
+        .bind(house)
+        .bind(at)
+        .execute(&mut *tx)
+        .await?;
         sqlx::query(
             "INSERT OR REPLACE INTO auction_snapshot_times (region, house, at, items) VALUES (?, ?, ?, ?)",
         )
@@ -2144,4 +2154,145 @@ mod tests {
                 .is_some()
         );
     }
+}
+
+// ---- item details ----
+
+/// Items to ask Battle.net about next, at most `limit`: those never asked about first, then
+/// those it didn't have before `missing_before`, then those whose ask failed before
+/// `failed_before`.
+///
+/// # Errors
+///
+/// On database errors.
+pub async fn items_due(
+    db: &SqlitePool,
+    missing_before: i64,
+    failed_before: i64,
+    limit: u32,
+) -> anyhow::Result<Vec<u32>> {
+    let rows: Vec<(u32,)> = sqlx::query_as(
+        "SELECT id FROM items
+         WHERE fetched_at IS NULL
+            OR (name IS NULL AND error IS NULL AND fetched_at < ?)
+            OR (name IS NULL AND error IS NOT NULL AND fetched_at < ?)
+         ORDER BY fetched_at, id
+         LIMIT ?",
+    )
+    .bind(missing_before)
+    .bind(failed_before)
+    .bind(limit)
+    .fetch_all(db)
+    .await?;
+    Ok(rows.into_iter().map(|(id,)| id).collect())
+}
+
+/// What asking Battle.net about an item came to.
+pub enum ItemFetch<'a> {
+    Found {
+        item: &'a zesquad_core::items::Item,
+        source: zesquad_core::items::Source,
+        json: &'a str,
+    },
+    /// No item data has it.
+    Missing,
+    Failed(&'a str),
+}
+
+/// Stores what asking about an item came to. A failure keeps details found before.
+///
+/// # Errors
+///
+/// On database errors.
+pub async fn store_item(
+    db: &SqlitePool,
+    id: u32,
+    at: i64,
+    fetch: ItemFetch<'_>,
+) -> anyhow::Result<()> {
+    let query = match fetch {
+        ItemFetch::Found { item, source, json } => sqlx::query(
+            "INSERT INTO items (id, fetched_at, source, name, quality, class_id, subclass_id, json, error)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)
+             ON CONFLICT (id) DO UPDATE SET fetched_at = excluded.fetched_at,
+                source = excluded.source, name = excluded.name, quality = excluded.quality,
+                class_id = excluded.class_id, subclass_id = excluded.subclass_id,
+                json = excluded.json, error = NULL",
+        )
+        .bind(id)
+        .bind(at)
+        .bind(source.as_str())
+        .bind(&item.name)
+        .bind(&item.quality)
+        .bind(item.class_id)
+        .bind(item.subclass_id)
+        .bind(json),
+        ItemFetch::Missing => sqlx::query(
+            "INSERT INTO items (id, fetched_at) VALUES (?, ?)
+             ON CONFLICT (id) DO UPDATE SET fetched_at = excluded.fetched_at,
+                source = NULL, name = NULL, quality = NULL, class_id = NULL,
+                subclass_id = NULL, json = NULL, error = NULL",
+        )
+        .bind(id)
+        .bind(at),
+        ItemFetch::Failed(error) => sqlx::query(
+            "INSERT INTO items (id, fetched_at, error) VALUES (?, ?, ?)
+             ON CONFLICT (id) DO UPDATE SET fetched_at = excluded.fetched_at, error = excluded.error",
+        )
+        .bind(id)
+        .bind(at)
+        .bind(error),
+    };
+    query.execute(db).await?;
+    Ok(())
+}
+
+/// How far the item details have got.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct ItemCounts {
+    /// Items seen at the auction houses.
+    pub seen: i64,
+    /// With details from Forever's item data, and from Classic's.
+    pub forever: i64,
+    pub classic: i64,
+    /// Asked about, but no item data has them.
+    pub missing: i64,
+    /// Whose last ask failed.
+    pub failed: i64,
+}
+
+/// # Errors
+///
+/// On database errors.
+pub async fn item_counts(db: &SqlitePool) -> anyhow::Result<ItemCounts> {
+    let (seen, forever, classic, missing, failed): (i64, i64, i64, i64, i64) = sqlx::query_as(
+        "SELECT COUNT(*),
+                COALESCE(SUM(source = 'forever'), 0),
+                COALESCE(SUM(source = 'classic'), 0),
+                COALESCE(SUM(fetched_at IS NOT NULL AND name IS NULL AND error IS NULL), 0),
+                COALESCE(SUM(name IS NULL AND error IS NOT NULL), 0)
+         FROM items",
+    )
+    .fetch_one(db)
+    .await?;
+    Ok(ItemCounts {
+        seen,
+        forever,
+        classic,
+        missing,
+        failed,
+    })
+}
+
+/// An item's name, if known.
+///
+/// # Errors
+///
+/// On database errors.
+pub async fn item_name(db: &SqlitePool, id: u32) -> anyhow::Result<Option<String>> {
+    let row: Option<(Option<String>,)> = sqlx::query_as("SELECT name FROM items WHERE id = ?")
+        .bind(id)
+        .fetch_optional(db)
+        .await?;
+    Ok(row.and_then(|(name,)| name))
 }

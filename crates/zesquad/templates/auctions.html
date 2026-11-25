@@ -79,4 +79,6 @@
   </tbody>
 </table>
 </div>
+<p class="hint">Item details: {{ items.forever + items.classic }} of {{ items.seen }} known ({{ items.forever }} from Forever's item data, {{ items.classic }} from Classic's), {{ items.missing }} in neither
+{%- if items.failed > 0 %}, {{ items.failed }} not looked up yet after an error{% endif %}.</p>
 {% endblock %}
