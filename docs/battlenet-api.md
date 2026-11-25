@@ -248,6 +248,13 @@ Tried with our client on the EU host, 2026-11-25:
   says 43%). [forum-works] Most are Classic world-drop gear, such as random-enchant greens.
   22 of 25 of those were in `static-classic1x-eu` and `static-classic-eu`; the other 3 (ids
   over 280,000) were in no namespace, retail's `static-eu` included.
+- **The top-level `sell_price` can be wrong in Forever's item data; `preview_item.sell_price.value`
+  (the tooltip's) is what the game shows.** Of 4,606 Forever items stored on 2026-11-25, 105
+  had a top-level 0 with a tooltip price (Red Dragonscale Leggings, 252603: 0 against 42,088)
+  and 15 had both set but different (Hammer of the Northern Wind, 810: 45,267 against 47,649).
+  425 had no tooltip price: 248 of those had a top-level 0 (quest items and the like, which
+  can't be sold) and 176 had 1 (ammunition). In Classic Era's item data the two always agreed.
+  `crates/zesquad-core/fixtures/item-epic.json` is item 252603.
 - `/data/wow/media/item/{id}` gives the icon: `assets [{key: "icon", value, file_data_id}]`,
   with URLs like `https://render.worldofwarcraft.com/forever-eu/icons/56/{file_data_id}.jpg`.
   Forever's media has icons for items its item data lacks (9950 and 264077 answered, though

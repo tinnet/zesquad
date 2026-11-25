@@ -51,7 +51,7 @@ pub struct Item {
     pub class_name: Option<String>,
     pub subclass_id: Option<u32>,
     pub subclass_name: Option<String>,
-    /// Copper a vendor pays for one.
+    /// Copper a vendor pays for one, as the tooltip says; `None` when it can't be sold.
     pub sell_price: Option<u64>,
 }
 
@@ -76,6 +76,21 @@ struct Doc {
     item_subclass: Option<Named>,
     #[serde(default)]
     sell_price: Option<u64>,
+    #[serde(default)]
+    preview_item: Option<Preview>,
+}
+
+/// The tooltip, as the game shows it.
+#[derive(Deserialize)]
+struct Preview {
+    #[serde(default)]
+    sell_price: Option<PreviewPrice>,
+}
+
+#[derive(Deserialize)]
+struct PreviewPrice {
+    #[serde(default)]
+    value: Option<u64>,
 }
 
 #[derive(Deserialize)]
@@ -90,6 +105,16 @@ struct Named {
     id: Option<u32>,
     #[serde(default)]
     name: Option<String>,
+}
+
+/// What a vendor pays: the tooltip's price, which is what the game shows. Forever repriced
+/// some items without changing the top-level `sell_price` (which can even be 0), so that's only
+/// used without a tooltip price. 0 means it can't be sold.
+fn sell_price(preview: Option<PreviewPrice>, top: Option<u64>) -> Option<u64> {
+    preview
+        .and_then(|p| p.value)
+        .or(top)
+        .filter(|&copper| copper > 0)
 }
 
 /// Reads an item document. Leniently: only the id and a name are needed.
@@ -114,7 +139,7 @@ pub fn parse(json: &str) -> Result<Item, ItemError> {
         class_name,
         subclass_id,
         subclass_name,
-        sell_price: doc.sell_price,
+        sell_price: sell_price(doc.preview_item.and_then(|p| p.sell_price), doc.sell_price),
     })
 }
 
@@ -238,6 +263,31 @@ mod tests {
                 sell_price: Some(15),
             }
         );
+    }
+
+    #[test]
+    fn sell_price_is_the_tooltips() {
+        let epic = parse(&fixture("item-epic")).unwrap();
+        assert_eq!(epic.name, "Red Dragonscale Leggings");
+        assert_eq!(epic.quality, "EPIC");
+        assert_eq!(epic.sell_price, Some(42_088), "not the top-level 0");
+        let price = |json: &str| parse(json).unwrap().sell_price;
+        assert_eq!(
+            price(
+                r#"{"id": 1, "name": "a", "sell_price": 45267, "preview_item": {"sell_price": {"value": 47649}}}"#
+            ),
+            Some(47_649)
+        );
+        assert_eq!(
+            price(r#"{"id": 1, "name": "a", "sell_price": 1, "preview_item": {}}"#),
+            Some(1)
+        );
+        assert_eq!(
+            price(r#"{"id": 1, "name": "a", "sell_price": 0}"#),
+            None,
+            "can't be sold"
+        );
+        assert_eq!(price(r#"{"id": 1, "name": "a"}"#), None);
     }
 
     #[test]

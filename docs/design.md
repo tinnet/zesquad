@@ -120,7 +120,8 @@ hover; then how collecting is going for each house. Money is shown with coins li
 The leathers are still named in `zesquad_core::auctions::LEATHER`. A search box above them (a plain GET form,
 `?q=`, that htmx swaps in as you type, like the guild roster's) shows the same for up to 20 items
 whose name contains what was typed, from `items`: names starting with it first, then shorter
-ones.
+ones. Under each name is what a vendor pays, read from the item's stored document
+when the page is shown (the tooltip's price; see Items in `docs/battlenet-api.md`).
 
 The same task fills in `items`, the details of every item seen (a row is added for each new item
 when a snapshot is stored). Each round it asks Battle.net about 120 of them, Forever's item data

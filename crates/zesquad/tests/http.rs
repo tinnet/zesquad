@@ -371,7 +371,14 @@ async fn fake_item(
                 "quality": {"type": "COMMON", "name": "Common"},
                 "item_class": {"id": 7, "name": "Trade Goods"},
                 "item_subclass": {"id": 5, "name": "Cloth"},
-                "sell_price": 3
+                // Like Forever's repriced items: the tooltip has the real price. 4306 can't be
+                // sold.
+                "sell_price": match id { 2592 | 4306 => 0, _ => 3 },
+                "preview_item": if id == 2592 {
+                    serde_json::json!({"sell_price": {"value": 42_088}})
+                } else {
+                    serde_json::json!({})
+                }
             })
             .to_string()
         }
@@ -2462,12 +2469,19 @@ async fn items_can_be_searched_by_name_on_the_auction_page() {
     let app = app_with_auctions(true, None, true).await;
     app.wait_for("/auctions", "1 in neither, 5 with icons.")
         .await;
-    let row_names = |page: &str| -> Vec<String> {
+    // The rows' item headers, and each one's name: the text after the icon.
+    let rows = |page: &str| -> Vec<String> {
         page.split(r#"<th scope="row""#)
             .skip(1)
-            .map(|r| {
-                let cell = &r[..r.find("</th>").unwrap()];
-                cell[cell.rfind('>').unwrap() + 1..].to_owned()
+            .map(|r| r[..r.find("</th>").unwrap()].to_owned())
+            .collect()
+    };
+    let row_names = |page: &str| -> Vec<String> {
+        rows(page)
+            .iter()
+            .map(|cell| {
+                let name = &cell[cell.find(r#"loading="lazy">"#).unwrap() + 15..];
+                name[..name.find('<').unwrap_or(name.len())].to_owned()
             })
             .collect()
     };
@@ -2494,6 +2508,29 @@ async fn items_can_be_searched_by_name_on_the_auction_page() {
         "Made-up Item 11208",
     ];
     assert_eq!(row_names(&page), [found, found].concat());
+    // Under each name what a vendor pays: the tooltip's price (4g 20s 88c, though the top-level
+    // price is 0), and nothing for an item that can't be sold.
+    let text = |html: &str| {
+        let mut out = String::new();
+        let mut in_tag = false;
+        for c in html.chars() {
+            match c {
+                '<' => in_tag = true,
+                '>' => in_tag = false,
+                c if !in_tag => out.push(c),
+                _ => {}
+            }
+        }
+        out
+    };
+    let vendor: Vec<String> = rows(&page)[..4]
+        .iter()
+        .map(|cell| {
+            cell.find("vendor ")
+                .map_or_else(String::new, |i| text(&cell[i..]))
+        })
+        .collect();
+    assert_eq!(vendor, ["vendor 3c", "vendor 4g 20s 88c", "", "vendor 3c"]);
     // Each with its icon, or the game's question mark when it has none.
     for icon in [134_400, 1001, 1002, 1003] {
         let url = format!("forever-eu/icons/36/{icon}.jpg");
@@ -2504,7 +2541,7 @@ async fn items_can_be_searched_by_name_on_the_auction_page() {
     let (_, page) = app.get("/auctions?q=light").await;
     assert_eq!(row_names(&page), ["Light Leather", "Light Leather"]);
     assert!(page.contains(
-        r#"<th scope="row" class="q-common"><img class="item-icon" src="https://render.worldofwarcraft.com/forever-eu/icons/36/134252.jpg" width="18" height="18" alt="" loading="lazy">Light Leather</th>"#
+        r#"<th scope="row" class="q-common"><img class="item-icon" src="https://render.worldofwarcraft.com/forever-eu/icons/36/134252.jpg" width="18" height="18" alt="" loading="lazy">Light Leather<span class="sub item-sub">vendor <span class="money"><span class="coin copper">15<span class="visually-hidden">c</span></span></span></span></th>"#
     ));
     assert!(page.contains(r#"<span class="coin copper">45<span"#));
 

@@ -1,0 +1,148 @@
+{
+  "appearances": [
+    {
+      "id": 121575
+    }
+  ],
+  "id": 252603,
+  "inventory_type": {
+    "name": "Legs",
+    "type": "LEGS"
+  },
+  "is_equippable": true,
+  "is_stackable": false,
+  "item_class": {
+    "id": 4,
+    "name": "Armor"
+  },
+  "item_subclass": {
+    "id": 3,
+    "name": "Mail"
+  },
+  "level": 61,
+  "max_count": 0,
+  "media": {
+    "id": 252603
+  },
+  "name": "Red Dragonscale Leggings",
+  "preview_item": {
+    "armor": {
+      "display": {
+        "color": {
+          "a": 1.0,
+          "b": 255,
+          "g": 255,
+          "r": 255
+        },
+        "display_string": "344 Armor"
+      },
+      "value": 344
+    },
+    "binding": {
+      "name": "Binds when equipped",
+      "type": "ON_EQUIP"
+    },
+    "durability": {
+      "display_string": "Durability 105 / 105",
+      "value": 105
+    },
+    "inventory_type": {
+      "name": "Legs",
+      "type": "LEGS"
+    },
+    "item": {
+      "id": 252603
+    },
+    "item_class": {
+      "id": 4,
+      "name": "Armor"
+    },
+    "item_subclass": {
+      "id": 3,
+      "name": "Mail"
+    },
+    "media": {
+      "id": 252603
+    },
+    "name": "Red Dragonscale Leggings",
+    "quality": {
+      "name": "Epic",
+      "type": "EPIC"
+    },
+    "requirements": {
+      "level": {
+        "display_string": "Requires Level 56",
+        "value": 56
+      }
+    },
+    "sell_price": {
+      "display_strings": {
+        "copper": "88",
+        "gold": "4",
+        "header": "Sell Price:",
+        "silver": "20"
+      },
+      "value": 42088
+    },
+    "stats": [
+      {
+        "display": {
+          "color": {
+            "a": 1.0,
+            "b": 255,
+            "g": 255,
+            "r": 255
+          },
+          "display_string": "+32 Intellect"
+        },
+        "type": {
+          "name": "Intellect",
+          "type": "INTELLECT"
+        },
+        "value": 32
+      },
+      {
+        "display": {
+          "color": {
+            "a": 1.0,
+            "b": 0,
+            "g": 255,
+            "r": 0
+          },
+          "display_string": "+20 Spell Damage"
+        },
+        "is_equip_bonus": true,
+        "type": {
+          "name": "Spell Damage",
+          "type": "SPELL_DAMAGE_DONE"
+        },
+        "value": 20
+      },
+      {
+        "display": {
+          "color": {
+            "a": 1.0,
+            "b": 0,
+            "g": 255,
+            "r": 0
+          },
+          "display_string": "+20 Spell Healing"
+        },
+        "is_equip_bonus": true,
+        "type": {
+          "name": "Spell Healing",
+          "type": "SPELL_HEALING_DONE"
+        },
+        "value": 20
+      }
+    ]
+  },
+  "purchase_price": 0,
+  "purchase_quantity": 1,
+  "quality": {
+    "name": "Epic",
+    "type": "EPIC"
+  },
+  "required_level": 56,
+  "sell_price": 0
+}

@@ -269,6 +269,8 @@ a.guild:hover { color: var(--text); }
 .q-poor { --q: var(--q-poor); } .q-common { --q: var(--q-common); } .q-uncommon { --q: var(--q-uncommon); }
 .q-rare { --q: var(--q-rare); } .q-epic { --q: var(--q-epic); } .q-legendary { --q: var(--q-legendary); }
 [class^="q-"], .data tbody th[class^="q-"] { color: var(--q); }
+/* A line under an item's name, lined up with the name rather than the icon. */
+.data .item-sub { padding-left: calc(20px + .4rem); font-weight: 400; }
 
 @media (max-width: 30rem) {
   .actions { justify-content: flex-start; }

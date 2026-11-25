@@ -2379,6 +2379,8 @@ pub struct FoundItem {
     pub name: String,
     pub quality: String,
     pub icon: Option<u32>,
+    /// The whole document from Battle.net, for what the columns don't hold.
+    pub json: Option<String>,
 }
 
 /// Items whose name contains `search` (as tidied by `zesquad_core::items::search`), any case:
@@ -2395,7 +2397,7 @@ pub async fn search_items(
 ) -> anyhow::Result<(Vec<FoundItem>, bool)> {
     use zesquad_core::items::{contains_pattern, prefix_pattern};
     let mut found: Vec<FoundItem> = sqlx::query_as(
-        "SELECT id, name, COALESCE(quality, '') AS quality, icon FROM items
+        "SELECT id, name, COALESCE(quality, '') AS quality, icon, json FROM items
          WHERE name LIKE ? ESCAPE '\\'
          ORDER BY name LIKE ? ESCAPE '\\' DESC, length(name), name, id
          LIMIT ?",
@@ -2417,7 +2419,7 @@ pub async fn search_items(
 /// On database errors.
 pub async fn items_by_id(db: &SqlitePool, ids: &[u32]) -> anyhow::Result<Vec<FoundItem>> {
     Ok(sqlx::query_as(
-        "SELECT id, name, COALESCE(quality, '') AS quality, icon FROM items
+        "SELECT id, name, COALESCE(quality, '') AS quality, icon, json FROM items
          WHERE id IN (SELECT value FROM json_each(?)) AND name IS NOT NULL",
     )
     .bind(serde_json::to_string(ids)?)

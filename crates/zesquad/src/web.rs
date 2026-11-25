@@ -1916,6 +1916,8 @@ struct PriceRow {
     quality: String,
     /// Its icon's URL; the unknown item's when it has none.
     icon: String,
+    /// What a vendor pays for one; `None` when it can't be sold or isn't known.
+    vendor: Option<Money>,
     cells: Vec<Option<PriceCell>>,
 }
 
@@ -1969,6 +1971,7 @@ async fn shown_items(
                     name: name.to_owned(),
                     quality: "COMMON".to_owned(),
                     icon: None,
+                    json: None,
                 })
         })
         .collect();
@@ -2012,6 +2015,12 @@ async fn auctions_page(
                         name: f.name.clone(),
                         quality: items::quality_class(&f.quality),
                         icon: items::icon_url(f.icon, ICON_SIZE),
+                        vendor: f
+                            .json
+                            .as_deref()
+                            .and_then(|json| items::parse(json).ok())
+                            .and_then(|item| item.sell_price)
+                            .map(Money::from_copper),
                         cells: Vec::new(),
                     })
                     .collect(),
