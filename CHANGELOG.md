@@ -2,6 +2,12 @@
 
 What changed in each zesquad release. Versions are dates (CalVer).
 
+## 2026.11.25.9
+
+### Performance
+
+- **web**: Load the auction overview from a stored ranking ([1321242](https://github.com/tinnet/zesquad/commit/13212427a8dc9090443868fdcbe733fd058c4708))
+
 ## 2026.11.25.8
 
 ### Features
