@@ -160,6 +160,12 @@ with made-up values and the `_links` / `href` fields left out:
 ```
 
 - No `realm`; `guild` is missing when the character has none. `last_login_timestamp` is in ms.
+- **Item levels can be missing.** On 2026-11-25, 8 of 18 summaries zesquad fetched had no
+  `average_item_level` or `equipped_item_level` key, and their `equipment` items had no
+  `level`. They were exactly the characters last logged in at or after 2026-11-25 05:12 UTC;
+  every one last logged in at or before 2026-11-24 22:35 UTC still had both. The cut falls
+  around the weekly Wednesday maintenance, so profiles saved since then seem to leave item
+  levels out, at levels 14 to 60 alike. Not yet known whether Blizzard will bring them back.
 - The summary links to `achievements`, `titles`, `pvp_summary`, `encounters`, `media`,
   `specializations`, `statistics`, `mythic_keystone_profile`, `equipment`, `appearance`,
   `collections`, `reputations`, `quests`, `achievements_statistics`, `professions`.
