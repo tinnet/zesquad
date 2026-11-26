@@ -2594,9 +2594,10 @@ async fn the_auction_overview_shows_moves_gaps_bargains_and_big_markets() {
     let (status, page) = app.get("/auctions").await;
     assert_eq!(status, StatusCode::OK);
     assert!(page.contains("<h2>Market overview</h2>"));
-    assert!(
-        page.contains(r#"class="chip on" aria-current="page">Europe</a>"#),
-        "Europe by default"
+    assert_eq!(
+        picked(&page),
+        ["Europe", "Both", "All"],
+        "all of Europe by default"
     );
     let eu = overview_lists(&page);
     let titles: Vec<&str> = eu.iter().map(|(t, _)| t.as_str()).collect();
@@ -2641,7 +2642,7 @@ async fn the_auction_overview_shows_moves_gaps_bargains_and_big_markets() {
 
     // Americas has no whole days yet, but has bargains of its own.
     let (_, page) = app.get("/auctions?region=us").await;
-    assert!(page.contains(r#"class="chip on" aria-current="page">Americas</a>"#));
+    assert_eq!(picked(&page), ["Americas", "Both", "All"]);
     let us = overview_lists(&page);
     assert!(page.contains("Nothing yet: this needs two whole days of prices."));
     assert!(
@@ -2654,7 +2655,81 @@ async fn the_auction_overview_shows_moves_gaps_bargains_and_big_markets() {
     // An unknown region is the default one.
     let (status, page) = app.get("/auctions?region=kr").await;
     assert_eq!(status, StatusCode::OK);
-    assert!(page.contains(r#"class="chip on" aria-current="page">Europe</a>"#));
+    assert_eq!(picked(&page)[0], "Europe");
+}
+
+#[tokio::test]
+async fn the_auction_overview_narrows_to_a_faction_and_a_ruleset() {
+    let app = app_with_auctions(true, None, true).await;
+    app.wait_for("/auctions", "1 in neither, 5 with icons.")
+        .await;
+    seed_overview(&app.db().await).await;
+    let squash = |s: &str| s.split_whitespace().collect::<Vec<_>>().join(" ");
+    let lists = |page: &str| -> Vec<String> {
+        overview_lists(page)
+            .iter()
+            .map(|(_, rows)| squash(rows))
+            .collect()
+    };
+
+    // Horde PvP alone: its moves, no Alliance bargains, its own markets.
+    let (_, page) = app
+        .get("/auctions?region=eu&faction=horde&ruleset=pvp")
+        .await;
+    assert_eq!(picked(&page), ["Europe", "Horde", "PvP"]);
+    let rows = lists(&page);
+    assert_eq!(
+        rows[0], "Made-up Item 2589Horde PvP 1s 4s 50c ×4.5",
+        "rising"
+    );
+    assert_eq!(rows[3], "", "the bargains are on Alliance PvP");
+    assert!(page.contains("on sale now in the Horde PvP house,"));
+    // Faction gaps compare both factions, so only the ruleset narrows them: PvE's gap is out.
+    assert!(!rows[2].contains("PvE houses"), "{}", rows[2]);
+
+    // Each choice keeps the other filters.
+    for link in [
+        "/auctions?region=us&#38;faction=horde&#38;ruleset=pvp",
+        "/auctions?region=eu&#38;ruleset=pvp",
+        "/auctions?region=eu&#38;faction=horde",
+        "/auctions?region=eu&#38;faction=alliance&#38;ruleset=pvp",
+    ] {
+        assert!(
+            page.contains(&format!(r#"href="{link}""#)),
+            "missing {link}"
+        );
+    }
+
+    // PvE: its gap, but not PvP's moves or bargains.
+    let (_, page) = app.get("/auctions?ruleset=pve").await;
+    assert_eq!(picked(&page), ["Europe", "Both", "PvE"]);
+    let rows = lists(&page);
+    assert_eq!((rows[0].as_str(), rows[3].as_str()), ("", ""));
+    assert_eq!(rows[2], "Made-up Item 2589PvE houses 10c 50c ×5");
+    assert!(page.contains("on sale now in both PvE houses,"));
+
+    // Alliance: the bargains, and gaps still.
+    let (_, page) = app.get("/auctions?faction=alliance").await;
+    let rows = lists(&page);
+    assert!(rows[3].starts_with("Made-up Item 2592Alliance PvP"));
+    assert!(rows[2].contains("PvE houses"));
+    assert!(page.contains("on sale now in both Alliance houses,"));
+
+    // Unknown choices are all.
+    let (status, page) = app.get("/auctions?faction=goblin&ruleset=rp").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(picked(&page), ["Europe", "Both", "All"]);
+}
+
+/// The overview's picked filter choices, in order.
+fn picked(page: &str) -> Vec<String> {
+    page.split(r#"class="segment on""#)
+        .skip(1)
+        .map(|s| {
+            let s = &s[s.find('>').unwrap() + 1..];
+            s[..s.find("</a>").unwrap()].to_owned()
+        })
+        .collect()
 }
 
 #[tokio::test]

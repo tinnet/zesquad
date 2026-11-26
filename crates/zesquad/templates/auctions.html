@@ -36,11 +36,18 @@
 {%- endif %}
 {%- else if let Some(o) = overview %}
 <h2>Market overview</h2>
-<nav class="filters" aria-label="Region">
-  {%- for r in o.regions %}
-  <a href="/auctions?region={{ r.as_str() }}" class="chip{% if *r == o.region %} on{% endif %}"{% if *r == o.region %} aria-current="page"{% endif %}>{{ r.name() }}</a>
+{#- Plain links, so they work without script; htmx swaps just the prices in, like a search. -#}
+<div class="overview-filters">
+  {%- for f in o.filters %}
+  <nav class="segmented" aria-label="{{ f.label }}">
+    <span class="segmented-label">{{ f.label }}</span>
+    {%- for c in f.choices %}
+    <a href="{{ c.href }}" class="segment{% if c.on %} on{% endif %}"{% if c.on %} aria-current="page"{% endif %}
+      hx-get="{{ c.href }}" hx-select="#prices" hx-target="#prices" hx-swap="outerHTML" hx-push-url="true">{{ c.label }}</a>
+    {%- endfor %}
+  </nav>
   {%- endfor %}
-</nav>
+</div>
 <div class="overview-grid">
 {%- for l in o.lists %}
 <section class="overview-list">

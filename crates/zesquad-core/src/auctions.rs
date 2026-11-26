@@ -18,11 +18,22 @@ pub enum Faction {
 }
 
 impl Faction {
+    pub const ALL: [Self; 2] = [Self::Alliance, Self::Horde];
+
     #[must_use]
     pub fn name(self) -> &'static str {
         match self {
             Self::Alliance => "Alliance",
             Self::Horde => "Horde",
+        }
+    }
+
+    /// For links: `alliance`.
+    #[must_use]
+    pub fn slug(self) -> &'static str {
+        match self {
+            Self::Alliance => "alliance",
+            Self::Horde => "horde",
         }
     }
 }
@@ -35,11 +46,74 @@ pub enum Pool {
 }
 
 impl Pool {
+    pub const ALL: [Self; 2] = [Self::Pvp, Self::Pve];
+
     #[must_use]
     pub fn name(self) -> &'static str {
         match self {
             Self::Pvp => "PvP",
             Self::Pve => "PvE",
+        }
+    }
+
+    /// For links: `pvp`.
+    #[must_use]
+    pub fn slug(self) -> &'static str {
+        match self {
+            Self::Pvp => "pvp",
+            Self::Pve => "pve",
+        }
+    }
+}
+
+/// Which of a region's houses to look at: one faction's, one ruleset's, both, or (`None` for
+/// each) all of them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Scope {
+    pub faction: Option<Faction>,
+    pub pool: Option<Pool>,
+}
+
+impl Scope {
+    /// Every scope: all houses first, then each faction, each ruleset, and each house.
+    #[must_use]
+    pub fn all() -> Vec<Self> {
+        let factions = [None, Some(Faction::Alliance), Some(Faction::Horde)];
+        let pools = [None, Some(Pool::Pvp), Some(Pool::Pve)];
+        pools
+            .into_iter()
+            .flat_map(|pool| {
+                factions
+                    .into_iter()
+                    .map(move |faction| Self { faction, pool })
+            })
+            .collect()
+    }
+
+    /// From a link's `faction` and `ruleset`, by [`Faction::slug`] and [`Pool::slug`]; anything
+    /// else (missing, `all`, unknown) doesn't narrow it.
+    #[must_use]
+    pub fn parse(faction: Option<&str>, pool: Option<&str>) -> Self {
+        Self {
+            faction: Faction::ALL.into_iter().find(|f| Some(f.slug()) == faction),
+            pool: Pool::ALL.into_iter().find(|p| Some(p.slug()) == pool),
+        }
+    }
+
+    #[must_use]
+    pub fn contains(self, house: House) -> bool {
+        self.faction.is_none_or(|f| f == house.faction) && self.pool.is_none_or(|p| p == house.pool)
+    }
+
+    /// The houses in it, for sentences: `all four houses`, `both Alliance houses`, `both PvP
+    /// houses`, `the Alliance PvP house`.
+    #[must_use]
+    pub fn houses(self) -> String {
+        match (self.faction, self.pool) {
+            (None, None) => "all four houses".to_owned(),
+            (Some(f), None) => format!("both {} houses", f.name()),
+            (None, Some(p)) => format!("both {} houses", p.name()),
+            (Some(f), Some(p)) => format!("the {} {} house", f.name(), p.name()),
         }
     }
 }
@@ -525,6 +599,38 @@ mod tests {
         assert_eq!(show(Money::brief(17_249)), "1g 72s");
         assert_eq!(show(Money::brief(17_250)), "1g 73s");
         assert_eq!(show(Money::brief(19_990)), "2g", "not 2g 0s");
+    }
+
+    #[test]
+    fn scopes_pick_houses() {
+        let all = Scope::all();
+        assert_eq!(all.len(), 9);
+        assert_eq!(all[0], Scope::default());
+        let count = |scope: Scope| followed().filter(|h| scope.contains(*h)).count();
+        let counts: Vec<usize> = all.iter().map(|&s| count(s)).collect();
+        // Both regions' houses.
+        assert_eq!(counts, [8, 4, 4, 4, 2, 2, 4, 2, 2]);
+        let horde_pve = Scope::parse(Some("horde"), Some("pve"));
+        assert_eq!(
+            horde_pve,
+            Scope {
+                faction: Some(Faction::Horde),
+                pool: Some(Pool::Pve)
+            }
+        );
+        assert!(
+            followed()
+                .filter(|h| horde_pve.contains(*h))
+                .all(|h| h.id == 114)
+        );
+        assert_eq!(horde_pve.houses(), "the Horde PvE house");
+        assert_eq!(Scope::parse(Some("all"), Some("RP")), Scope::default());
+        assert_eq!(Scope::parse(None, None).houses(), "all four houses");
+        assert_eq!(
+            Scope::parse(Some("alliance"), None).houses(),
+            "both Alliance houses"
+        );
+        assert_eq!(Scope::parse(None, Some("pvp")).houses(), "both PvP houses");
     }
 
     #[test]

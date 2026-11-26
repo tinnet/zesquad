@@ -126,13 +126,17 @@ each name is what a vendor pays (the tooltip's price; see Items in `docs/battlen
 Money is shown with coins like the game, empty coins left out.
 
 Without a search the page shows a market overview of one region (`?region=`, the default region
-first), ranked in `zesquad_core::market`, eight items a list, each linking to its search:
+first), ranked in `zesquad_core::market`, eight items a list, each linking to its search. Three
+rows of filters above it, Region, Faction (`?faction=alliance|horde`) and Ruleset
+(`?ruleset=pvp|pve`), narrow it to some of the region's houses (`zesquad_core::auctions::Scope`).
+They're plain links that keep the other filters, swapped in by htmx like a search; a filter left
+at Both or All is left out of the link, and an unknown value counts as all.
 
 - **Rising** and **Falling**: the last finished day's typical price (the median of its hourly
   medians, from `auction_daily`) against the day before, per house, an item's biggest move once.
   Both days need 20 units on sale and 12 snapshots; single snapshots were too noisy to rank.
 - **Faction gaps**: an item's median now on the Alliance and Horde houses of the same pool, each
-  with at least five auctions.
+  with at least five auctions. Only the ruleset filter narrows it: a gap is between factions.
 
   Moves and gaps are ranked by the money they involve, the price difference times the units on
   sale (the fewer of the two), not by how many times dearer. Forever's markets are thin and
@@ -148,7 +152,8 @@ first), ranked in `zesquad_core::market`, eight items a list, each linking to it
 Ranking a region reads its latest snapshots and two days of `auction_daily`, about 90k rows and
 half a second on the server, so it's stored in `auction_rankings` (`crate::ranking`) with what it
 was ranked from: each house's latest snapshot and last condensed day, and when item details last
-changed. The auction task ranks a region again after a round that changed any of those, and the
+changed. It ranks all nine scopes from one read of the data (a few milliseconds more) and
+stores them together. The auction task ranks a region again after a round that changed any of those, and the
 page reads the stored ranking, a few kilobytes. The page checks the same few values first and
 ranks on the spot when they differ, so it's never stale, only slow when the task hasn't got to
 it (or isn't running). Change how it ranks or what it stores and bump `ranking::VERSION`, so

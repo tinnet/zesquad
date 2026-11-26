@@ -1934,6 +1934,9 @@ struct AuctionsQuery {
     q: Option<String>,
     /// The overview's region; the default region when missing or unknown.
     region: Option<String>,
+    /// The overview's faction and ruleset (see [`auctions::Scope::parse`]); all when missing.
+    faction: Option<String>,
+    ruleset: Option<String>,
 }
 
 /// Search results shown at most.
@@ -1973,7 +1976,12 @@ async fn auctions_page(
         (found, more, None)
     } else {
         let region = overview_region(query.region.as_deref(), state.default_region);
-        (Vec::new(), false, Some(overview(&state.db, region).await?))
+        let scope = auctions::Scope::parse(query.faction.as_deref(), query.ruleset.as_deref());
+        (
+            Vec::new(),
+            false,
+            Some(overview(&state.db, region, scope).await?),
+        )
     };
     let ids: Vec<u32> = found.iter().map(|f| f.id).collect();
     let mut houses = Vec::new();
@@ -2092,12 +2100,81 @@ fn price_cell(
 
 // ---- auction overview ----
 
-/// What's going on in one region's houses, when nothing was searched.
+/// What's going on in some of a region's houses, when nothing was searched.
 struct Overview {
-    region: Region,
-    /// The regions to switch between.
-    regions: [Region; 2],
+    /// Region, faction and ruleset, each a row of choices.
+    filters: Vec<Filter>,
     lists: Vec<OverviewList>,
+}
+
+/// One of the overview's filters: a name and its choices, one of them picked.
+struct Filter {
+    label: &'static str,
+    choices: Vec<Choice>,
+}
+
+struct Choice {
+    label: &'static str,
+    /// The overview with this picked and the other filters as they are.
+    href: String,
+    on: bool,
+}
+
+/// The overview's link for `region` and `scope`; a filter left at all is left out.
+fn overview_href(region: Region, scope: auctions::Scope) -> String {
+    let mut href = format!("/auctions?region={}", region.as_str());
+    if let Some(f) = scope.faction {
+        href.push_str("&faction=");
+        href.push_str(f.slug());
+    }
+    if let Some(p) = scope.pool {
+        href.push_str("&ruleset=");
+        href.push_str(p.slug());
+    }
+    href
+}
+
+/// The overview's filters, with `region` and `scope` picked.
+fn overview_filters(region: Region, scope: auctions::Scope) -> Vec<Filter> {
+    use auctions::{Faction, Pool, Scope};
+    let regions = auctions::REGIONS
+        .into_iter()
+        .map(|r| Choice {
+            label: r.name(),
+            href: overview_href(r, scope),
+            on: r == region,
+        })
+        .collect();
+    let factions = [None, Some(Faction::Alliance), Some(Faction::Horde)]
+        .into_iter()
+        .map(|faction| Choice {
+            label: faction.map_or("Both", Faction::name),
+            href: overview_href(region, Scope { faction, ..scope }),
+            on: faction == scope.faction,
+        })
+        .collect();
+    let pools = [None, Some(Pool::Pvp), Some(Pool::Pve)]
+        .into_iter()
+        .map(|pool| Choice {
+            label: pool.map_or("All", Pool::name),
+            href: overview_href(region, Scope { pool, ..scope }),
+            on: pool == scope.pool,
+        })
+        .collect();
+    vec![
+        Filter {
+            label: "Region",
+            choices: regions,
+        },
+        Filter {
+            label: "Faction",
+            choices: factions,
+        },
+        Filter {
+            label: "Ruleset",
+            choices: pools,
+        },
+    ]
 }
 
 struct OverviewList {
@@ -2166,18 +2243,21 @@ fn overview_region(asked: Option<&str>, default: Region) -> Region {
         .unwrap_or(auctions::REGIONS[0])
 }
 
-/// The overview of `region`'s houses, with the items' names.
-async fn overview(db: &SqlitePool, region: Region) -> anyhow::Result<Overview> {
-    let ranked = ranking::load(db, region, db::now()).await?;
+/// The overview of `region`'s houses in `scope`, with the items' names.
+async fn overview(
+    db: &SqlitePool,
+    region: Region,
+    scope: auctions::Scope,
+) -> anyhow::Result<Overview> {
+    let ranked = ranking::load(db, region, scope, db::now()).await?;
     let known: HashMap<u32, db::FoundItem> = db::items_by_id(db, &ranked.items())
         .await?
         .into_iter()
         .map(|f| (f.id, f))
         .collect();
     Ok(Overview {
-        region,
-        regions: auctions::REGIONS,
-        lists: overview_lists(&ranked, &known),
+        filters: overview_filters(region, scope),
+        lists: overview_lists(&ranked, scope, &known),
     })
 }
 
@@ -2200,15 +2280,15 @@ fn item_row(
     }
 }
 
-const GAPS_HINT: &str = "The same item now on both factions' houses of a pool, biggest first \
-    by the difference times the units on sale. A neutral auction house can carry it across.";
-const BIGGEST_HINT: &str =
-    "What's on sale now in all four houses, by its worth at the median price.";
-const SOLD_HINT: &str = "What sold for the most over the last 24 hours in all four houses, \
-    per day. An estimate: auctions gone from one hourly dump to the next while they still had \
-    hours left, so bought or cancelled; ones bought within the hour aren't seen.";
+const GAPS_HINT: &str = "The same item now on both factions' houses of a ruleset, biggest first \
+    by the difference times the units on sale. A neutral auction house can carry it across. \
+    The faction filter doesn't narrow this one: it always compares both.";
 
-fn overview_lists(r: &Ranked, known: &HashMap<u32, db::FoundItem>) -> Vec<OverviewList> {
+fn overview_lists(
+    r: &Ranked,
+    scope: auctions::Scope,
+    known: &HashMap<u32, db::FoundItem>,
+) -> Vec<OverviewList> {
     let move_row = |m: &market::Move| {
         let way = if m.now > m.before { "up" } else { "down" };
         item_row(
@@ -2287,7 +2367,10 @@ fn overview_lists(r: &Ranked, known: &HashMap<u32, db::FoundItem>) -> Vec<Overvi
         },
         OverviewList {
             title: "Biggest markets",
-            hint: BIGGEST_HINT.to_owned(),
+            hint: format!(
+                "What's on sale now in {}, by its worth at the median price.",
+                scope.houses()
+            ),
             empty: "No prices yet.",
             heads: vec!["Units", "Worth"],
             rows: r
@@ -2300,15 +2383,24 @@ fn overview_lists(r: &Ranked, known: &HashMap<u32, db::FoundItem>) -> Vec<Overvi
                 })
                 .collect(),
         },
-        sold_list(r, known),
+        sold_list(r, scope, known),
     ]
 }
 
 /// The overview's list of what sold most.
-fn sold_list(r: &Ranked, known: &HashMap<u32, db::FoundItem>) -> OverviewList {
+fn sold_list(
+    r: &Ranked,
+    scope: auctions::Scope,
+    known: &HashMap<u32, db::FoundItem>,
+) -> OverviewList {
     OverviewList {
         title: "Most sold",
-        hint: SOLD_HINT.to_owned(),
+        hint: format!(
+            "What sold for the most over the last 24 hours in {}, per day. An estimate: \
+             auctions gone from one hourly dump to the next while they still had hours left, \
+             so bought or cancelled; ones bought within the hour aren't seen.",
+            scope.houses()
+        ),
         empty: "Nothing yet: this needs a few hours of hourly dumps to compare.",
         heads: vec!["Units a day", "Worth a day"],
         rows: r
