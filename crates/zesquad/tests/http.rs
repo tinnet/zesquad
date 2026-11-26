@@ -1075,6 +1075,7 @@ async fn added_characters_get_their_armory_details() {
         "Skinning 158/225",
         "https://render.example/forever-eu/character/1-avatar.jpg",
         "class-rogue",
+        "href=\"https://worldofwarcraft.blizzard.com/en-gb/forever/eu/armory/character/aldric-thornwood\"",
         ">Raid<",
         ">alts<",
     ] {
@@ -1088,7 +1089,11 @@ async fn characters_the_armory_doesnt_know_are_marked() {
     let app = app(true).await;
     let squad = app.squad("Raiders").await;
     app.add(&squad, "Nobody-Atall", "").await;
-    app.wait_for(&squad, "Not on the Armory").await;
+    let page = app.wait_for(&squad, "Not on the Armory").await;
+    assert!(
+        !page.contains("/armory/character/"),
+        "no link to an Armory page that doesn't exist: {page}"
+    );
 }
 
 #[tokio::test]

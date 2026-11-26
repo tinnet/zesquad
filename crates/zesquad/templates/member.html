@@ -20,7 +20,10 @@
         {%- if let Some(link) = m.guild_link %}<a href="{{ link }}" class="guild">&lt;{{ guild }}&gt;</a>{% else %}&lt;{{ guild }}&gt;{% endif %}
         {%- if !details.is_empty() %} · {% endif %}
         {%- endif %}{{ details }}</p>{% endif %}
-      {% if let Some(seen) = m.last_login %}<p class="line sub">last played {{ seen }}</p>{% endif %}
+      {% if m.last_login.is_some() || m.armory_link.is_some() %}<p class="line sub">
+        {%- if let Some(seen) = m.last_login %}last played {{ seen }}{% if m.armory_link.is_some() %} · {% endif %}{% endif %}
+        {%- if let Some(link) = m.armory_link %}<a href="{{ link }}" class="armory" target="_blank" rel="external noopener" title="This character on Blizzard's Armory">Armory<span aria-hidden="true"> ↗</span></a>{% endif -%}
+      </p>{% endif %}
       {% endif %}
       {% match m.status %}
       {% when Status::NotFound %}

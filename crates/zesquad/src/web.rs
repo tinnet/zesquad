@@ -321,6 +321,17 @@ pub fn guild_path(region: Region, slug: &Slug) -> String {
     format!("/g/{}/{}", region.as_str(), urlencode(slug.as_str()))
 }
 
+/// A character's page on Blizzard's Armory (see `docs/battlenet-api.md`).
+#[must_use]
+pub fn armory_url(region: Region, name: &str, surname: &str) -> String {
+    format!(
+        "https://worldofwarcraft.blizzard.com/{}/forever/{}/armory/character/{}",
+        region.locale().replace('_', "-").to_lowercase(),
+        region.as_str(),
+        urlencode(&format!("{name}-{surname}").to_lowercase()),
+    )
+}
+
 /// A squad's page; every form on it posts below this.
 #[must_use]
 pub fn squad_path(id: &str) -> String {
@@ -428,6 +439,8 @@ pub struct MemberView {
     pub checked: Option<String>,
     /// The page of the character's guild, when it has one and lookups are on.
     pub guild_link: Option<String>,
+    /// The character's page on Blizzard's Armory, once the Armory has answered for it.
+    pub armory_link: Option<String>,
 }
 
 impl MemberView {
@@ -445,15 +458,22 @@ impl MemberView {
         let guild_link = region
             .zip(profile.guild_slug.as_deref())
             .and_then(|(region, slug)| Some(guild_path(region, &Slug::parse(slug).ok()?)));
+        let name = profile.name.clone().unwrap_or(m.name);
+        let surname = profile.surname.clone().unwrap_or(m.surname);
+        // Blizzard's page is an error for characters it doesn't know, so only once it answered.
+        let armory_link = region
+            .filter(|_| m.armory.answered)
+            .map(|region| armory_url(region, &name, &surname));
         Self {
             guild_link,
+            armory_link,
             has_profile: m.armory.answered,
             id: m.id,
             class_key: profile.class_key(),
             last_login: profile.last_login_ms.map(|ms| ago(now - ms / 1000)),
             checked: m.fetched_at.map(|t| ago(now - t)),
-            name: profile.name.clone().unwrap_or(m.name),
-            surname: profile.surname.clone().unwrap_or(m.surname),
+            name,
+            surname,
             profile,
             tags,
             status: m.status,
@@ -2691,6 +2711,18 @@ mod tests {
         assert_eq!(ago(60), "1 minute ago");
         assert_eq!(ago(7200), "2 hours ago");
         assert_eq!(ago(86_400 * 3), "3 days ago");
+    }
+
+    #[test]
+    fn armory_urls() {
+        assert_eq!(
+            armory_url(Region::Eu, "Aldric", "Thornwood"),
+            "https://worldofwarcraft.blizzard.com/en-gb/forever/eu/armory/character/aldric-thornwood"
+        );
+        assert_eq!(
+            armory_url(Region::Us, "Älva", "McIntyre"),
+            "https://worldofwarcraft.blizzard.com/en-us/forever/us/armory/character/%C3%A4lva-mcintyre"
+        );
     }
 
     #[test]

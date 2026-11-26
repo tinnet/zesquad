@@ -20,6 +20,7 @@ Update this file when something changes.
 | [wowforevertierlist.com/armory][tierlist] | Third-party status page, as of 2026-10-18 | Unofficial |
 | [Forum: "WoW: Forever API: what works so far"][forum-works] | Community notes on rulesets and auction houses, 2026-11-05/06 | Unofficial |
 | [Goldbook issue #96][goldbook-houses] | Auction house ids probed in US; labels PvP/PvE houses, 2026-11-09 | Unofficial; the labels are the author's guess |
+| [Phantom Armory update][phantom-armory] | Third-party tool's note on Forever Armory page URLs | Unofficial; checked against the site |
 
 The developer portal renders its docs with JavaScript, so a plain fetch of the pages above returns
 an empty shell. The content is served as JSON at
@@ -99,6 +100,13 @@ So the hidden realm survives as the `realmId` in the protected-character link. [
 The public lookup takes the place of `{realmSlug}/{characterName}` with one segment, the
 lower-case `{name}-{surname}`: `/profile/wow/character/{name}-{surname}[/...]`. Verified with
 real characters (see "Verified").
+
+Blizzard's own Armory pages use the same key:
+`https://worldofwarcraft.blizzard.com/{locale}/forever/{region}/armory/character/{name}-{surname}`,
+for example `.../en-gb/forever/eu/armory/character/aldric-thornwood`. A character the Armory
+knows gets a 200 page titled with its name; an unknown one gets an "Error 500" page, not a 404.
+The pattern was reported by a third-party tool [phantom-armory]; checked on 2026-11-26 with a
+real EU character and a made-up one.
 
 ## Endpoints
 
@@ -356,3 +364,4 @@ launch. Now the path is routed: real characters return data, and unknown ones ge
 [tierlist]: https://wowforevertierlist.com/armory
 [forum-works]: https://us.forums.blizzard.com/en/blizzard/t/wow-forever-api-what-works-so-far-plus-a-ts-client/60334
 [goldbook-houses]: https://github.com/jkc-be/goldbook/issues/96
+[phantom-armory]: https://accountshark.net/blog/phantom-armory-wow-forever-update
