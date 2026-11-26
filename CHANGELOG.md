@@ -2,6 +2,12 @@
 
 What changed in each zesquad release. Versions are dates (CalVer).
 
+## 2026.11.25.11
+
+### Features
+
+- **web**: Filter the auction overview by faction and ruleset ([1bc196a](https://github.com/tinnet/zesquad/commit/1bc196a3194bd3817cbde4d7878b24de88e7a9ae))
+
 ## 2026.11.25.10
 
 ### Features
