@@ -2,6 +2,12 @@
 
 What changed in each zesquad release. Versions are dates (CalVer).
 
+## 2026.11.25.10
+
+### Features
+
+- **web**: Estimate how many of an item sell a day ([1610cb1](https://github.com/tinnet/zesquad/commit/1610cb11a0bca613b0614f303a77ac59db05425a))
+
 ## 2026.11.25.9
 
 ### Performance
