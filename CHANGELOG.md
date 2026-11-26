@@ -2,6 +2,12 @@
 
 What changed in each zesquad release. Versions are dates (CalVer).
 
+## 2026.11.26
+
+### Features
+
+- **web**: Link each character card to its page on Blizzard's Armory ([4ce6c5c](https://github.com/tinnet/zesquad/commit/4ce6c5cd9674790e11c91fe6ab61b5cd59ada10f))
+
 ## 2026.11.25.12
 
 ### Features
