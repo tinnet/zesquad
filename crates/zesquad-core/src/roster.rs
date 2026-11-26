@@ -58,8 +58,9 @@ impl Sort {
     }
 
     /// Orders `a` before `b`. Numbers go highest (or most recent) first, and characters the
-    /// Armory hasn't told us the number for go last. Ties go by name, then by when they were
-    /// added, so the order never depends on how the list came in.
+    /// Armory hasn't told us the number for go last. Item level ties, including characters
+    /// without one, go by level, and level ties by item level. Then ties go by name, then by when they were added, so the
+    /// order never depends on how the list came in.
     #[must_use]
     pub fn compare(self, a: &Entry, b: &Entry) -> Ordering {
         let by_name = || a.name.cmp(&b.name).then(a.added.cmp(&b.added));
@@ -72,8 +73,12 @@ impl Sort {
         match self {
             Self::Added => a.added.cmp(&b.added),
             Self::Name => by_name(),
-            Self::Level => highest_first(a.level, b.level).then_with(by_name),
-            Self::ItemLevel => highest_first(a.item_level, b.item_level).then_with(by_name),
+            Self::Level => highest_first(a.level, b.level)
+                .then(highest_first(a.item_level, b.item_level))
+                .then_with(by_name),
+            Self::ItemLevel => highest_first(a.item_level, b.item_level)
+                .then(highest_first(a.level, b.level))
+                .then_with(by_name),
             Self::LastPlayed => highest_first(a.last_played, b.last_played).then_with(by_name),
         }
     }
@@ -187,6 +192,32 @@ mod tests {
             sorted(Sort::Added, entries),
             ["cora", "abel", "bram", "aida"]
         );
+    }
+
+    #[test]
+    fn level_and_item_level_break_each_others_ties() {
+        let with = |added, name: &str, level, item_level| Entry {
+            item_level,
+            ..entry(added, name, level)
+        };
+        let entries = vec![
+            with(0, "abel", Some(14), None),
+            with(1, "bram", Some(60), None),
+            with(2, "cora", Some(20), Some(18)),
+            with(3, "dana", Some(30), Some(18)),
+            with(4, "eda", None, None),
+            with(5, "finn", Some(10), Some(25)),
+        ];
+        assert_eq!(
+            sorted(Sort::ItemLevel, entries),
+            ["finn", "dana", "cora", "bram", "abel", "eda"]
+        );
+        let entries = vec![
+            with(0, "abel", Some(60), None),
+            with(1, "bram", Some(60), Some(40)),
+            with(2, "cora", Some(60), Some(55)),
+        ];
+        assert_eq!(sorted(Sort::Level, entries), ["cora", "bram", "abel"]);
     }
 
     #[test]
