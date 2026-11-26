@@ -2,6 +2,16 @@
 
 What changed in each zesquad release. Versions are dates (CalVer).
 
+## 2026.11.25.12
+
+### Features
+
+- **web**: Break item level ties by level when sorting the roster ([4931c1b](https://github.com/tinnet/zesquad/commit/4931c1b3774d9065212e4b301739af6cf5800ff2))
+
+### Documentation
+
+- Note that recently saved characters have no item level ([1fe72e0](https://github.com/tinnet/zesquad/commit/1fe72e05269196141a32dfc637b9e8cfd4e2e890))
+
 ## 2026.11.25.11
 
 ### Features
