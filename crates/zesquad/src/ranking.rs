@@ -14,7 +14,7 @@ use crate::db;
 
 /// The stored format and ranking rules. Bump it when either changes, so rankings stored by an
 /// older version are ranked again instead of read.
-pub const VERSION: i64 = 1;
+pub const VERSION: i64 = 2;
 /// Rows each overview list keeps.
 pub const ROWS: usize = 8;
 /// The pools whose factions' prices are compared; a gap's `pool` indexes this.
@@ -35,6 +35,8 @@ pub struct Ranked {
     pub gaps: Vec<market::Gap>,
     pub bargains: Vec<market::Bargain>,
     pub biggest: Vec<market::Market>,
+    /// What sold for the most a day over the day before the latest snapshot.
+    pub sold: Vec<market::Sold>,
 }
 
 impl Ranked {
@@ -48,6 +50,7 @@ impl Ranked {
             .chain(self.gaps.iter().map(|g| g.item))
             .chain(self.bargains.iter().map(|b| b.item))
             .chain(self.biggest.iter().map(|m| m.item))
+            .chain(self.sold.iter().map(|s| s.item))
             .collect()
     }
 
@@ -84,16 +87,26 @@ async fn source(db: &SqlitePool, region: Region) -> anyhow::Result<String> {
 }
 
 /// Ranks `region`'s houses from scratch: the last day's movers, faction gaps, listings under
-/// the vendor price and the biggest markets.
+/// the vendor price, the biggest markets and what sold most in the 24 hours up to the latest
+/// snapshot (not up to now, so the ranking only changes with its [`source`]).
 async fn rank(db: &SqlitePool, region: Region) -> anyhow::Result<Ranked> {
     let houses = houses(region);
     let vendor = db::vendor_prices(db).await?;
     let mut latest: Vec<Vec<ItemPrices>> = Vec::new();
     let mut days = Vec::new();
+    let mut latest_at = None;
     for house in &houses {
         let prices = db::latest_auctions(db, region, house.id).await?;
+        latest_at = latest_at.max(prices.as_ref().map(|&(at, _)| at));
         latest.push(prices.map_or_else(Vec::new, |(_, p)| p));
         days.push(db::condensed_through(db, region, house.id).await?);
+    }
+    let mut sold = Vec::new();
+    if let Some(at) = latest_at {
+        for house in &houses {
+            let since = at - auctions::DAY;
+            sold.push(db::sales_since(db, region, house.id, None, since).await?);
+        }
     }
     // Moves are from the region's last finished day; a house that's behind (its fetches failing,
     // say) is left out rather than mixing in an older day.
@@ -126,6 +139,7 @@ async fn rank(db: &SqlitePool, region: Region) -> anyhow::Result<Ranked> {
     let all: Vec<&[ItemPrices]> = latest.iter().map(Vec::as_slice).collect();
     Ok(Ranked {
         biggest: market::biggest(&all, ROWS),
+        sold: market::most_sold(&sold, ROWS),
         houses,
         last_day,
         rising,

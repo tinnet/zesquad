@@ -1,5 +1,5 @@
 //! The auction house overview: what moved, where the factions disagree, what sells for less
-//! than a vendor pays, and the biggest markets. Pure ranking over prices read elsewhere.
+//! than a vendor pays, the biggest markets and what sells most. Pure ranking over prices read elsewhere.
 //!
 //! Forever's markets are thin and jumpy: one cheap stack bought out can turn a 2c median into
 //! 4s overnight, which is real but not news. So moves compare finished days (the median of a
@@ -11,7 +11,8 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::auctions::ItemPrices;
+use crate::auctions::{DAY, ItemPrices};
+use crate::sales::Sales;
 
 /// One item's typical price over a finished day in one house.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -237,6 +238,48 @@ pub fn biggest(houses: &[&[ItemPrices]], n: usize) -> Vec<Market> {
     markets
 }
 
+/// Time compared (see [`crate::sales`]) a house needs for its sales to count: a few hours of a
+/// day is a guess at the day.
+pub const MIN_COMPARED: i64 = 6 * 3_600;
+
+/// One item's sales across a region's houses, per day.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Sold {
+    pub item: u32,
+    /// Units a day.
+    pub units: u64,
+    /// What they sold for a day, copper.
+    pub value: u64,
+}
+
+/// The `n` items that sold for the most a day across `houses`, most first. Each house's sales
+/// are scaled to a day by the time it was compared; houses compared for less than
+/// [`MIN_COMPARED`] are left out.
+#[must_use]
+pub fn most_sold(houses: &[Sales], n: usize) -> Vec<Sold> {
+    let a_day = |n: u64, seconds: i64| {
+        let seconds = u128::try_from(seconds).unwrap_or(1).max(1);
+        let scaled = u128::from(n) * u128::from(DAY.unsigned_abs()) / seconds;
+        u64::try_from(scaled).unwrap_or(u64::MAX)
+    };
+    let mut by_item: BTreeMap<u32, Sold> = BTreeMap::new();
+    for house in houses.iter().filter(|h| h.seconds >= MIN_COMPARED) {
+        for s in &house.items {
+            let sold = by_item.entry(s.item).or_insert(Sold {
+                item: s.item,
+                units: 0,
+                value: 0,
+            });
+            sold.units = sold.units.saturating_add(a_day(s.sold, house.seconds));
+            sold.value = sold.value.saturating_add(a_day(s.value, house.seconds));
+        }
+    }
+    let mut sold: Vec<Sold> = by_item.into_values().collect();
+    sold.sort_by(|a, b| b.value.cmp(&a.value).then(a.item.cmp(&b.item)));
+    sold.truncate(n);
+    sold
+}
+
 /// A change for people: `+35%` and `−20%` for small ones, `×2.5` and `÷225` from doubling or
 /// halving up.
 #[must_use]
@@ -319,6 +362,41 @@ mod tests {
             quantity: auctions * 10,
             auctions,
         }
+    }
+
+    #[test]
+    fn most_sold_by_money_a_day() {
+        use crate::sales::{ItemSales, Sales};
+        let sales = |seconds, items: &[(u32, u64, u64)]| Sales {
+            seconds,
+            items: items
+                .iter()
+                .map(|&(item, sold, value)| ItemSales { item, sold, value })
+                .collect(),
+        };
+        let houses = [
+            // Half a day: counts double.
+            sales(DAY / 2, &[(1, 10, 1_000), (2, 1, 5_000)]),
+            sales(DAY, &[(1, 4, 400), (3, 100, 100)]),
+            // Too little compared to count.
+            sales(MIN_COMPARED - 1, &[(4, 1, 1_000_000)]),
+        ];
+        assert_eq!(
+            most_sold(&houses, 2),
+            [
+                Sold {
+                    item: 2,
+                    units: 2,
+                    value: 10_000
+                },
+                Sold {
+                    item: 1,
+                    units: 24,
+                    value: 2_400
+                },
+            ]
+        );
+        assert_eq!(most_sold(&[], 5), []);
     }
 
     #[test]

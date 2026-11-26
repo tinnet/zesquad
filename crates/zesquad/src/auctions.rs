@@ -9,6 +9,7 @@ use anyhow::Context as _;
 use sqlx::SqlitePool;
 use zesquad_core::auctions::{self, House};
 use zesquad_core::items::{self, Source};
+use zesquad_core::sales::{self, Listing};
 
 use crate::archive::Archive;
 use crate::armory::{Client, Dump, Lookup, RateLimited};
@@ -207,8 +208,9 @@ impl AuctionSync {
         db::condense_auctions(&self.db, house.region, house.id, now, KEEP_DAYS).await
     }
 
-    /// Fetches a house now and stores a snapshot if its dumps changed. Fails only on database
-    /// errors; Battle.net errors are stored for the house instead.
+    /// Fetches a house now and stores a snapshot if its dumps changed, with what sold since the
+    /// last one. Fails only on database errors; Battle.net errors are stored for the house
+    /// instead.
     ///
     /// # Errors
     ///
@@ -220,12 +222,37 @@ impl AuctionSync {
                 tracing::debug!(region = %house.region, house = house.id, "auction house not modified");
                 db::auctions_unchanged(&self.db, house.region, house.id, now).await?;
             }
-            Ok(Some((snapshot, modified))) => {
-                let items = snapshot.items.len();
-                let stored =
-                    db::store_auctions(&self.db, house.region, house.id, now, &snapshot).await?;
-                db::set_auctions_modified(&self.db, house.region, house.id, &modified).await?;
-                tracing::info!(region = %house.region, house = house.id, items, stored, "auction house checked");
+            Ok(Some(fetched)) => {
+                let items = fetched.snapshot.items.len();
+                let before = db::last_listings(&self.db, house.region, house.id).await?;
+                let taken = fetched.taken.unwrap_or(now);
+                let listings = fetched.listings;
+                let comparable = fetched.both_new;
+                let (packed, sales) = tokio::task::spawn_blocking(move || {
+                    compare(before, &listings, taken, comparable)
+                })
+                .await??;
+                let turnover = db::Turnover {
+                    taken,
+                    listings: &packed,
+                    sales: sales.as_ref(),
+                };
+                let stored = db::store_auctions_with(
+                    &self.db,
+                    house.region,
+                    house.id,
+                    now,
+                    &fetched.snapshot,
+                    Some(&turnover),
+                )
+                .await?;
+                db::set_auctions_modified(&self.db, house.region, house.id, &fetched.modified)
+                    .await?;
+                let sold: u64 = sales.iter().flat_map(|s| &s.items).map(|s| s.sold).sum();
+                tracing::info!(
+                    region = %house.region, house = house.id, items, stored,
+                    compared = sales.is_some(), sold, "auction house checked"
+                );
             }
             Err(e) => {
                 tracing::warn!(region = %house.region, house = house.id, "auction house fetch failed: {e:#}");
@@ -236,7 +263,7 @@ impl AuctionSync {
         Ok(())
     }
 
-    /// Both dumps of a house read into a snapshot, with their `Last-Modified`; `None` when
+    /// Both dumps of a house read, with their `Last-Modified`; `None` when
     /// neither changed since `modified`. Each is asked for with `If-Modified-Since`, which
     /// Battle.net answers with a 304 and no body when the dump hasn't changed: polite, and
     /// saves downloading megabytes three checks out of four.
@@ -245,7 +272,7 @@ impl AuctionSync {
         house: House,
         modified: &db::DumpsModified,
         now: i64,
-    ) -> anyhow::Result<Option<(auctions::Snapshot, db::DumpsModified)>> {
+    ) -> anyhow::Result<Option<Fetched>> {
         let (region, id) = (house.region, house.id);
         let items = self
             .client
@@ -311,16 +338,66 @@ impl AuctionSync {
             }
         }
         // Reading 50 MB of JSON takes a while; keep it off the threads serving pages.
-        let snapshot =
-            tokio::task::spawn_blocking(move || auctions::snapshot(&[&items, &commodities]))
+        let (snapshot, listings) =
+            tokio::task::spawn_blocking(move || auctions::read(&[&items, &commodities]))
                 .await?
                 .context("Battle.net sent auctions in an unexpected shape")?;
-        Ok(Some((
+        let taken = [&items_modified, &commodities_modified]
+            .into_iter()
+            .filter_map(|m| httpdate::parse_http_date(m.as_deref()?).ok())
+            .max()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .and_then(|d| i64::try_from(d.as_secs()).ok());
+        Ok(Some(Fetched {
             snapshot,
-            db::DumpsModified {
+            listings,
+            taken,
+            both_new: new.0 && new.1,
+            modified: db::DumpsModified {
                 items: items_modified,
                 commodities: commodities_modified,
             },
-        )))
+        }))
     }
+}
+
+/// A house's dumps, read.
+struct Fetched {
+    snapshot: auctions::Snapshot,
+    /// Every auction, sorted by id.
+    listings: Vec<Listing>,
+    /// When Battle.net made the dumps, from their `Last-Modified`.
+    taken: Option<i64>,
+    /// Battle.net said both dumps were new: neither was fetched again only to make a whole
+    /// snapshot, so both follow on from the last ones stored.
+    both_new: bool,
+    modified: db::DumpsModified,
+}
+
+/// zstd level for the listings kept: they're rewritten hourly, so fast beats small.
+const LISTINGS_LEVEL: i32 = 3;
+
+/// Compares `listings`, made at `taken`, with the ones kept from the last snapshot (`before`,
+/// see [`db::last_listings`]) when `comparable`, and packs them to keep in turn. Kept listings
+/// that can't be read (from an older format, say) are only logged: the next snapshot compares.
+fn compare(
+    before: Option<(i64, Vec<u8>)>,
+    listings: &[Listing],
+    taken: i64,
+    comparable: bool,
+) -> anyhow::Result<(Vec<u8>, Option<sales::Sales>)> {
+    let sales = before.filter(|_| comparable).and_then(|(then, packed)| {
+        let unpacked = zstd::stream::decode_all(packed.as_slice())
+            .map_err(anyhow::Error::from)
+            .and_then(|bytes| Ok(sales::decode(&bytes)?));
+        match unpacked {
+            Ok(before) => sales::compare(&before, listings, taken - then),
+            Err(e) => {
+                tracing::warn!("kept auction listings unreadable: {e:#}");
+                None
+            }
+        }
+    });
+    let packed = zstd::bulk::compress(&sales::encode(listings), LISTINGS_LEVEL)?;
+    Ok((packed, sales))
 }

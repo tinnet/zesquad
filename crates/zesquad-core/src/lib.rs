@@ -19,6 +19,7 @@ pub mod refresh;
 pub mod region;
 pub mod retry;
 pub mod roster;
+pub mod sales;
 pub mod sparkline;
 pub mod squad_id;
 pub mod tags;

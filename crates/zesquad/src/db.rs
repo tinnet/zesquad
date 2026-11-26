@@ -15,6 +15,7 @@ use zesquad_core::auctions;
 use zesquad_core::discord::Webhook;
 use zesquad_core::guild::{self, Guild, Member as GuildMember, Slug};
 use zesquad_core::refresh::{Status, is_due};
+use zesquad_core::sales;
 use zesquad_core::tags::Colour;
 use zesquad_core::{CharacterName, Region, SquadName, Tag};
 
@@ -1402,6 +1403,34 @@ pub async fn store_auctions(
     at: i64,
     snapshot: &auctions::Snapshot,
 ) -> anyhow::Result<bool> {
+    store_auctions_with(db, region, house, at, snapshot, None).await
+}
+
+/// What a snapshot's dumps add for estimating sales (see [`zesquad_core::sales`]).
+#[derive(Debug)]
+pub struct Turnover<'a> {
+    /// When Battle.net made the dumps.
+    pub taken: i64,
+    /// Their listings, encoded and compressed, to compare the next dumps with.
+    pub listings: &'a [u8],
+    /// What sold since the snapshot before, when the two could be compared.
+    pub sales: Option<&'a sales::Sales>,
+}
+
+/// Like [`store_auctions`], and with `turnover` keeps the listings for next time and stores
+/// the sales, if the snapshot is stored.
+///
+/// # Errors
+///
+/// On database errors.
+pub async fn store_auctions_with(
+    db: &SqlitePool,
+    region: Region,
+    house: u32,
+    at: i64,
+    snapshot: &auctions::Snapshot,
+    turnover: Option<&Turnover<'_>>,
+) -> anyhow::Result<bool> {
     let fingerprint = format!("{:016x}", snapshot.fingerprint);
     let mut tx = begin_write(db).await?;
     let last: Option<(Option<String>,)> =
@@ -1441,15 +1470,44 @@ pub async fn store_auctions(
         .bind(at)
         .execute(&mut *tx)
         .await?;
+        let sales = turnover.and_then(|t| t.sales);
         sqlx::query(
-            "INSERT OR REPLACE INTO auction_snapshot_times (region, house, at, items) VALUES (?, ?, ?, ?)",
+            "INSERT OR REPLACE INTO auction_snapshot_times (region, house, at, items, compared)
+             VALUES (?, ?, ?, ?, ?)",
         )
         .bind(region.as_str())
         .bind(house)
         .bind(at)
         .bind(i64::try_from(snapshot.items.len()).unwrap_or(i64::MAX))
+        .bind(sales.map(|s| s.seconds))
         .execute(&mut *tx)
         .await?;
+        for s in sales.map_or(&[][..], |s| &s.items) {
+            sqlx::query(
+                "INSERT OR REPLACE INTO auction_sales (region, house, at, item, sold, value)
+                 VALUES (?, ?, ?, ?, ?, ?)",
+            )
+            .bind(region.as_str())
+            .bind(house)
+            .bind(at)
+            .bind(s.item)
+            .bind(int(s.sold))
+            .bind(int(s.value))
+            .execute(&mut *tx)
+            .await?;
+        }
+        if let Some(t) = turnover {
+            sqlx::query(
+                "INSERT OR REPLACE INTO auction_listings (region, house, taken, listings)
+                 VALUES (?, ?, ?, ?)",
+            )
+            .bind(region.as_str())
+            .bind(house)
+            .bind(t.taken)
+            .bind(t.listings)
+            .execute(&mut *tx)
+            .await?;
+        }
     }
     sqlx::query(
         "INSERT INTO auction_houses (region, house, checked_at, fingerprint) VALUES (?, ?, ?, ?)
@@ -1464,6 +1522,26 @@ pub async fn store_auctions(
     .await?;
     tx.commit().await?;
     Ok(changed)
+}
+
+/// The listings kept from a house's last stored snapshot (see [`Turnover`]): when Battle.net
+/// made them, and their bytes.
+///
+/// # Errors
+///
+/// On database errors.
+pub async fn last_listings(
+    db: &SqlitePool,
+    region: Region,
+    house: u32,
+) -> anyhow::Result<Option<(i64, Vec<u8>)>> {
+    Ok(sqlx::query_as(
+        "SELECT taken, listings FROM auction_listings WHERE region = ? AND house = ?",
+    )
+    .bind(region.as_str())
+    .bind(house)
+    .fetch_optional(db)
+    .await?)
 }
 
 /// The `Last-Modified` of a house's items and commodities dumps in its last stored snapshot.
@@ -1784,6 +1862,7 @@ pub async fn condense_auctions(
                 .execute(&mut *tx)
                 .await?;
             }
+            condense_sales(&mut tx, region, house, day).await?;
             sqlx::query(
                 "UPDATE auction_houses SET condensed_through = ? WHERE region = ? AND house = ?",
             )
@@ -1810,8 +1889,102 @@ pub async fn condense_auctions(
             .bind(keep_from)
             .execute(db)
             .await?;
+        sqlx::query("DELETE FROM auction_sales WHERE region = ? AND house = ? AND at < ?")
+            .bind(region.as_str())
+            .bind(house)
+            .bind(keep_from)
+            .execute(db)
+            .await?;
     }
     Ok(())
+}
+
+/// Condenses a house's sales on `day` into `auction_daily_sales`, and how much of the day was
+/// compared into `auction_days`.
+async fn condense_sales(
+    tx: &mut sqlx::Transaction<'static, sqlx::Sqlite>,
+    region: Region,
+    house: u32,
+    day: i64,
+) -> sqlx::Result<()> {
+    let start = day * auctions::DAY;
+    sqlx::query(
+        "INSERT OR REPLACE INTO auction_daily_sales (region, house, day, item, sold, value)
+         SELECT region, house, ?, item, SUM(sold), SUM(value) FROM auction_sales
+         WHERE region = ? AND house = ? AND at >= ? AND at < ?
+         GROUP BY item",
+    )
+    .bind(day)
+    .bind(region.as_str())
+    .bind(house)
+    .bind(start)
+    .bind(start + auctions::DAY)
+    .execute(&mut **tx)
+    .await?;
+    sqlx::query(
+        "INSERT OR REPLACE INTO auction_days (region, house, day, compared)
+         SELECT ?, ?, ?, SUM(compared) FROM auction_snapshot_times
+         WHERE region = ? AND house = ? AND at >= ? AND at < ?
+         HAVING SUM(compared) > 0",
+    )
+    .bind(region.as_str())
+    .bind(house)
+    .bind(day)
+    .bind(region.as_str())
+    .bind(house)
+    .bind(start)
+    .bind(start + auctions::DAY)
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
+}
+
+/// A house's sales since `since`, of `items` or (with `None`) every item, by item; `seconds`
+/// is how much of that time was compared.
+///
+/// # Errors
+///
+/// On database errors.
+pub async fn sales_since(
+    db: &SqlitePool,
+    region: Region,
+    house: u32,
+    items: Option<&[u32]>,
+    since: i64,
+) -> anyhow::Result<sales::Sales> {
+    let (seconds,): (i64,) = sqlx::query_as(
+        "SELECT COALESCE(SUM(compared), 0) FROM auction_snapshot_times
+         WHERE region = ? AND house = ? AND at >= ?",
+    )
+    .bind(region.as_str())
+    .bind(house)
+    .bind(since)
+    .fetch_one(db)
+    .await?;
+    let items = items.map(serde_json::to_string).transpose()?;
+    let rows: Vec<(u32, i64, i64)> = sqlx::query_as(
+        "SELECT item, SUM(sold), SUM(value) FROM auction_sales
+         WHERE region = ?1 AND house = ?2 AND at >= ?3
+           AND (?4 IS NULL OR item IN (SELECT value FROM json_each(?4)))
+         GROUP BY item ORDER BY item",
+    )
+    .bind(region.as_str())
+    .bind(house)
+    .bind(since)
+    .bind(items)
+    .fetch_all(db)
+    .await?;
+    Ok(sales::Sales {
+        seconds,
+        items: rows
+            .into_iter()
+            .map(|(item, sold, value)| sales::ItemSales {
+                item,
+                sold: uint(sold),
+                value: uint(value),
+            })
+            .collect(),
+    })
 }
 
 /// How collecting a house's prices is going.
@@ -2131,6 +2304,119 @@ mod tests {
                 .len(),
             1
         );
+    }
+
+    #[tokio::test]
+    async fn sales_are_kept_with_their_snapshot_then_condensed() {
+        use zesquad_core::sales::{ItemSales, Sales};
+
+        let (_dir, db) = temp_db().await;
+        let first_day = 20_000 * DAY;
+        let sold = |item, sold, value| ItemSales { item, sold, value };
+        // Day 0: the first snapshot (nothing to compare), then two compared an hour apart;
+        // day 1: one more.
+        let rounds = [
+            (first_day, None),
+            (first_day + 3_600, Some(vec![sold(2589, 4, 40)])),
+            (
+                first_day + 7_200,
+                Some(vec![sold(2589, 2, 30), sold(4306, 1, 150)]),
+            ),
+            (first_day + DAY, Some(vec![sold(2589, 1, 10)])),
+        ];
+        for (i, (at, items)) in rounds.into_iter().enumerate() {
+            let sales = items.map(|items| Sales {
+                seconds: 3_600,
+                items,
+            });
+            let listings = [u8::try_from(i).unwrap()];
+            let turnover = Turnover {
+                taken: at - 60,
+                listings: &listings,
+                sales: sales.as_ref(),
+            };
+            let snapshot = snapshot(i as u64, 10);
+            store_auctions_with(&db, Region::Eu, 110, at, &snapshot, Some(&turnover))
+                .await
+                .unwrap();
+        }
+        // The last listings are kept for the next dumps.
+        assert_eq!(
+            last_listings(&db, Region::Eu, 110).await.unwrap(),
+            Some((first_day + DAY - 60, vec![3]))
+        );
+        // A repeat of the last auctions keeps nothing new.
+        let turnover = Turnover {
+            taken: first_day + DAY + 3_540,
+            listings: &[9],
+            sales: Some(&Sales {
+                seconds: 3_600,
+                items: vec![sold(2589, 99, 990)],
+            }),
+        };
+        let repeat = snapshot(3, 10);
+        let stored = store_auctions_with(
+            &db,
+            Region::Eu,
+            110,
+            first_day + DAY + 3_600,
+            &repeat,
+            Some(&turnover),
+        )
+        .await
+        .unwrap();
+        assert!(!stored);
+        assert_eq!(
+            last_listings(&db, Region::Eu, 110).await.unwrap(),
+            Some((first_day + DAY - 60, vec![3]))
+        );
+
+        // Day 0's sales, summed, over the two hours compared; other houses have none.
+        let first = sales_since(&db, Region::Eu, 110, None, first_day)
+            .await
+            .unwrap();
+        assert_eq!(first.seconds, 3 * 3_600);
+        assert_eq!(first.items, [sold(2589, 7, 80), sold(4306, 1, 150)]);
+        let only = sales_since(&db, Region::Eu, 110, Some(&[4306]), first_day)
+            .await
+            .unwrap();
+        assert_eq!(only.items, [sold(4306, 1, 150)]);
+        assert_eq!(
+            sales_since(&db, Region::Eu, 111, None, first_day)
+                .await
+                .unwrap(),
+            Sales::default()
+        );
+
+        // Condensed by day, and pruned with the snapshots a week on.
+        condense_auctions(&db, Region::Eu, 110, first_day + 8 * DAY, 7)
+            .await
+            .unwrap();
+        let daily: Vec<(i64, u32, i64, i64)> = sqlx::query_as(
+            "SELECT day, item, sold, value FROM auction_daily_sales ORDER BY day, item",
+        )
+        .fetch_all(&db)
+        .await
+        .unwrap();
+        assert_eq!(
+            daily,
+            [
+                (20_000, 2589, 6, 70),
+                (20_000, 4306, 1, 150),
+                (20_001, 2589, 1, 10)
+            ]
+        );
+        let days: Vec<(i64, i64)> =
+            sqlx::query_as("SELECT day, compared FROM auction_days ORDER BY day")
+                .fetch_all(&db)
+                .await
+                .unwrap();
+        assert_eq!(days, [(20_000, 7_200), (20_001, 3_600)]);
+        let left: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM auction_sales")
+            .fetch_one(&db)
+            .await
+            .unwrap();
+        assert_eq!(left.0, 1, "day 1's stay within the week");
     }
 
     #[tokio::test]

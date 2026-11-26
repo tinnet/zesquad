@@ -32,7 +32,7 @@
 {%- if regions.is_empty() || regions[0].rows.is_empty() %}
 <p class="empty">No item seen at the auction houses has a name like that. Names are still being looked up, so a few may be missing.</p>
 {%- else %}
-<p class="hint">Price per unit now, how it moved over the last 7 days, and its lowest and highest in that time.{% if more %} Only the first {{ regions[0].rows.len() }} matches are shown; type more to narrow it down.{% endif %}</p>
+<p class="hint">Price per unit now, how it moved over the last 7 days, its lowest and highest in that time, and about how many sell a day (auctions gone between hourly dumps while they still had hours left, so bought or cancelled).{% if more %} Only the first {{ regions[0].rows.len() }} matches are shown; type more to narrow it down.{% endif %}</p>
 {%- endif %}
 {%- else if let Some(o) = overview %}
 <h2>Market overview</h2>
@@ -97,6 +97,7 @@
         </svg>
         {%- endif %}
         <span class="sub range">{% call coins(c.low) %}{% endcall %} – {% call coins(c.high) %}{% endcall %}</span>
+        {%- if let Some(n) = c.sold %}<span class="sub sold">{{ n }} sold a day</span>{% endif %}
       </td>
       {%- else %}
       <td class="num"><span class="sub">no data</span></td>
@@ -116,7 +117,7 @@
 <summary>How prices are collected
   {%- if failing > 0 %} <span class="error">· {{ failing }} house{% if failing != 1 %}s{% endif %} failing</span>{% endif %}</summary>
 {%- if enabled %}
-<p class="hint">Prices are collected from Battle.net about hourly. Snapshots are kept for a week, then only daily prices.</p>
+<p class="hint">Prices are collected from Battle.net about hourly. Snapshots are kept for a week, then only daily prices. Sales are estimated by matching each auction from one hourly dump to the next.</p>
 {%- endif %}
 <div class="table-wrap">
 <table class="data">

@@ -51,6 +51,8 @@ struct Fake {
     items_limited: Arc<AtomicBool>,
     /// Item media requests.
     media_requests: Arc<AtomicUsize>,
+    /// House 110 serves its next dumps (see [`next_dump`]).
+    next_dumps: Arc<AtomicBool>,
 }
 
 /// Whether a request to the fake Battle.net carries the app's token.
@@ -149,6 +151,31 @@ fn fixture(name: &str) -> String {
 
 /// When the fake's auction dumps last changed.
 const DUMPS_MODIFIED: &str = "Fri, 20 Nov 2026 20:23:48 GMT";
+/// When house 110's next dumps were made, an hour later.
+const NEXT_MODIFIED: &str = "Fri, 20 Nov 2026 21:23:48 GMT";
+
+/// House 110's fixture dumps an hour on: 1001 (11208, 16s, long left) and 1002 (11208, short
+/// left) are gone, so is 2004 (3 of 2592 at 60c, long left), 8 of 2001's 20 of 2589 (10c) were
+/// bought, and 3000 is new.
+fn next_dump(commodities: bool) -> String {
+    let name = if commodities {
+        "commodities"
+    } else {
+        "auctions"
+    };
+    let mut dump: serde_json::Value = serde_json::from_str(&fixture(name)).unwrap();
+    let auctions = dump["auctions"].as_array_mut().unwrap();
+    auctions.retain(|a| ![1001, 1002, 2004].contains(&a["id"].as_u64().unwrap()));
+    if commodities {
+        for a in auctions.iter_mut().filter(|a| a["id"] == 2001) {
+            a["quantity"] = 12.into();
+        }
+        auctions.push(serde_json::json!(
+            {"id": 3000, "item": {"id": 2589}, "quantity": 5, "unit_price": 11, "time_left": "VERY_LONG"}
+        ));
+    }
+    dump.to_string()
+}
 
 /// A player's token from the fake login, and the code it's swapped for.
 const USER_TOKEN: &str = "test-user-token";
@@ -306,16 +333,19 @@ async fn fake_auctions(
     if (region, house) == ("us", "111") {
         return StatusCode::SERVICE_UNAVAILABLE.into_response();
     }
+    let next = house == "110" && fake.next_dumps.load(Ordering::SeqCst);
     // EU house 113's commodities changed later than the rest.
-    let modified = if (region, house, commodities) == ("eu", "113", true) {
-        "Fri, 20 Nov 2026 21:23:48 GMT"
+    let modified = if (region, house, commodities) == ("eu", "113", true) || next {
+        NEXT_MODIFIED
     } else {
         DUMPS_MODIFIED
     };
     if since == Some(DUMPS_MODIFIED) && modified == DUMPS_MODIFIED {
         return StatusCode::NOT_MODIFIED.into_response();
     }
-    let body = if house == "110" {
+    let body = if next {
+        next_dump(commodities)
+    } else if house == "110" {
         let name = if commodities {
             "commodities"
         } else {
@@ -502,6 +532,8 @@ struct App {
     base: String,
     http: reqwest::Client,
     fake: Fake,
+    /// Where the fake Battle.net listens.
+    fake_url: String,
     dir: TempDir,
 }
 
@@ -579,6 +611,7 @@ async fn app_tweaked(
             .build()
             .unwrap(),
         fake,
+        fake_url,
         dir,
     }
 }
@@ -2574,7 +2607,8 @@ async fn the_auction_overview_shows_moves_gaps_bargains_and_big_markets() {
             "Falling",
             "Faction gaps",
             "Under the vendor price",
-            "Biggest markets"
+            "Biggest markets",
+            "Most sold"
         ]
     );
     let squash = |s: &str| s.split_whitespace().collect::<Vec<_>>().join(" ");
@@ -3057,6 +3091,90 @@ async fn unchanged_auction_dumps_are_not_downloaded_again() {
             .unwrap()
             .checked_at,
         Some(2_000)
+    );
+}
+
+#[tokio::test]
+async fn sales_are_estimated_from_auctions_gone_by_the_next_dump() {
+    use zesquad::auctions::AuctionSync;
+    use zesquad::db;
+    use zesquad_core::auctions::followed;
+    use zesquad_core::sales::ItemSales;
+
+    let app = app_with_auctions(true, None, true).await;
+    let page = app
+        .wait_for("/auctions", "1 in neither, 5 with icons.")
+        .await;
+    assert!(page.contains("Nothing yet: this needs a few hours of hourly dumps to compare."));
+    let db = app.db().await;
+    let config = zesquad::armory::Config::new(
+        CLIENT_ID.into(),
+        CLIENT_SECRET.into(),
+        Some(&app.fake_url),
+        &format!("{}/token", app.fake_url),
+    )
+    .unwrap();
+    let sync = AuctionSync {
+        db: db.clone(),
+        client: Arc::new(zesquad::armory::Client::new(config).unwrap()),
+        archive: None,
+    };
+    let eu110 = followed()
+        .find(|h| h.region == Region::Eu && h.id == 110)
+        .unwrap();
+
+    // The first dumps were stored with nothing to compare them with.
+    let week = db::now() - 7 * 86_400;
+    let sales = db::sales_since(&db, Region::Eu, 110, None, week)
+        .await
+        .unwrap();
+    assert_eq!((sales.seconds, sales.items.len()), (0, 0));
+
+    // An hour on (by Last-Modified), what's gone with hours left, or shrank, sold; 1002 had
+    // under half an hour left and may have expired, so it doesn't count.
+    app.fake.next_dumps.store(true, Ordering::SeqCst);
+    sync.update(eu110, db::now() + 1).await.unwrap();
+    let sales = db::sales_since(&db, Region::Eu, 110, None, week)
+        .await
+        .unwrap();
+    let sold = |item, sold, value| ItemSales { item, sold, value };
+    assert_eq!(sales.seconds, 3_600);
+    assert_eq!(
+        sales.items,
+        [sold(2589, 8, 80), sold(2592, 3, 180), sold(11208, 1, 1_600)]
+    );
+
+    // An hour compared is too little to show a rate; five more hours without sales make six.
+    let (_, page) = app.get("/auctions?q=made-up").await;
+    assert!(!page.contains("sold a day"), "{page}");
+    for hour in 1..=5 {
+        sqlx::query(
+            "INSERT INTO auction_snapshot_times (region, house, at, items, compared)
+             VALUES ('eu', 110, ?, 0, 3600)",
+        )
+        .bind(db::now() - hour * 3_600)
+        .execute(&db)
+        .await
+        .unwrap();
+    }
+
+    // A search says about how many sell a day: 8 in 6 hours is 32.
+    let (_, page) = app.get("/auctions?q=made-up%20item%202589").await;
+    assert!(
+        page.contains(r#"<span class="sub sold">≈32 sold a day</span>"#),
+        "{page}"
+    );
+    assert!(page.contains("2 snapshots, about 32 sold a day"), "{page}");
+
+    // The overview ranks what sold for the most a day: 4 of 11208 at 16s is 64s.
+    let (_, page) = app.get("/auctions").await;
+    let lists = overview_lists(&page);
+    let (title, rows) = lists.last().unwrap();
+    assert_eq!(title, "Most sold");
+    let squash = |s: &str| s.split_whitespace().collect::<Vec<_>>().join(" ");
+    assert_eq!(
+        squash(rows),
+        "Made-up Item 11208 4 64s Made-up Item 2592 12 7s 20c Made-up Item 2589 32 3s 20c"
     );
 }
 

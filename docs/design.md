@@ -40,7 +40,9 @@ erDiagram
 - `guilds` holds one row per `(region, slug)` someone opened a page for, apart from squads, and
   `guild_documents` its guild and roster JSON, like `armory` and `armory_documents` (see Guilds).
 - `auction_houses`, `auction_snapshots`, `auction_snapshot_times` and `auction_daily` hold
-  auction prices by region and house, apart from squads (see Auction prices).
+  auction prices by region and house, apart from squads (see Auction prices);
+  `auction_listings`, `auction_sales`, `auction_daily_sales` and `auction_days` the sales
+  estimated from them (see Sales).
 - `armory_documents` keeps each endpoint's raw JSON from the last good fetch; the pages parse it
   the first time a character is shown after a fetch and keep the result in memory. Showing a new
   field needs no refetch, and a failed fetch keeps the old data.
@@ -104,6 +106,8 @@ through the houses:
   snapshots' medians, average units, number of snapshots. `condensed_through` remembers how far.
 - Snapshots older than seven whole days are deleted, but never before their day is condensed.
 
+- Each stored snapshot is compared with the one before to estimate what sold (see Sales).
+
 Sizes, measured on 2026-11-20: a big house has about 6,600-7,000 different items, so a round of
 snapshots is about 54,000 rows, 2.2 MB in SQLite. Hourly for a week that's about 9 million
 rows, under 400 MB. `auction_daily` grows by the same 2.2 MB a day, about 800 MB a year.
@@ -137,6 +141,9 @@ first), ranked in `zesquad_core::market`, eight items a list, each linking to it
 - **Under the vendor price**: listings now cheaper than what a vendor pays
   (`items.sell_price`), by profit per unit.
 - **Biggest markets**: units on sale times the median, summed over the region's houses.
+- **Most sold**: what sold for the most in the 24 hours up to the region's latest snapshot
+  (see Sales; not up to now, so the stored ranking stays current), each house scaled to a day
+  by the time it compared, summed over the region's houses.
 
 Ranking a region reads its latest snapshots and two days of `auction_daily`, about 90k rows and
 half a second on the server, so it's stored in `auction_rankings` (`crate::ranking`) with what it
@@ -165,6 +172,32 @@ as failed.
 
 A failed fetch is logged and stored in `auction_houses.error`, and tried again on the next
 check; the house's snapshots stay.
+
+### Sales
+
+Battle.net doesn't say what sold, but each auction keeps its id while it's up
+(`zesquad_core::sales`). Every snapshot's auctions are kept as listings (id, item, units, unit
+price, `time_left`), varint-packed (about 10 bytes each, under 3 MB for a big house) and
+zstd-compressed, in `auction_listings`, one row per house, replaced with each stored snapshot.
+The next snapshot is compared with them:
+
+- Gone, with more time left than passed between the dumps: sold. `time_left` is a band (see
+  Auction houses in `docs/battlenet-api.md`), so an hour apart that means `LONG` and
+  `VERY_LONG`; anything shorter may have expired and doesn't count.
+- Still up with fewer units (part of a commodity stack bought): the difference sold.
+- Cancelled auctions look like sales, so items people undercut and relist often read high;
+  auctions listed and bought within the hour are never seen, so quick sellers read low. Pages
+  call it an estimate.
+
+The time between dumps is their `Last-Modified`, not our fetch times. Dumps are only compared
+when both were new (neither fetched again just to complete the snapshot) and at most two hours
+apart; past that, `LONG` auctions could have expired too. Sales go in `auction_sales` by item,
+with the snapshot, and the time compared in `auction_snapshot_times.compared`, so sales read as
+a rate per day over however much was compared. Finished days are condensed into
+`auction_daily_sales` and `auction_days` and the rows pruned with the snapshots.
+
+A search shows about how many sold a day over the last week under each price, once a house has
+six hours compared (`zesquad_core::market::MIN_COMPARED`); the overview has Most sold.
 
 ### Raw dumps
 

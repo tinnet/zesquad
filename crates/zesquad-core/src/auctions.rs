@@ -6,6 +6,7 @@ use std::collections::BTreeMap;
 use serde::Deserialize;
 
 use crate::Region;
+use crate::sales::{Listing, TimeLeft};
 
 /// Every ruleset lists the same houses with the same auctions, so any one does; this is Normal.
 pub const RULESET: u32 = 2;
@@ -189,6 +190,8 @@ struct Auction {
     quantity: u64,
     buyout: Option<u64>,
     unit_price: Option<u64>,
+    #[serde(default)]
+    time_left: TimeLeft,
 }
 
 #[derive(Deserialize)]
@@ -211,11 +214,30 @@ impl Auction {
 ///
 /// When a dump isn't the JSON expected.
 pub fn snapshot(dumps: &[&str]) -> Result<Snapshot, serde_json::Error> {
+    read(dumps).map(|(snapshot, _)| snapshot)
+}
+
+/// Like [`snapshot`], with every auction as a listing too, sorted by id, to compare with the
+/// next dump (see [`crate::sales`]).
+///
+/// # Errors
+///
+/// When a dump isn't the JSON expected.
+pub fn read(dumps: &[&str]) -> Result<(Snapshot, Vec<Listing>), serde_json::Error> {
     let mut by_item: BTreeMap<u32, Vec<(u64, u64)>> = BTreeMap::new();
+    let mut listings = Vec::new();
     let mut fingerprint: u64 = 0;
     for dump in dumps {
         let dump: Dump = serde_json::from_str(dump)?;
+        listings.reserve(dump.auctions.len());
         for auction in dump.auctions {
+            listings.push(Listing {
+                id: auction.id,
+                item: auction.item.id,
+                quantity: auction.quantity,
+                unit_price: auction.unit_price(),
+                time_left: auction.time_left,
+            });
             // Order-independent: a sum of the ids, spread out so near ids don't cancel.
             fingerprint = fingerprint.wrapping_add(auction.id.wrapping_mul(0x9E37_79B9_7F4A_7C15));
             fingerprint = fingerprint.wrapping_add(1);
@@ -242,7 +264,8 @@ pub fn snapshot(dumps: &[&str]) -> Result<Snapshot, serde_json::Error> {
             }
         })
         .collect();
-    Ok(Snapshot { items, fingerprint })
+    listings.sort_unstable_by_key(|l| l.id);
+    Ok((Snapshot { items, fingerprint }, listings))
 }
 
 /// The lower median of `(value, weight)` pairs sorted by value, each value counted `weight`
@@ -370,6 +393,37 @@ mod tests {
                 prices(19019, 4_000_000, 4_000_000, 2, 2),
             ]
         );
+    }
+
+    #[test]
+    fn every_auction_is_listed_by_id() {
+        let (items, commodities) = (fixture("auctions"), fixture("commodities"));
+        let (_, listings) = read(&[&commodities, &items]).unwrap();
+        let ids: Vec<u64> = listings.iter().map(|l| l.id).collect();
+        assert!(ids.is_sorted() && ids.len() == 13, "{ids:?}");
+        assert_eq!(
+            listings[1],
+            Listing {
+                id: 1002,
+                item: 11208,
+                quantity: 1,
+                unit_price: Some(1401),
+                time_left: TimeLeft::Short,
+            }
+        );
+        // Bid-only, and a whole buyout split per unit.
+        assert_eq!(listings[6].unit_price, None);
+        assert_eq!(
+            (listings[5].quantity, listings[5].unit_price),
+            (2, Some(150))
+        );
+        assert_eq!(listings[3].time_left, TimeLeft::VeryLong);
+        // Missing or unknown, it may be about to expire.
+        let odd = r#"{"auctions":[
+            {"id":1,"item":{"id":5},"quantity":1,"buyout":10},
+            {"id":2,"item":{"id":5},"quantity":1,"buyout":10,"time_left":"FOREVER"}]}"#;
+        let (_, listings) = read(&[odd]).unwrap();
+        assert!(listings.iter().all(|l| l.time_left == TimeLeft::Unknown));
     }
 
     #[test]

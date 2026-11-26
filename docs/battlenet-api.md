@@ -214,6 +214,13 @@ Forever has no realms (see Verified), so auctions hang off **rulesets** instead,
   | 112, 115, 118 | 0 | 0 |
 - **Items and commodities are separate**: no auction id or item id is in both dumps of a house.
   Item auctions all had `quantity` 1; 5 of 148,941 had no `buyout` (bid only).
+- **Auction ids and `time_left`** are what zesquad estimates sales from (`zesquad_core::sales`):
+  an auction gone by the next dump, with more time left than passed, was bought or cancelled.
+  `time_left` is `SHORT`, `MEDIUM`, `LONG` or `VERY_LONG`, the bands the game shows: under 30
+  minutes, 30 minutes to 2 hours, 2 to 12 hours, over 12 hours (retail's `AUCTION_TIME_LEFT*`
+  strings). **Not verified on Forever** yet: the bands, that an auction keeps its id while it's
+  up, and that a partly bought commodity auction keeps its id with a smaller `quantity` (as on
+  retail). The archived dumps can check all three.
 - **Size**: one big house is about 150k item auctions (28 MB of formatted JSON) plus 125k
   commodity auctions (19 MB); about 2.6 MB gzipped. Both dumps arrive in a few seconds with
   `Accept-Encoding: gzip`.

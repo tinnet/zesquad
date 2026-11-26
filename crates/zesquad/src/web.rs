@@ -25,6 +25,7 @@ use zesquad_core::market;
 use zesquad_core::recent::Recent;
 use zesquad_core::refresh::Status;
 use zesquad_core::roster::{self as order, Sort};
+use zesquad_core::sales;
 use zesquad_core::sparkline::{Sparkline, sparkline};
 use zesquad_core::tags::{self, CharacterTag, Colour};
 use zesquad_core::{CharacterName, Region, SquadName, Tag, parse_tags};
@@ -1948,6 +1949,8 @@ struct PriceCell {
     /// For the tooltip.
     summary: String,
     line: Option<Sparkline>,
+    /// Units sold a day, estimated (`≈3`, `<1`); `None` until enough was compared.
+    sold: Option<String>,
 }
 
 /// How far back the price lines go.
@@ -1990,6 +1993,11 @@ async fn auctions_page(
 
         let ranges = db::price_ranges(&state.db, house.region, house.id, &ids, since).await?;
         let series = db::price_series(&state.db, house.region, house.id, &ids, since).await?;
+        let sold = if ids.is_empty() {
+            sales::Sales::default()
+        } else {
+            db::sales_since(&state.db, house.region, house.id, Some(&ids), since).await?
+        };
         if regions.last().is_none_or(|r| r.region != house.region) {
             regions.push(RegionPrices {
                 region: house.region,
@@ -2011,30 +2019,9 @@ async fn auctions_page(
         };
         region.houses.push(house);
         for (row, &item) in region.rows.iter_mut().zip(&ids) {
-            let points: Vec<(i64, u64)> = series
-                .iter()
-                .filter(|p| p.item == item)
-                .map(|p| (p.at, p.median))
-                .collect();
-            row.cells.push(
-                ranges
-                    .iter()
-                    .find(|r| r.item == item)
-                    .zip(points.last())
-                    .map(|(r, &(_, latest))| PriceCell {
-                        now: Money::from_copper(latest),
-                        low: Money::brief(r.min),
-                        high: Money::brief(r.max),
-                        summary: format!(
-                            "{PRICE_DAYS} days: average {}, lowest {}, highest {}, {} snapshots",
-                            auctions::money(r.avg),
-                            auctions::money(r.min),
-                            auctions::money(r.max),
-                            r.snapshots
-                        ),
-                        line: sparkline(&points, since, now, SPARK_WIDTH, SPARK_HEIGHT, SPARK_PAD),
-                    }),
-            );
+            let window = (since, now);
+            row.cells
+                .push(price_cell(item, &ranges, &series, &sold, window));
         }
     }
     Ok(AuctionsPage {
@@ -2048,6 +2035,58 @@ async fn auctions_page(
         regions,
         items: db::item_counts(&state.db).await?,
         spark: (SPARK_WIDTH, SPARK_HEIGHT),
+    })
+}
+
+/// An item's cell in one house: its prices from `ranges` and `series` and its sales from
+/// `sold`, over `(since, now)`. `None` when it wasn't on sale.
+fn price_cell(
+    item: u32,
+    ranges: &[db::PriceRange],
+    series: &[db::PricePoint],
+    sold: &sales::Sales,
+    (since, now): (i64, i64),
+) -> Option<PriceCell> {
+    let points: Vec<(i64, u64)> = series
+        .iter()
+        .filter(|p| p.item == item)
+        .map(|p| (p.at, p.median))
+        .collect();
+    let per_day = (sold.seconds >= market::MIN_COMPARED)
+        .then(|| {
+            let units = sold
+                .items
+                .iter()
+                .find(|s| s.item == item)
+                .map_or(0, |s| s.sold);
+            sales::per_day(units, sold.seconds).map(sales::rate)
+        })
+        .flatten();
+    let r = ranges.iter().find(|r| r.item == item)?;
+    let &(_, latest) = points.last()?;
+    Some(PriceCell {
+        now: Money::from_copper(latest),
+        low: Money::brief(r.min),
+        high: Money::brief(r.max),
+        summary: format!(
+            "{PRICE_DAYS} days: average {}, lowest {}, highest {}, {} snapshots{}",
+            auctions::money(r.avg),
+            auctions::money(r.min),
+            auctions::money(r.max),
+            r.snapshots,
+            per_day
+                .as_ref()
+                .map_or_else(String::new, |n| format!(", about {n} sold a day")),
+        ),
+        line: sparkline(&points, since, now, SPARK_WIDTH, SPARK_HEIGHT, SPARK_PAD),
+        // `<1` is already a bound; an estimate of a number gets `≈`.
+        sold: per_day.map(|n| {
+            if n.starts_with('<') {
+                n
+            } else {
+                format!("≈{n}")
+            }
+        }),
     })
 }
 
@@ -2165,6 +2204,9 @@ const GAPS_HINT: &str = "The same item now on both factions' houses of a pool, b
     by the difference times the units on sale. A neutral auction house can carry it across.";
 const BIGGEST_HINT: &str =
     "What's on sale now in all four houses, by its worth at the median price.";
+const SOLD_HINT: &str = "What sold for the most over the last 24 hours in all four houses, \
+    per day. An estimate: auctions gone from one hourly dump to the next while they still had \
+    hours left, so bought or cancelled; ones bought within the hour aren't seen.";
 
 fn overview_lists(r: &Ranked, known: &HashMap<u32, db::FoundItem>) -> Vec<OverviewList> {
     let move_row = |m: &market::Move| {
@@ -2258,7 +2300,27 @@ fn overview_lists(r: &Ranked, known: &HashMap<u32, db::FoundItem>) -> Vec<Overvi
                 })
                 .collect(),
         },
+        sold_list(r, known),
     ]
+}
+
+/// The overview's list of what sold most.
+fn sold_list(r: &Ranked, known: &HashMap<u32, db::FoundItem>) -> OverviewList {
+    OverviewList {
+        title: "Most sold",
+        hint: SOLD_HINT.to_owned(),
+        empty: "Nothing yet: this needs a few hours of hourly dumps to compare.",
+        heads: vec!["Units a day", "Worth a day"],
+        rows: r
+            .sold
+            .iter()
+            .map(|s| {
+                let worth = Figure::coins(Money::brief(s.value), "");
+                let units = Figure::text(s.units.to_string(), "");
+                item_row(known, s.item, (String::new(), ""), vec![units, worth])
+            })
+            .collect(),
+    }
 }
 
 // ---- guilds ----
