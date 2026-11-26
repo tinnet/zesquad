@@ -138,8 +138,14 @@ first), ranked in `zesquad_core::market`, eight items a list, each linking to it
   (`items.sell_price`), by profit per unit.
 - **Biggest markets**: units on sale times the median, summed over the region's houses.
 
-It reads the region's latest snapshots and two days of `auction_daily`, about 60k rows. At the
-bottom, folded away by default as it's internals, is how collecting is going for each house and
+Ranking a region reads its latest snapshots and two days of `auction_daily`, about 90k rows and
+half a second on the server, so it's stored in `auction_rankings` (`crate::ranking`) with what it
+was ranked from: each house's latest snapshot and last condensed day, and when item details last
+changed. The auction task ranks a region again after a round that changed any of those, and the
+page reads the stored ranking, a few kilobytes. The page checks the same few values first and
+ranks on the spot when they differ, so it's never stale, only slow when the task hasn't got to
+it (or isn't running). Change how it ranks or what it stores and bump `ranking::VERSION`, so
+older rankings are ranked again instead of read. At the bottom, folded away by default as it's internals, is how collecting is going for each house and
 how far item details have got; its summary says when a house is failing.
 
 The same task fills in `items`, the details of every item seen (a row is added for each new item

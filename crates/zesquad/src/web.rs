@@ -30,6 +30,7 @@ use zesquad_core::tags::{self, CharacterTag, Colour};
 use zesquad_core::{CharacterName, Region, SquadName, Tag, parse_tags};
 
 use crate::db;
+use crate::ranking::{self, Ranked};
 use crate::version;
 
 #[derive(Clone)]
@@ -2052,11 +2053,6 @@ async fn auctions_page(
 
 // ---- auction overview ----
 
-/// Rows each overview list shows.
-const OVERVIEW_ROWS: usize = 8;
-/// The pools whose factions' prices are compared; a gap's `pool` indexes this.
-const POOLS: [auctions::Pool; 2] = [auctions::Pool::Pvp, auctions::Pool::Pve];
-
 /// What's going on in one region's houses, when nothing was searched.
 struct Overview {
     region: Region,
@@ -2131,102 +2127,9 @@ fn overview_region(asked: Option<&str>, default: Region) -> Region {
         .unwrap_or(auctions::REGIONS[0])
 }
 
-/// The rankings behind the overview of one region.
-struct Ranked {
-    houses: Vec<auctions::House>,
-    /// The last finished day the moves are from.
-    last_day: Option<i64>,
-    rising: Vec<market::Move>,
-    falling: Vec<market::Move>,
-    gaps: Vec<market::Gap>,
-    bargains: Vec<market::Bargain>,
-    biggest: Vec<market::Market>,
-}
-
-impl Ranked {
-    /// Every item ranked, for looking their names up.
-    fn items(&self) -> Vec<u32> {
-        self.rising
-            .iter()
-            .chain(&self.falling)
-            .map(|m| m.item)
-            .chain(self.gaps.iter().map(|g| g.item))
-            .chain(self.bargains.iter().map(|b| b.item))
-            .chain(self.biggest.iter().map(|m| m.item))
-            .collect()
-    }
-
-    /// A house's label and the class colouring it.
-    fn house(&self, i: usize) -> (String, &'static str) {
-        let house = self.houses[i];
-        let class = match house.faction {
-            auctions::Faction::Alliance => "faction-alliance",
-            auctions::Faction::Horde => "faction-horde",
-        };
-        (house.label(), class)
-    }
-}
-
-/// Ranks `region`'s houses: the last day's movers, faction gaps, listings under the vendor
-/// price and the biggest markets. Reads the latest snapshots and two days of daily prices,
-/// about 60k rows, a few tens of milliseconds.
-async fn rank_market(db: &SqlitePool, region: Region) -> anyhow::Result<Ranked> {
-    use zesquad_core::auctions::{Faction, ItemPrices};
-
-    let houses: Vec<auctions::House> = auctions::followed()
-        .filter(|h| h.region == region)
-        .collect();
-    let vendor = db::vendor_prices(db).await?;
-    let mut latest: Vec<Vec<ItemPrices>> = Vec::new();
-    let mut days = Vec::new();
-    for house in &houses {
-        let prices = db::latest_auctions(db, region, house.id).await?;
-        latest.push(prices.map_or_else(Vec::new, |(_, p)| p));
-        days.push(db::condensed_through(db, region, house.id).await?);
-    }
-    // Moves are from the region's last finished day; a house that's behind (its fetches failing,
-    // say) is left out rather than mixing in an older day.
-    let last_day = days.iter().copied().max().flatten();
-    let mut moves = Vec::new();
-    for (i, house) in houses.iter().enumerate() {
-        if let Some(day) = last_day.filter(|&d| days[i] == Some(d)) {
-            let now = db::day_prices(db, region, house.id, day).await?;
-            let before = db::day_prices(db, region, house.id, day - 1).await?;
-            moves.extend(market::moves(i, &before, &now));
-        }
-    }
-    let (rising, falling) = market::rising_and_falling(moves, OVERVIEW_ROWS);
-    let mut gaps = Vec::new();
-    for (p, pool) in POOLS.into_iter().enumerate() {
-        let side = |faction| {
-            houses
-                .iter()
-                .position(|h| h.pool == pool && h.faction == faction)
-        };
-        if let (Some(a), Some(h)) = (side(Faction::Alliance), side(Faction::Horde)) {
-            gaps.extend(market::gaps(p, &latest[a], &latest[h]));
-        }
-    }
-    let bargains = latest
-        .iter()
-        .enumerate()
-        .flat_map(|(i, prices)| market::under_vendor(i, prices, |id| vendor.get(&id).copied()))
-        .collect();
-    let all: Vec<&[ItemPrices]> = latest.iter().map(Vec::as_slice).collect();
-    Ok(Ranked {
-        biggest: market::biggest(&all, OVERVIEW_ROWS),
-        houses,
-        last_day,
-        rising,
-        falling,
-        gaps: market::top_gaps(gaps, OVERVIEW_ROWS),
-        bargains: market::top_bargains(bargains, OVERVIEW_ROWS),
-    })
-}
-
 /// The overview of `region`'s houses, with the items' names.
 async fn overview(db: &SqlitePool, region: Region) -> anyhow::Result<Overview> {
-    let ranked = rank_market(db, region).await?;
+    let ranked = ranking::load(db, region, db::now()).await?;
     let known: HashMap<u32, db::FoundItem> = db::items_by_id(db, &ranked.items())
         .await?
         .into_iter()
@@ -2319,7 +2222,7 @@ fn overview_lists(r: &Ranked, known: &HashMap<u32, db::FoundItem>) -> Vec<Overvi
                     item_row(
                         known,
                         g.item,
-                        (format!("{} houses", POOLS[g.pool].name()), ""),
+                        (format!("{} houses", ranking::POOLS[g.pool].name()), ""),
                         figures,
                     )
                 })

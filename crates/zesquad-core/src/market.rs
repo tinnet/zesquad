@@ -9,6 +9,8 @@
 
 use std::collections::BTreeMap;
 
+use serde::{Deserialize, Serialize};
+
 use crate::auctions::ItemPrices;
 
 /// One item's typical price over a finished day in one house.
@@ -31,7 +33,7 @@ pub const MIN_SNAPSHOTS: u64 = 12;
 pub const MIN_AUCTIONS: u64 = 5;
 
 /// An item's price in one house from one day to the next. `house` is the caller's index.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Move {
     pub item: u32,
     pub house: usize,
@@ -88,7 +90,7 @@ pub fn rising_and_falling(moves: Vec<Move>, n: usize) -> (Vec<Move>, Vec<Move>) 
 }
 
 /// One item's price on both factions' houses of a pool.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Gap {
     pub item: u32,
     /// The caller's index of the pool.
@@ -153,7 +155,7 @@ pub fn top_gaps(all: Vec<Gap>, n: usize) -> Vec<Gap> {
 }
 
 /// A listing a vendor would pay more for than it costs.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Bargain {
     pub item: u32,
     pub house: usize,
@@ -203,7 +205,7 @@ pub fn top_bargains(all: Vec<Bargain>, n: usize) -> Vec<Bargain> {
 }
 
 /// One item's market across a region's houses.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Market {
     pub item: u32,
     /// Copper's worth on sale.

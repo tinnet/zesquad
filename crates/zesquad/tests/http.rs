@@ -2623,6 +2623,82 @@ async fn the_auction_overview_shows_moves_gaps_bargains_and_big_markets() {
     assert!(page.contains(r#"class="chip on" aria-current="page">Europe</a>"#));
 }
 
+#[tokio::test]
+async fn the_auction_overview_is_ranked_once_until_its_data_changes() {
+    use zesquad::{db, ranking};
+    use zesquad_core::auctions::{ItemPrices, Snapshot};
+
+    let app = app_with_auctions(false, None, false).await;
+    let db = app.db().await;
+    seed_overview(&db).await;
+    let stored = async || db::ranking(&db, Region::Eu).await.unwrap();
+    assert_eq!(stored().await, None);
+
+    // The first visit ranks and stores it; the sync then finds nothing to do.
+    let (_, page) = app.get("/auctions").await;
+    let first = stored().await.expect("stored by the visit");
+    assert_eq!(first.version, ranking::VERSION);
+    let gaps = |page: &str| {
+        let rows = overview_lists(page)[2].1.clone();
+        rows.split_whitespace().collect::<Vec<_>>().join(" ")
+    };
+    assert!(gaps(&page).contains("PvE houses 10c 50c"));
+    let now = db::now();
+    assert!(!ranking::refresh(&db, Region::Eu, now).await.unwrap());
+
+    // What's stored is what's shown: a ranking that only changed in the database shows as is.
+    let changed = first.ranked.replace("\"horde\":50", "\"horde\":70");
+    assert_ne!(changed, first.ranked);
+    let edited = db::StoredRanking {
+        ranked: changed,
+        ..first.clone()
+    };
+    db::store_ranking(&db, Region::Eu, &edited, now)
+        .await
+        .unwrap();
+    let (_, page) = app.get("/auctions").await;
+    assert!(
+        gaps(&page).contains("PvE houses 10c 70c"),
+        "read, not ranked"
+    );
+
+    // A new snapshot makes it stale: the sync ranks it again.
+    let snapshot = Snapshot {
+        items: vec![ItemPrices {
+            item: 2589,
+            min_price: 90,
+            median_price: 90,
+            quantity: 60,
+            auctions: 6,
+        }],
+        fingerprint: 1,
+    };
+    db::store_auctions(&db, Region::Eu, 114, now + 120, &snapshot)
+        .await
+        .unwrap();
+    assert!(ranking::refresh(&db, Region::Eu, now).await.unwrap());
+    assert_ne!(stored().await.unwrap().source, first.source);
+    let (_, page) = app.get("/auctions").await;
+    assert!(gaps(&page).contains("PvE houses 10c 90c"));
+
+    // So does a new version of the rules, or a ranking that can't be read.
+    for broken in [
+        db::StoredRanking {
+            version: ranking::VERSION - 1,
+            ..stored().await.unwrap()
+        },
+        db::StoredRanking {
+            ranked: "{}".into(),
+            ..stored().await.unwrap()
+        },
+    ] {
+        db::store_ranking(&db, Region::Eu, &broken, now)
+            .await
+            .unwrap();
+        assert!(ranking::refresh(&db, Region::Eu, now).await.unwrap());
+    }
+}
+
 // For the overview: two whole days of hourly snapshots of EU Horde PvP, condensed as the sync
 // does (2589 goes from 1s to 4s 50c, Light Leather halves, 4306 jumps but has too little on
 // sale to count), and EU's PvE houses now, with 2589 five times dearer on the Horde side.

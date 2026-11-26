@@ -12,6 +12,7 @@ pub mod db;
 pub mod discord;
 pub mod limits;
 pub mod login;
+pub mod ranking;
 mod s3;
 mod sync;
 pub mod version;

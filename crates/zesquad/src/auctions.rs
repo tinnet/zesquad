@@ -13,6 +13,7 @@ use zesquad_core::items::{self, Source};
 use crate::archive::Archive;
 use crate::armory::{Client, Dump, Lookup, RateLimited};
 use crate::db;
+use crate::ranking;
 
 /// How often the loop looks for houses to check.
 const TICK: Duration = Duration::from_mins(1);
@@ -47,6 +48,7 @@ impl AuctionSync {
                     tracing::warn!(region = %house.region, house = house.id, "auction house check failed: {e:#}");
                 }
             }
+            self.rank().await;
             if let Err(e) = self.learn_items().await {
                 tracing::warn!("storing item details failed: {e:#}");
             }
@@ -61,6 +63,17 @@ impl AuctionSync {
                 }
             }
             tokio::time::sleep(TICK).await;
+        }
+    }
+
+    /// Ranks each region's overview again if its data changed (see [`ranking::refresh`]).
+    pub async fn rank(&self) {
+        for region in auctions::REGIONS {
+            match ranking::refresh(&self.db, region, db::now()).await {
+                Ok(true) => tracing::info!(%region, "auction overview ranked"),
+                Ok(false) => {}
+                Err(e) => tracing::warn!(%region, "ranking the auction overview failed: {e:#}"),
+            }
         }
     }
 

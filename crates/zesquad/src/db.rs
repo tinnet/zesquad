@@ -1571,16 +1571,16 @@ pub async fn auctions_failed(
     Ok(())
 }
 
-/// The latest snapshot of a house: when it was taken and its prices by item.
+/// When the latest snapshot of a house with any items was taken.
 ///
 /// # Errors
 ///
 /// On database errors.
-pub async fn latest_auctions(
+pub async fn latest_snapshot_at(
     db: &SqlitePool,
     region: Region,
     house: u32,
-) -> anyhow::Result<Option<(i64, Vec<auctions::ItemPrices>)>> {
+) -> anyhow::Result<Option<i64>> {
     // From the snapshot list, not the snapshots: counting those reads every row of the house
     // (880k a week), where this is one row per snapshot.
     let at: Option<(i64,)> = sqlx::query_as(
@@ -1591,10 +1591,79 @@ pub async fn latest_auctions(
     .bind(house)
     .fetch_optional(db)
     .await?;
-    let Some((at,)) = at else {
+    Ok(at.map(|(at,)| at))
+}
+
+/// The latest snapshot of a house: when it was taken and its prices by item.
+///
+/// # Errors
+///
+/// On database errors.
+pub async fn latest_auctions(
+    db: &SqlitePool,
+    region: Region,
+    house: u32,
+) -> anyhow::Result<Option<(i64, Vec<auctions::ItemPrices>)>> {
+    let Some(at) = latest_snapshot_at(db, region, house).await? else {
         return Ok(None);
     };
     Ok(Some((at, snapshots(db, region, house, at, at + 1).await?)))
+}
+
+/// A region's stored market ranking (see `crate::ranking`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StoredRanking {
+    /// The format and rules it was ranked with.
+    pub version: i64,
+    /// What it was ranked from: the houses and how far their data went.
+    pub source: String,
+    /// The ranking, JSON.
+    pub ranked: String,
+}
+
+/// `region`'s stored market ranking, if any.
+///
+/// # Errors
+///
+/// On database errors.
+pub async fn ranking(db: &SqlitePool, region: Region) -> anyhow::Result<Option<StoredRanking>> {
+    let row: Option<(i64, String, String)> =
+        sqlx::query_as("SELECT version, source, ranked FROM auction_rankings WHERE region = ?")
+            .bind(region.as_str())
+            .fetch_optional(db)
+            .await?;
+    Ok(row.map(|(version, source, ranked)| StoredRanking {
+        version,
+        source,
+        ranked,
+    }))
+}
+
+/// Stores `region`'s market ranking, replacing the one before.
+///
+/// # Errors
+///
+/// On database errors.
+pub async fn store_ranking(
+    db: &SqlitePool,
+    region: Region,
+    ranking: &StoredRanking,
+    at: i64,
+) -> anyhow::Result<()> {
+    sqlx::query(
+        "INSERT INTO auction_rankings (region, version, source, ranked, ranked_at)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT (region) DO UPDATE SET version = excluded.version,
+             source = excluded.source, ranked = excluded.ranked, ranked_at = excluded.ranked_at",
+    )
+    .bind(region.as_str())
+    .bind(ranking.version)
+    .bind(&ranking.source)
+    .bind(&ranking.ranked)
+    .bind(at)
+    .execute(db)
+    .await?;
+    Ok(())
 }
 
 /// A house's item prices from snapshots in `[from, to)`, by item, then time.
@@ -2446,6 +2515,18 @@ pub async fn vendor_prices(db: &SqlitePool) -> anyhow::Result<HashMap<u32, u64>>
             .fetch_all(db)
             .await?;
     Ok(rows.into_iter().map(|(id, p)| (id, uint(p))).collect())
+}
+
+/// When item details (and so vendor prices) were last stored; `None` before any were.
+///
+/// # Errors
+///
+/// On database errors.
+pub async fn items_changed_at(db: &SqlitePool) -> anyhow::Result<Option<i64>> {
+    let (at,): (Option<i64>,) = sqlx::query_as("SELECT MAX(fetched_at) FROM items")
+        .fetch_one(db)
+        .await?;
+    Ok(at)
 }
 
 /// The last finished day condensed for a house (days since the epoch, UTC), if any.
