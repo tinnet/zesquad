@@ -2,7 +2,7 @@
 
 What changed in each zesquad release. Versions are dates (CalVer).
 
-## 2026.11.27
+## 2026.11.27.1
 
 ### Fixes
 
