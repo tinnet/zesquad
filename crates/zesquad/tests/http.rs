@@ -2614,7 +2614,8 @@ async fn the_auction_overview_shows_moves_gaps_bargains_and_big_markets() {
             "Faction gaps",
             "Under the vendor price",
             "Biggest markets",
-            "Most sold"
+            "Most sold",
+            "Cooldown crafts"
         ]
     );
     let squash = |s: &str| s.split_whitespace().collect::<Vec<_>>().join(" ");
@@ -2724,6 +2725,68 @@ async fn the_auction_overview_narrows_to_a_faction_and_a_ruleset() {
     let (status, page) = app.get("/auctions?faction=goblin&ruleset=rp").await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(picked(&page), ["Europe", "Both", "All"]);
+}
+
+#[tokio::test]
+async fn the_auction_overview_says_what_cooldown_crafts_make() {
+    use zesquad::db;
+    use zesquad_core::auctions::{ItemPrices, Snapshot};
+
+    let app = app_with_auctions(false, None, false).await;
+    let db = app.db().await;
+    let price = |item, median| ItemPrices {
+        item,
+        min_price: median,
+        median_price: median,
+        quantity: 10,
+        auctions: 3,
+    };
+    let now = db::now();
+    // Mooncloth (14342) from two Felcloth (14256): 85s profit on Horde PvP after the 5% cut,
+    // 45c on Alliance PvP. Legionite (251290 from 251291 and 248819) loses 50s. Arcanite's crystal isn't on
+    // sale, so it isn't shown.
+    for (house, items) in [
+        (113, vec![price(14256, 10_000), price(14342, 30_000)]),
+        (
+            110,
+            vec![
+                price(14256, 10_000),
+                price(14342, 21_100),
+                price(251_291, 10_000),
+                price(248_819, 14_000),
+                price(251_290, 20_000),
+                price(12359, 5_000),
+                price(12360, 400_000),
+            ],
+        ),
+    ] {
+        let snapshot = Snapshot {
+            items,
+            fingerprint: u64::from(house),
+        };
+        db::store_auctions(&db, Region::Eu, house, now, &snapshot)
+            .await
+            .unwrap();
+    }
+
+    let (_, page) = app.get("/auctions").await;
+    let lists = overview_lists(&page);
+    let (_, rows) = lists.iter().find(|(t, _)| t == "Cooldown crafts").unwrap();
+    let squash = |s: &str| s.split_whitespace().collect::<Vec<_>>().join(" ");
+    assert_eq!(
+        squash(rows),
+        "Item 14342from 2 × Item 14256 · Horde PvP 2g 3g 85s \
+         Item 251290from Item 251291, Item 248819 · Alliance PvP 2g 40s 2g −50s"
+    );
+
+    // Alliance alone: Mooncloth's best house there.
+    let (_, page) = app.get("/auctions?faction=alliance").await;
+    let lists = overview_lists(&page);
+    let (_, rows) = lists.iter().find(|(t, _)| t == "Cooldown crafts").unwrap();
+    assert!(
+        squash(rows).starts_with("Item 14342from 2 × Item 14256 · Alliance PvP 2g 2g 11s 45c"),
+        "{rows}"
+    );
 }
 
 /// The overview's picked filter choices, in order.
@@ -3249,8 +3312,7 @@ async fn sales_are_estimated_from_auctions_gone_by_the_next_dump() {
     // The overview ranks what sold for the most a day: 4 of 11208 at 16s is 64s.
     let (_, page) = app.get("/auctions").await;
     let lists = overview_lists(&page);
-    let (title, rows) = lists.last().unwrap();
-    assert_eq!(title, "Most sold");
+    let (_, rows) = lists.iter().find(|(t, _)| t == "Most sold").unwrap();
     let squash = |s: &str| s.split_whitespace().collect::<Vec<_>>().join(" ");
     assert_eq!(
         squash(rows),

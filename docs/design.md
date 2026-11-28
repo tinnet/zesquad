@@ -148,6 +148,13 @@ at Both or All is left out of the link, and an unknown value counts as all.
 - **Most sold**: what sold for the most in the 24 hours up to the region's latest snapshot
   (see Sales; not up to now, so the stored ranking stays current), each house scaled to a day
   by the time it compared, summed over the region's houses.
+- **Cooldown crafts**: the crafts made once every day or few (`market::CRAFTS`: Mooncloth,
+  Arcanite, Forever's Legionite and Refined Deeprock Salt, as in [wow.gg's cooldown
+  guide](https://wow.gg/guides/wow-forever-profession-cooldowns-goldmaking); the Legionite ids
+  from [gamemaps](https://www.gamemaps.net/game/wow_forever/spells/1317279-transmute-legionite)), each in the house where it
+  pays best: the reagents at their median now against the result's median less the 5% auction
+  cut. All of them, losses too. A margin stores its index into `CRAFTS`, so changing the list
+  means bumping `ranking::VERSION`.
 
 Ranking a region reads its latest snapshots and two days of `auction_daily`, about 90k rows and
 half a second on the server, so it's stored in `auction_rankings` (`crate::ranking`) with what it

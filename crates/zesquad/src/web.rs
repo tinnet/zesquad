@@ -2222,7 +2222,8 @@ struct OverviewRow {
     figures: Vec<Figure>,
 }
 
-/// A number in an overview row: money, or text such as a change.
+/// A number in an overview row: money, or text such as a change; money's text goes before it
+/// (a sign).
 struct Figure {
     money: Option<Money>,
     text: String,
@@ -2240,6 +2241,19 @@ impl Figure {
             money: Some(money),
             text: String::new(),
             class,
+        }
+    }
+
+    /// A gain or, with a minus sign, a loss.
+    fn signed(copper: i64) -> Self {
+        let coins = Money::from_copper(copper.unsigned_abs());
+        if copper < 0 {
+            Self {
+                text: "−".to_owned(),
+                ..Self::coins(coins, "down")
+            }
+        } else {
+            Self::coins(coins, "up")
         }
     }
 
@@ -2404,6 +2418,7 @@ fn overview_lists(
                 .collect(),
         },
         sold_list(r, scope, known),
+        crafts_list(r, known),
     ]
 }
 
@@ -2430,6 +2445,49 @@ fn sold_list(
                 let worth = Figure::coins(Money::brief(s.value), "");
                 let units = Figure::text(s.units.to_string(), "");
                 item_row(known, s.item, (String::new(), ""), vec![units, worth])
+            })
+            .collect(),
+    }
+}
+
+/// The overview's list of what cooldown crafts make.
+fn crafts_list(r: &Ranked, known: &HashMap<u32, db::FoundItem>) -> OverviewList {
+    let name = |item: u32| {
+        known
+            .get(&item)
+            .map_or_else(|| format!("Item {item}"), |f| f.name.clone())
+    };
+    OverviewList {
+        title: "Cooldown crafts",
+        hint: format!(
+            "Crafts that can only be made every day or few: the reagents bought at their median \
+             price now against the result sold at its, less the auction house's {}% cut. Each \
+             in its most profitable house.",
+            market::CUT_PERCENT
+        ),
+        empty: "No house has these crafts' reagents and results on sale.",
+        heads: vec!["Reagents", "Sells for", "Profit"],
+        rows: r
+            .crafts
+            .iter()
+            .map(|m| {
+                let craft = market::CRAFTS[m.craft];
+                let reagents: Vec<String> = craft
+                    .from
+                    .iter()
+                    .map(|&(item, n)| match n {
+                        1 => name(item),
+                        n => format!("{n} × {}", name(item)),
+                    })
+                    .collect();
+                let (house, class) = r.house(m.house);
+                let place = format!("from {} · {house}", reagents.join(", "));
+                let figures = vec![
+                    Figure::money(m.cost),
+                    Figure::money(m.price),
+                    Figure::signed(m.profit()),
+                ];
+                item_row(known, craft.makes, (place, class), figures)
             })
             .collect(),
     }

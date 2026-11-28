@@ -18,7 +18,7 @@ use crate::db;
 
 /// The stored format and ranking rules. Bump it when either changes, so rankings stored by an
 /// older version are ranked again instead of read.
-pub const VERSION: i64 = 3;
+pub const VERSION: i64 = 4;
 /// Rows each overview list keeps.
 pub const ROWS: usize = 8;
 /// The pools whose factions' prices are compared; a gap's `pool` indexes this.
@@ -41,6 +41,8 @@ pub struct Ranked {
     pub biggest: Vec<market::Market>,
     /// What sold for the most a day over the day before the latest snapshot.
     pub sold: Vec<market::Sold>,
+    /// The cooldown crafts, each in its most profitable house.
+    pub crafts: Vec<market::Margin>,
 }
 
 impl Ranked {
@@ -55,6 +57,10 @@ impl Ranked {
             .chain(self.bargains.iter().map(|b| b.item))
             .chain(self.biggest.iter().map(|m| m.item))
             .chain(self.sold.iter().map(|s| s.item))
+            .chain(self.crafts.iter().flat_map(|m| {
+                let craft = market::CRAFTS[m.craft];
+                std::iter::once(craft.makes).chain(craft.from.iter().map(|&(item, _)| item))
+            }))
             .collect()
     }
 
@@ -103,6 +109,8 @@ struct Data {
     gaps: Vec<Vec<market::Gap>>,
     /// Each house's listings under the vendor price.
     bargains: Vec<Vec<market::Bargain>>,
+    /// Each house's cooldown crafts.
+    margins: Vec<Vec<market::Margin>>,
     last_day: Option<i64>,
 }
 
@@ -162,6 +170,11 @@ async fn read(db: &SqlitePool, region: Region) -> anyhow::Result<Data> {
         .enumerate()
         .map(|(i, prices)| market::under_vendor(i, prices, |id| vendor.get(&id).copied()))
         .collect();
+    let margins = latest
+        .iter()
+        .enumerate()
+        .map(|(i, prices)| market::margins(i, prices))
+        .collect();
     Ok(Data {
         houses,
         latest,
@@ -169,13 +182,14 @@ async fn read(db: &SqlitePool, region: Region) -> anyhow::Result<Data> {
         sold,
         gaps,
         bargains,
+        margins,
         last_day,
     })
 }
 
 /// Ranks the houses in `scope`: the last day's movers, listings under the vendor price, the
-/// biggest markets and what sold most. Faction gaps compare both factions, so only the
-/// ruleset narrows them.
+/// biggest markets, what sold most and what cooldown crafts make. Faction gaps compare both
+/// factions, so only the ruleset narrows them.
 fn rank(data: &Data, scope: Scope) -> Ranked {
     let picked: Vec<usize> = (0..data.houses.len())
         .filter(|&i| scope.contains(data.houses[i]))
@@ -192,6 +206,10 @@ fn rank(data: &Data, scope: Scope) -> Ranked {
         .iter()
         .flat_map(|&i| data.bargains[i].iter().copied())
         .collect();
+    let margins = picked
+        .iter()
+        .flat_map(|&i| data.margins[i].iter().copied())
+        .collect();
     let latest: Vec<&[ItemPrices]> = picked.iter().map(|&i| data.latest[i].as_slice()).collect();
     let sold: Vec<Sales> = picked.iter().map(|&i| data.sold[i].clone()).collect();
     Ranked {
@@ -203,6 +221,8 @@ fn rank(data: &Data, scope: Scope) -> Ranked {
         bargains: market::top_bargains(bargains, ROWS),
         biggest: market::biggest(&latest, ROWS),
         sold: market::most_sold(&sold, ROWS),
+        // There are few enough to show them all.
+        crafts: market::top_margins(margins, market::CRAFTS.len()),
     }
 }
 

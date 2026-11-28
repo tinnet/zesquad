@@ -1,5 +1,6 @@
 //! The auction house overview: what moved, where the factions disagree, what sells for less
-//! than a vendor pays, the biggest markets and what sells most. Pure ranking over prices read elsewhere.
+//! than a vendor pays, the biggest markets, what sells most and what cooldown crafts make. Pure
+//! ranking over prices read elsewhere.
 //!
 //! Forever's markets are thin and jumpy: one cheap stack bought out can turn a 2c median into
 //! 4s overnight, which is real but not news. So moves compare finished days (the median of a
@@ -236,6 +237,105 @@ pub fn biggest(houses: &[&[ItemPrices]], n: usize) -> Vec<Market> {
     markets.sort_by(|a, b| b.value.cmp(&a.value).then(a.item.cmp(&b.item)));
     markets.truncate(n);
     markets
+}
+
+/// A craft that can only be made every day or few: one of `makes` from `from`'s reagents.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Craft {
+    pub makes: u32,
+    /// Each reagent and how many it takes.
+    pub from: &'static [(u32, u64)],
+}
+
+/// The cooldown crafts whose reagents and results are traded. A [`Margin`]'s `craft` indexes
+/// this, so rankings stored with another list must be ranked again.
+pub const CRAFTS: [Craft; 4] = [
+    // Tailoring: Mooncloth from two Felcloth.
+    Craft {
+        makes: 14342,
+        from: &[(14256, 2)],
+    },
+    // Alchemy: Transmute Arcanite, a Thorium Bar and an Arcane Crystal.
+    Craft {
+        makes: 12360,
+        from: &[(12359, 1), (12363, 1)],
+    },
+    // Alchemy, new in Forever: Transmute Legionite, a Heavy Thorium Bar and a Fel Crystal.
+    Craft {
+        makes: 251_290,
+        from: &[(251_291, 1), (248_819, 1)],
+    },
+    // Leatherworking: Refined Deeprock Salt from Deeprock Salt, with a Salt Shaker.
+    Craft {
+        makes: 15409,
+        from: &[(8150, 1)],
+    },
+];
+
+/// The auction house's cut of a sale, in percent.
+pub const CUT_PERCENT: u64 = 5;
+
+/// A cooldown craft in one house: its reagents bought and its result sold at their median.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Margin {
+    /// Indexes [`CRAFTS`].
+    pub craft: usize,
+    pub house: usize,
+    /// The reagents' cost, copper.
+    pub cost: u64,
+    /// What one result sells for, copper.
+    pub price: u64,
+}
+
+impl Margin {
+    /// What a sale brings in after the auction house's cut.
+    #[must_use]
+    pub fn proceeds(&self) -> u64 {
+        self.price - self.price.saturating_mul(CUT_PERCENT) / 100
+    }
+
+    /// Copper made by buying the reagents, crafting and selling the result; negative is a loss.
+    #[must_use]
+    pub fn profit(&self) -> i64 {
+        let signed = |c: u64| i64::try_from(c).unwrap_or(i64::MAX);
+        signed(self.proceeds()) - signed(self.cost)
+    }
+}
+
+/// Each of [`CRAFTS`] whose reagents and result are all on sale in `house`.
+#[must_use]
+pub fn margins(house: usize, prices: &[ItemPrices]) -> Vec<Margin> {
+    let median: BTreeMap<u32, u64> = prices
+        .iter()
+        .filter(|p| p.median_price > 0)
+        .map(|p| (p.item, p.median_price))
+        .collect();
+    CRAFTS
+        .iter()
+        .enumerate()
+        .filter_map(|(craft, c)| {
+            let price = *median.get(&c.makes)?;
+            let cost = c.from.iter().try_fold(0u64, |sum, &(item, n)| {
+                Some(sum.saturating_add(median.get(&item)?.saturating_mul(n)))
+            })?;
+            Some(Margin {
+                craft,
+                house,
+                cost,
+                price,
+            })
+        })
+        .collect()
+}
+
+/// The `n` most profitable crafts from several houses, one per craft (its best house), most
+/// profit first; losses too, as knowing a cooldown isn't worth it is worth knowing.
+#[must_use]
+pub fn top_margins(all: Vec<Margin>, n: usize) -> Vec<Margin> {
+    let key = |m: &Margin| u32::try_from(m.craft).unwrap_or(u32::MAX);
+    let mut top = best_per_item(all, key, Margin::profit);
+    top.truncate(n);
+    top
 }
 
 /// Time compared (see [`crate::sales`]) a house needs for its sales to count: a few hours of a
@@ -550,6 +650,69 @@ mod tests {
             2,
         );
         assert_eq!(top, [b(1, 2, 5, 50), b(2, 1, 10, 30)]);
+    }
+
+    #[test]
+    fn crafts_cost_their_reagents_and_sell_after_the_cut() {
+        let mooncloth = CRAFTS.iter().position(|c| c.makes == 14342).unwrap();
+        let arcanite = CRAFTS.iter().position(|c| c.makes == 12360).unwrap();
+        // Two Felcloth at 1g against a Mooncloth at 3g: 2g 85s after the cut, 85s profit.
+        // Arcanite has no Arcane Crystal on sale, so it isn't priced.
+        let prices = [
+            quote(14256, 10_000, 5),
+            quote(14342, 30_000, 5),
+            quote(12359, 5_000, 5),
+            quote(12360, 400_000, 5),
+        ];
+        let found = margins(3, &prices);
+        assert_eq!(
+            found,
+            [Margin {
+                craft: mooncloth,
+                house: 3,
+                cost: 20_000,
+                price: 30_000
+            }]
+        );
+        assert_eq!(found[0].profit(), 8_500);
+        let with_crystal = [prices.as_slice(), &[quote(12363, 600_000, 5)]].concat();
+        let arcanite_margin = margins(1, &with_crystal)
+            .into_iter()
+            .find(|m| m.craft == arcanite)
+            .unwrap();
+        assert_eq!(arcanite_margin.cost, 605_000);
+        assert_eq!(arcanite_margin.profit(), 380_000 - 605_000, "a loss");
+    }
+
+    #[test]
+    fn crafts_are_ranked_once_by_their_best_house() {
+        let m = |craft, house, cost, price| Margin {
+            craft,
+            house,
+            cost,
+            price,
+        };
+        let top = top_margins(
+            vec![
+                m(0, 0, 100, 200),
+                m(0, 1, 100, 1_000),
+                m(1, 0, 500, 100),
+                m(2, 1, 100, 300),
+            ],
+            5,
+        );
+        assert_eq!(
+            top,
+            [m(0, 1, 100, 1_000), m(2, 1, 100, 300), m(1, 0, 500, 100)]
+        );
+    }
+
+    #[test]
+    fn every_craft_has_reagents_unlike_its_result() {
+        for c in CRAFTS {
+            assert_ne!(c.from.len(), 0);
+            assert!(c.from.iter().all(|&(item, n)| item != c.makes && n > 0));
+        }
     }
 
     #[test]

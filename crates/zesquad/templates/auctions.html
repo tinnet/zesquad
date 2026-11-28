@@ -68,7 +68,7 @@
           {%- if let Some(link) = row.link %}<a href="{{ link }}">{{ row.name }}</a>{% else %}{{ row.name }}{% endif %}
           {%- if !row.place.is_empty() %}<span class="sub {{ row.place_class }}">{{ row.place }}</span>{% endif %}</span></span></th>
         {%- for f in row.figures %}
-        <td class="num {{ f.class }}">{% if let Some(m) = f.money %}{% call coins(m) %}{% endcall %}{% else %}{{ f.text }}{% endif %}</td>
+        <td class="num {{ f.class }}">{{ f.text }}{% if let Some(m) = f.money %}{% call coins(m) %}{% endcall %}{% endif %}</td>
         {%- endfor %}
       </tr>
       {%- endfor %}
