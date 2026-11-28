@@ -17,7 +17,31 @@ jobs:
         with:
           persist-credentials: false
       - uses: jdx/mise-action@v5.2.7 # rust, just from mise.toml
+      # Dependencies built before, keyed by the toolchain and Cargo.lock (see docs/development.md).
+      - uses: actions/cache/restore@v6.1.0
+        id: cache
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: cargo-test-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('mise.toml', 'Cargo.toml', 'Cargo.lock') }}
+          restore-keys: cargo-test-${{ runner.os }}-${{ runner.arch }}-
       - run: just ci
+      # Only main saves; pull requests and tags read main's caches. Our own crates are left out:
+      # they're rebuilt every time anyway.
+      - if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.cache.outputs.cache-hit != 'true'
+        run: cargo clean -p zesquad -p zesquad-core
+      - if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: ${{ steps.cache.outputs.cache-primary-key }}
 
   # Every action is pinned to a commit in actions.lock; fail if a workflow uses one that isn't.
   actions-lock:
@@ -50,7 +74,29 @@ jobs:
       - uses: jdx/mise-action@v5.2.7
         with:
           install_args: rust
+      # The same key as release.yml's build, which restores what this saves.
+      - uses: actions/cache/restore@v6.1.0
+        id: cache
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: cargo-release-${{ matrix.target }}-${{ hashFiles('mise.toml', 'Cargo.toml', 'Cargo.lock') }}
+          restore-keys: cargo-release-${{ matrix.target }}-
       - run: cargo build --release --locked --target ${{ matrix.target }} -p zesquad
+      - if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.cache.outputs.cache-hit != 'true'
+        run: cargo clean --release --target ${{ matrix.target }} -p zesquad -p zesquad-core
+      - if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: ${{ steps.cache.outputs.cache-primary-key }}
       # No version check here; tests/cli.rs checks -V and --version agree, and release.yml checks
       # the version against the tag.
       - name: Smoke test

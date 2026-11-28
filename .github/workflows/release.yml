@@ -29,6 +29,17 @@ jobs:
       - uses: jdx/mise-action@v5.2.7
         with:
           install_args: rust
+      # Dependencies as main's CI built them (ci.yml saves under this key); restored, never
+      # saved, as a tag's cache is only ever read by that tag.
+      - uses: actions/cache/restore@v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: cargo-release-${{ matrix.target }}-${{ hashFiles('mise.toml', 'Cargo.toml', 'Cargo.lock') }}
+          restore-keys: cargo-release-${{ matrix.target }}-
       - run: cargo build --release --locked --target ${{ matrix.target }} -p zesquad
       - name: Smoke test
         run: .github/scripts/smoke-test.sh target/${{ matrix.target }}/release/zesquad "${VERSION#v}"

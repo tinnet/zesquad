@@ -50,6 +50,14 @@ x86_64 and aarch64, checked by `.github/scripts/smoke-test.sh` (static and serve
 pinned in `.github/workflows/actions.lock`: after changing a `uses:`, run `gh actions-lock` and
 commit the lockfile with it. Dependabot proposes action and crate updates weekly.
 
+Built dependencies are cached with `actions/cache`, keyed by `mise.toml` (the toolchain),
+`Cargo.toml` (the profiles) and `Cargo.lock`: `cargo-test-*` for `just ci`, and
+`cargo-release-<target>` for the musl builds, which `release.yml` restores. Only pushes to
+`main` save a cache, and only for a key not saved yet, with our own crates cleaned out first
+(they're rebuilt every run anyway). Pull requests and tags only read `main`'s caches. It's
+plain `actions/cache` rather than a Rust caching action: one fewer third party in the release
+build.
+
 ## Releases
 
 CalVer tags, `vYYYY.MM.DD` (`.N` for a second release that day). `just release` (from a clean
