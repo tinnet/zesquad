@@ -4,6 +4,12 @@ What changed in each zesquad release. Versions are dates (CalVer).
 
 ## 2026.11.27
 
+### Fixes
+
+- **web**: Fit the cooldown crafts box without scrolling sideways ([2d889f7](https://github.com/tinnet/zesquad/commit/2d889f716aa7038c5e028567120317d640b03b09))
+
+## 2026.11.27
+
 ### Features
 
 - **web**: Show what cooldown crafts make on the auction overview ([0684007](https://github.com/tinnet/zesquad/commit/0684007bfc58da53c432c899ab094ce7e18dce79))
