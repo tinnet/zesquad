@@ -17,6 +17,7 @@ unsafe_code = "forbid"
 pedantic = { level = "warn", priority = -1 }
 
 [profile.release]
-lto = true
-codegen-units = 1
+# Thin rather than full LTO: rebuilding our crates on top of cached dependencies takes ~25s
+# instead of ~80s (16 cores; CI's 4 are slower), for a binary ~20% larger (16.4 MB, not 13.8).
+lto = "thin"
 strip = true
