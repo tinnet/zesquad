@@ -86,6 +86,11 @@ jobs:
           key: cargo-release-${{ matrix.target }}-${{ hashFiles('mise.toml', 'Cargo.toml', 'Cargo.lock') }}
           restore-keys: cargo-release-${{ matrix.target }}-
       - run: cargo build --release --locked --target ${{ matrix.target }} -p zesquad
+      # No version check here; tests/cli.rs checks -V and --version agree, and release.yml checks
+      # the version against the tag.
+      - name: Smoke test
+        run: .github/scripts/smoke-test.sh target/${{ matrix.target }}/release/zesquad
+      # After the smoke test: cleaning removes the binary it runs.
       - if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.cache.outputs.cache-hit != 'true'
         run: cargo clean --release --target ${{ matrix.target }} -p zesquad -p zesquad-core
       - if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.cache.outputs.cache-hit != 'true'
@@ -97,7 +102,3 @@ jobs:
             ~/.cargo/git/db
             target
           key: ${{ steps.cache.outputs.cache-primary-key }}
-      # No version check here; tests/cli.rs checks -V and --version agree, and release.yml checks
-      # the version against the tag.
-      - name: Smoke test
-        run: .github/scripts/smoke-test.sh target/${{ matrix.target }}/release/zesquad
