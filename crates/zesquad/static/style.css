@@ -290,6 +290,7 @@ a.guild:hover { color: var(--text); }
 /* An item: its icon, then its name with small print under it, which wrap beside the icon. */
 .item { display: flex; gap: .4rem; align-items: flex-start; white-space: normal; }
 .item .sub { font-weight: 400; white-space: nowrap; }
+.item .sub.note { white-space: normal; }
 .item-text { min-width: 0; }
 /* Long names wrap, so four houses' prices fit beside them. */
 .prices tbody th { min-width: 10rem; max-width: 15rem; }

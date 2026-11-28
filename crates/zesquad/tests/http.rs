@@ -2775,8 +2775,8 @@ async fn the_auction_overview_says_what_cooldown_crafts_make() {
     let squash = |s: &str| s.split_whitespace().collect::<Vec<_>>().join(" ");
     assert_eq!(
         squash(rows),
-        "Item 14342from 2 × Item 14256 · Horde PvP 2g 3g 85s \
-         Item 251290from Item 251291, Item 248819 · Alliance PvP 2g 40s 2g −50s"
+        "Item 14342from 2 × Item 14256Horde PvP 2g 3g 85s \
+         Item 251290from Item 251291, Item 248819Alliance PvP 2g 40s 2g −50s"
     );
 
     // Alliance alone: Mooncloth's best house there.
@@ -2784,7 +2784,7 @@ async fn the_auction_overview_says_what_cooldown_crafts_make() {
     let lists = overview_lists(&page);
     let (_, rows) = lists.iter().find(|(t, _)| t == "Cooldown crafts").unwrap();
     assert!(
-        squash(rows).starts_with("Item 14342from 2 × Item 14256 · Alliance PvP 2g 2g 11s 45c"),
+        squash(rows).starts_with("Item 14342from 2 × Item 14256Alliance PvP 2g 2g 11s 45c"),
         "{rows}"
     );
 }

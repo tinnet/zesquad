@@ -2214,6 +2214,9 @@ struct OverviewRow {
     icon: String,
     /// Searches for the item.
     link: Option<String>,
+    /// Under the name, before `place`: more about the item (a craft's reagents), or empty.
+    /// Unlike `place` it wraps, as it can be long.
+    note: String,
     /// Under the name: where (a house, a pool), or empty.
     place: String,
     /// Colours `place` (`faction-alliance`), or empty.
@@ -2244,9 +2247,9 @@ impl Figure {
         }
     }
 
-    /// A gain or, with a minus sign, a loss.
+    /// A gain or, with a minus sign, a loss; brief (see [`Money::brief`]).
     fn signed(copper: i64) -> Self {
-        let coins = Money::from_copper(copper.unsigned_abs());
+        let coins = Money::brief(copper.unsigned_abs());
         if copper < 0 {
             Self {
                 text: "−".to_owned(),
@@ -2308,6 +2311,7 @@ fn item_row(
         quality: found.map_or_else(String::new, |f| items::quality_class(&f.quality)),
         icon: items::icon_url(found.and_then(|f| f.icon), ICON_SIZE),
         link: found.map(|f| format!("/auctions?q={}", urlencode(&f.name))),
+        note: String::new(),
         place,
         place_class,
         figures,
@@ -2480,14 +2484,16 @@ fn crafts_list(r: &Ranked, known: &HashMap<u32, db::FoundItem>) -> OverviewList 
                         n => format!("{n} × {}", name(item)),
                     })
                     .collect();
-                let (house, class) = r.house(m.house);
-                let place = format!("from {} · {house}", reagents.join(", "));
+                // Brief, so three columns of gold fit beside the name and reagents.
                 let figures = vec![
-                    Figure::money(m.cost),
-                    Figure::money(m.price),
+                    Figure::coins(Money::brief(m.cost), ""),
+                    Figure::coins(Money::brief(m.price), ""),
                     Figure::signed(m.profit()),
                 ];
-                item_row(known, craft.makes, (place, class), figures)
+                OverviewRow {
+                    note: format!("from {}", reagents.join(", ")),
+                    ..item_row(known, craft.makes, r.house(m.house), figures)
+                }
             })
             .collect(),
     }
